@@ -1,8 +1,9 @@
 # asaas — integrations/finance/asaas
 
-> ⚠️ **ESTADO: NÃO APROVADO. Só a FUNDAÇÃO (1a-i) foi feita, e só o BÁSICO foi testado.**
-> Este doc é honesto de propósito: a maior parte do que o Victor pediu **NÃO está feita nem
-> testada** (ver "O que NÃO foi feito"). Não tratar isto como "asaas pronto".
+> ⚠️ **ESTADO: NÃO APROVADO formalmente** (Victor não deu "SIM" no Portão 3). Feito e testado:
+> a **fundação (1a-i)** + o **endpoint de status/onboarding (1a-ii)**. Ainda faltam: configurar
+> o webhook, webhook receiver, charge, payout e o **E2E 1-centavo** (ver "O que NÃO foi feito").
+> Doc honesto de propósito — **não tratar como "asaas pronto".**
 
 App Django que porta o gateway de pagamento **Asaas** do micro legado (`~/coders/backend/asaas`,
 FastAPI) pro monólito. Caminho do MVP §4 item 1-a. Label do app: `asaas`
@@ -24,15 +25,22 @@ FastAPI) pro monólito. Caminho do MVP §4 item 1-a. Label do app: `asaas`
   real dedicada a testes, pouco dinheiro. **Zero movimento de valor.** Print em
   `.claude/tests/1a-i-asaas-fundacao.md`.
 
+## O que FOI feito e testado (1a-ii — endpoint de status/onboarding) ✅
+
+- **View DMZ** `GET /integrations/asaas/status/` (`views.py`, JSON) — é o **padrão reusável p/
+  TODA integração**. Testada de verdade (print em `.claude/tests/1a-i-asaas-fundacao.md`):
+  flags `api_key_in_env` / `api_key_tested_ok` (puxa o saldo real) / `webhook_secret_in_env` /
+  `external_url_in_env` / `ready` + `hints`.
+- Key ok e sem webhook-secret no `.env` → **gera `generated_webhook_secret` e retorna no JSON
+  (só DMZ)** — Victor cola no painel do Asaas e em `ASAAS_WEBHOOK_SECRET`.
+- `.env`: adicionados `ASAAS_WEBHOOK_SECRET` e `EXTERNAL_URL` (vazios).
+
 ## O que NÃO foi feito nem testado ❌ (pedidos do Victor — ver `.claude/specs/asaas2.md`)
 
-O Victor pediu um **endpoint de status DMZ (JSON), padrão pra TODAS as integrações**. **NADA
-disso existe ainda:**
+O endpoint de status (1a-ii) **já existe**. Ainda faltam:
 
-- ❌ Endpoint de status com as flags `api_key_in_env` / `api_key_tested_ok`.
-- ❌ **Geração do secret-key + retorno no status (DMZ)** pra colar no painel Asaas. *(é o
-  coração do pedido original em `specs/asaas.md` — NÃO feito.)*
-- ❌ Endpoint que checa `EXTERNAL_URL` no `.env` → **configura o webhook** no Asaas.
+- ❌ **Configurar o webhook de fato** no Asaas a partir do `EXTERNAL_URL` (o status só sinaliza a
+  flag; registrar o webhook no Asaas é 1a-iii).
 - ❌ **Webhook receiver** (HMAC `asaas-signature` + CIDR) e os `hooks/` de destino.
 - ❌ **Charge** (PIX inbound) e **payout** (PIX-out/transfer + fila drenando).
 - ❌ **Teste E2E de 1 centavo** (CPF=chave PIX → R$0,01 → webhook valida → prova secret+HMAC).
@@ -65,5 +73,6 @@ memória do projeto). **Não testado de forma alguma.**
 
 ## Próximo
 
-`1a-ii` — o endpoint de status DMZ (flags + geração do secret). Ver `specs/asaas2.md` (palavra
-do dono) e `plan/1a-i-asaas-fundacao.md`.
+`1a-iii` — receber o webhook do Asaas (HMAC `asaas-signature` + CIDR) e configurar o webhook a
+partir do `EXTERNAL_URL`; depois charge (1a-iv) e payout + E2E 1-centavo (1a-v). Ver
+`specs/asaas2.md` (palavra do dono) e `plan/1a-i-asaas-fundacao.md`.

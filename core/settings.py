@@ -138,6 +138,9 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 # já populou os.environ acima. Centralizado aqui no settings, ninguém usa os.environ espalhado.
 ASAAS_API_KEY = os.environ.get("ASAAS_API_KEY", "")
 ASAAS_BASE_URL = env("ASAAS_BASE_URL", default="https://api.asaas.com")
+# Webhook-secret (HMAC) e URL externa — usados a partir do 1a-ii/1a-iii. Hex/URL, sem "$".
+ASAAS_WEBHOOK_SECRET = env("ASAAS_WEBHOOK_SECRET", default="")
+EXTERNAL_URL = env("EXTERNAL_URL", default="")
 
 
 # Django-Q2 — fila async com broker no próprio banco (sem Redis). `qcluster` roda o worker.
