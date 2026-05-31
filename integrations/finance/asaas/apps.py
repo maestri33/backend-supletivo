@@ -6,10 +6,11 @@ class AsaasConfig(AppConfig):
     label = "asaas"
 
     def ready(self):
-        # Registra o system check de env no boot. Roda em todo runserver/manage, então
-        # "fica printando" em vermelho enquanto faltar a env essencial (padrão p/ integrações).
+        # Registra os system checks de env no boot. Rodam em todo runserver/manage, então "ficam
+        # printando" enquanto faltar env essencial (E001 = api-key trava; W001 = webhook-secret avisa).
         from django.core.checks import register
 
-        from .checks import check_asaas_env
+        from .checks import check_asaas_env, check_asaas_webhook_secret
 
         register(check_asaas_env)
+        register(check_asaas_webhook_secret)

@@ -8,4 +8,5 @@ dependencies = [
     "django-environ>=0.13.0",
     "django-q2>=1.10.0",
     "httpx>=0.28.1",
+    "structlog>=25.5.0",
 ]

@@ -18,6 +18,10 @@ Config em `backend/.env` (não versionado). Dev usa SQLite.
 ## Estado
 
 - **Bootstrap (step 0):** Django sobe, migra, `/admin/` no ar. → [[wiki/core/bootstrap]]
+- **integrations/asaas (§4 item 1-a):** gateway de pagamento — fundação + status/onboarding +
+  webhook receiver + validação de saque. Faltam charge e payout. → [[wiki/integrations/finance/asaas]]
+- **core/fallback:** logger rastreável de evento sem destino (usado pelo webhook do asaas).
+  → [[wiki/core/fallback]]
 
 > Apps de negócio (`users`, `hub`, `notify`, `financeiro`, `integrations`...) entram um a um,
 > pelo `.claude/WORKFLOW.md`.

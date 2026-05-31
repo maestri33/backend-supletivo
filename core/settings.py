@@ -53,6 +53,8 @@ INSTALLED_APPS = [
     "corsheaders",
     # fila async (broker no próprio banco, sem Redis)
     "django_q",
+    # app base do projeto (models base comuns — ex.: fallback logger de eventos sem destino)
+    "core.apps.CoreConfig",
     # integrações externas
     "integrations.finance.asaas.apps.AsaasConfig",
 ]
@@ -147,7 +149,9 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 # já populou os.environ acima. Centralizado aqui no settings, ninguém usa os.environ espalhado.
 ASAAS_API_KEY = os.environ.get("ASAAS_API_KEY", "")
 ASAAS_BASE_URL = env("ASAAS_BASE_URL", default="https://api.asaas.com")
-# Webhook-secret (HMAC) e URL externa — usados a partir do 1a-ii/1a-iii. Hex/URL, sem "$".
+# Token do webhook (= authToken do `asaas-access-token`, NÃO é HMAC — o Asaas não tem HMAC) e URL
+# externa, usados a partir do 1a-ii/1a-iii. Hex/URL, sem "$" (lê via env normal). Um token só pros
+# dois endpoints que o Asaas chama de volta: webhook de eventos e mecanismo de validação de saque.
 ASAAS_WEBHOOK_SECRET = env("ASAAS_WEBHOOK_SECRET", default="")
 EXTERNAL_URL = env("EXTERNAL_URL", default="")
 
