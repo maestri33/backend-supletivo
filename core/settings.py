@@ -34,6 +34,11 @@ DEBUG = env("DEBUG")
 
 ALLOWED_HOSTS = env.list("ALLOWED_HOSTS", default=[])
 
+# CORS (django-cors-headers) — config no .env (CONVENTION §10: um .env, nada hardcoded).
+# Em dev liberamos geral p/ a rede interna acessar fácil; em prod = lista explícita + allow_all False.
+CORS_ALLOW_ALL_ORIGINS = env.bool("CORS_ALLOW_ALL_ORIGINS", default=False)
+CORS_ALLOWED_ORIGINS = env.list("CORS_ALLOWED_ORIGINS", default=[])
+
 
 # Application definition
 
@@ -44,6 +49,8 @@ INSTALLED_APPS = [
     "django.contrib.sessions",
     "django.contrib.messages",
     "django.contrib.staticfiles",
+    # CORS (cabeçalhos cross-origin p/ os edges/front consumirem o backend)
+    "corsheaders",
     # fila async (broker no próprio banco, sem Redis)
     "django_q",
     # integrações externas
@@ -52,6 +59,8 @@ INSTALLED_APPS = [
 
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
+    # CorsMiddleware o mais alto possível, antes do CommonMiddleware (doc django-cors-headers).
+    "corsheaders.middleware.CorsMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
