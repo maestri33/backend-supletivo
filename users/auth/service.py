@@ -18,7 +18,7 @@ import structlog
 from asgiref.sync import async_to_sync
 from django.db import IntegrityError, transaction
 
-from integrations.comunicacao.whatsapp.client import WhatsAppError, get_client
+from integrations.communication.whatsapp.client import WhatsAppError, get_client
 from integrations.tools.cpf.scripts import cpfhub
 from users.auth import validation
 from users.auth.models import User
