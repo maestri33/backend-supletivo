@@ -54,7 +54,8 @@ Config em `backend/.env` (não versionado). Dev usa SQLite.
 - **finance (§4 item 4, Fatia 1):** motor de comissão/payout — creditar (valor do `.env`) → fechamento
   semanal (bônus FLAT ≥ threshold) → solicitação de pagamento → **PIX real** via `asaas.payout`, com
   validação externa e reconciliação. FK→`users.User`, pix do profile. **R$1 real provado** (−R$1 no saldo).
-  `fees` é a Fatia 2. → [[wiki/finance/finance]]
+  **Fatia 2 (`fees`, pagar despesas via PIX QR code — imediato/agendado, mesma fila) iniciada; teste real
+  pendente.** → [[wiki/finance/finance]]
 
 > Apps de negócio (`users`, `hub`, `notify`, `finance`, `integrations`...) entram um a um,
 > pelo `.claude/WORKFLOW.md`.

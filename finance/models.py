@@ -99,21 +99,50 @@ class PaymentRequest(models.Model):
         PAID = "paid", "paga"  # reconciliada como PAID
         FAILED = "failed", "falhou"
 
+    class Kind(models.TextChoices):
+        COMMISSION = (
+            "commission",
+            "comissão",
+        )  # paga promotor/coordenador (default; Fatia 1)
+        FEE = "fee", "despesa"  # paga fornecedor/instituição (Fatia 2)
+
+    class Method(models.TextChoices):
+        PIX_KEY = "pix_key", "PIX por chave"  # comissão → asaas.payout
+        PIX_QRCODE = "pix_qrcode", "PIX por QR code"  # fee → asaas.qrpay
+
     external_id = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
-    # {ordinal-sexta-no-mês}_{MM}_{AAAA}_{payee.external_id} — idempotência do fechamento e do payout.
+    # {ordinal-sexta-no-mês}_{MM}_{AAAA}_{payee.external_id} (commission) ou fee_<uuid> (fee).
     external_reference = models.CharField(max_length=128, unique=True, db_index=True)
+    # fila de saída GENÉRICA: é tudo dinheiro saindo da mesma conta Asaas (palavra do Victor).
+    kind = models.CharField(
+        max_length=12, choices=Kind.choices, default=Kind.COMMISSION, db_index=True
+    )
+    method = models.CharField(
+        max_length=12, choices=Method.choices, default=Method.PIX_KEY
+    )
+    # payee/payee_role/week_of só existem pra commission (fee não tem User payee nem semana).
     payee = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.PROTECT,
         related_name="payment_requests",
+        null=True,
+        blank=True,
     )
     payee_role = models.CharField(
-        max_length=12, choices=Commission.Role.choices, db_index=True
+        max_length=12,
+        choices=Commission.Role.choices,
+        db_index=True,
+        null=True,
+        blank=True,
     )
-    amount = models.DecimalField(
-        max_digits=12, decimal_places=2
-    )  # soma da semana, reais
-    week_of = models.DateField(db_index=True)  # segunda-feira da semana
+    amount = models.DecimalField(max_digits=12, decimal_places=2)  # reais
+    week_of = models.DateField(
+        db_index=True, null=True, blank=True
+    )  # segunda-feira (só commission)
+    # fee: destino do PIX QR code (copia-e-cola) + fornecedor (texto até modelar instituição) + agendamento.
+    qrcode_payload = models.TextField(null=True, blank=True)
+    supplier_name = models.CharField(max_length=200, null=True, blank=True)
+    scheduled_for = models.DateTimeField(null=True, blank=True)  # null = imediato
     # snapshot de payee.profile.pix_key resolvido no fechamento (auditável/estável).
     pix_key = models.CharField(max_length=140, null=True, blank=True)
     status = models.CharField(

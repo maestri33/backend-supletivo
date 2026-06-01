@@ -17,6 +17,7 @@ from django.utils import timezone
 
 from finance.models import Commission, PaymentRequest
 from integrations.finance.asaas import payout as asaas_payout
+from integrations.finance.asaas import qrpay as asaas_qrpay
 from users.profiles.interface import get as get_profile
 
 logger = structlog.get_logger()
@@ -89,13 +90,21 @@ def _submit(pr: PaymentRequest, summary: dict) -> None:
     """Submete o PIX-out via asaas (idempotente por payment_id=external_reference)."""
     pr.attempts += 1
     try:
-        payment = asaas_payout.create_payout(
-            amount=pr.amount,  # já em reais (Decimal) — mesma unidade do asaas, sem conversão
-            pix_key=pr.pix_key,
-            payment_id=pr.external_reference,
-            description=f"comissao {pr.payee_role} semana {pr.week_of}",
-        )
-    except asaas_payout.PayoutError as exc:
+        if pr.method == PaymentRequest.Method.PIX_QRCODE:
+            payment = asaas_qrpay.pay_qr_code(
+                amount=pr.amount,  # reais (Decimal) — mesma unidade do asaas
+                qr_payload=pr.qrcode_payload,
+                payment_id=pr.external_reference,
+                description=f"despesa {pr.supplier_name or pr.external_reference}",
+            )
+        else:
+            payment = asaas_payout.create_payout(
+                amount=pr.amount,  # já em reais (Decimal) — mesma unidade do asaas, sem conversão
+                pix_key=pr.pix_key,
+                payment_id=pr.external_reference,
+                description=f"comissao {pr.payee_role} semana {pr.week_of}",
+            )
+    except (asaas_payout.PayoutError, asaas_qrpay.QrPayError) as exc:
         reason = str(exc)
         if reason.startswith("asaas_rejected"):
             # recusa definitiva do asaas: falha terminal, cascateia.
@@ -151,8 +160,11 @@ def _submit(pr: PaymentRequest, summary: dict) -> None:
 def _reconcile(pr: PaymentRequest, summary: dict) -> None:
     """Lê o Payment no asaas e move a PaymentRequest conforme o status real."""
     try:
-        payment = asaas_payout.get_payout(pr.external_reference)
-    except asaas_payout.PayoutError:
+        if pr.method == PaymentRequest.Method.PIX_QRCODE:
+            payment = asaas_qrpay.refresh_qr_payment(pr.external_reference)
+        else:
+            payment = asaas_payout.get_payout(pr.external_reference)
+    except (asaas_payout.PayoutError, asaas_qrpay.QrPayError):
         # ainda não achou o Payment (corrida) — tenta de novo com backoff.
         pr.next_attempt_at = timezone.now() + _backoff(pr.attempts)
         pr.save(update_fields=["next_attempt_at", "updated_at"])

@@ -73,7 +73,32 @@ python manage.py commission_process       # ⚠️ dispara PIX REAL
 
 Evidência: `.claude/tests/4-financeiro-motor.md` (R$1 real, aprovado pelo Victor 2026-06-01).
 
+## Fees — pagamento de DESPESAS (Fatia 2; ⚠️ teste com PIX REAL PENDENTE)
+
+Subsistema de **pagar despesas** (saída de dinheiro), 1º fornecedor = **a instituição que credencia o
+aluno**. **Mesma fila** das comissões (`PaymentRequest`) — é tudo dinheiro saindo da mesma conta Asaas
+(palavra do Victor). Plano: `plan/4-financeiro-fees.md`.
+
+- **Fila genérica:** `PaymentRequest.kind` (`commission`|`fee`) + `method` (`pix_key`|`pix_qrcode`).
+  Comissão = `commission`/`pix_key` (default, inalterado). Fee = `fee`/`pix_qrcode`. `payee`/`payee_role`/
+  `week_of` são nullable (fee não tem User payee nem semana); fee usa `qrcode_payload`/`supplier_name`/
+  `scheduled_for`.
+- **Imediato vs agendado:** `request_fee_payment(scheduled_for=None)` = imediato (`next_attempt_at=now`);
+  com data = agendado (`next_attempt_at=scheduled_for` → o worker não pega até lá). **Reusa a fila**, sem
+  lógica nova de deferimento.
+- **PIX por QR code:** o worker (`method=pix_qrcode`) chama `asaas.qrpay.pay_qr_code` (novo serviço,
+  espelha `create_payout`, idempotente por `payment_id`). Reconciliação por **leitura ativa**
+  (`qrpay.refresh_qr_payment` → `client.get_pix_transaction`) — o evento de webhook do QR-pay ainda não
+  foi confirmado num teste real.
+- **Valor vem do CALLER** (a conta real da instituição), nunca do `.env` (§8).
+- **Superfície:** `finance/interface/fees.py::request_fee_payment(...)`; command `fee_request` (§8). A fila
+  é processada pelo mesmo `commission_process` (roda qualquer `kind`).
+
+**⚠️ «PENDÊNCIA» (Victor decide na volta):** teste com PIX REAL; confirmar o evento de webhook do QR-pay;
+confirmar a fila única (vs model `Fee` separado); modelar `Supplier`/instituição; agendamento nativo do
+Asaas (`scheduledDate`); métodos extra (pix por chave); enum de status do PIX-transaction.
+
 ## Rabo pra trás (vira spec/feature nova)
-- `fees` (Fatia 2). Triggers reais (lead pagou / student→veteran). Atribuição do coordenador (vem do `hub`).
+- Triggers reais (lead pagou / student→veteran). Atribuição do coordenador (vem do `hub`).
 - Fast-path por hook do webhook asaas (hoje reconciliação ativa). Tarifa do PIX-out + enum completo de status.
 - Re-resolver `pix_key` quando o profile ganhar a chave (validação Pix no Asaas/DICT vem no `candidate`).
