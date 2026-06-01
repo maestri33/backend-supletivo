@@ -37,9 +37,18 @@ Sem base_url/api-key → checks `whatsapp.E001`/`whatsapp.E002` **travam** o boo
 
 ```bash
 python manage.py whatsapp_health                          # lista instâncias (auth + conectividade)
-python manage.py whatsapp_send 5543996648750 "texto"      # envio real (resolve 9º dígito antes)
+python manage.py whatsapp_send 5543996648750 "texto"      # texto (resolve 9º dígito antes)
 python manage.py whatsapp_send 5543996648750 "txt" --instance ieadpg
+# mídia: source = URL pública (Evolution busca) OU arquivo local (vira base64)
+python manage.py whatsapp_send_media 5543996648750 image https://picsum.photos/400
+python manage.py whatsapp_send_media 5543996648750 document ./arquivo.pdf --filename matricula.pdf
+python manage.py whatsapp_send_media 5543996648750 audio https://.../som.mp3            # áudio transmitido
+python manage.py whatsapp_send_media 5543996648750 audio https://.../som.mp3 --voice    # nota de voz (PTT)
 ```
+
+Todos os tipos (image/video/audio/document) e os 2 modos de áudio (transmitido via `send_media` e
+nota de voz nativa via `send_whatsapp_audio`) foram **testados em envio real** — ver
+`.claude/tests/1-comunicacao-whatsapp.md`.
 
 Evidência: `.claude/tests/1-comunicacao-whatsapp.md`.
 
