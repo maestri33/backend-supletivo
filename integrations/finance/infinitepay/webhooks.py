@@ -1,0 +1,128 @@
+"""Receiver de eventos da InfinitePay (webhook de pagamento aprovado).
+
+Fluxo (CONVENTION §7): persiste o evento bruto → acha o Checkout por order_nsu → RECONFIRMA via
+payment_check (a trava real: nunca confia só no corpo do webhook) → marca PAID → roteia pro fallback
+do core (consumidores reais — lead/enrollment — ainda não existem). A doc oficial da InfinitePay não
+tem HMAC/secret; o `order_nsu` (UUID opaco) liga o webhook ao checkout e o `payment_check` confirma
+o pagamento direto na API antes de mudar qualquer estado.
+"""
+
+import asyncio
+
+import structlog
+from django.conf import settings
+from django.utils import timezone
+
+from core.fallback import log_unrouted_event
+
+from .client import InfinitePayError, get_client
+from .models import Checkout, WebhookEvent
+
+logger = structlog.get_logger()
+
+
+def handle_event(order_nsu, payload, *, source_ip=None, user_agent=None):
+    """Persiste o evento bruto e roteia. Retorna (WebhookEvent, result_dict).
+
+    A persistência do evento NÃO é protegida (se o banco falhar, a view 500a e a InfinitePay re-tenta).
+    O roteamento é protegido: erro ao aplicar não pode perder o evento já salvo — cai no fallback.
+    """
+    row = WebhookEvent.objects.create(
+        order_nsu=str(order_nsu or ""),
+        payload=payload if isinstance(payload, dict) else {"_raw": payload},
+        source_ip=source_ip,
+        user_agent=user_agent,
+    )
+
+    checkout, result, reason = None, {"ok": True}, "unknown"
+    try:
+        checkout, result, reason = _apply(order_nsu, payload)
+    except Exception as exc:  # roteamento falhou -> não perde o evento, cai no fallback
+        logger.error("webhook_apply_failed", order_nsu=str(order_nsu), error=str(exc))
+        checkout, result, reason = None, {"ok": True}, f"apply_failed: {exc}"
+
+    if checkout is not None:
+        row.forwarded_ok = True
+        row.forwarded_at = timezone.now()
+        row.save(update_fields=["forwarded_ok", "forwarded_at"])
+        # consumidor real (lead/enrollment) não existe ainda -> guarda o evento pago no fallback
+        # rastreável pra reprocesso futuro (CONVENTION §7.4).
+        log_unrouted_event(
+            "infinitepay",
+            reason,
+            "no_consumer_yet",
+            payload if isinstance(payload, dict) else {},
+        )
+    else:
+        # nada nosso consumiu o evento -> fallback rastreável (não descarta em silêncio)
+        log_unrouted_event(
+            "infinitepay",
+            "webhook",
+            reason,
+            payload if isinstance(payload, dict) else {},
+        )
+    return row, result
+
+
+def _apply(order_nsu, payload):
+    """Aplica o evento. Retorna (checkout|None, result_dict, reason)."""
+    if not isinstance(payload, dict):
+        return None, {"ok": True}, "payload_not_dict"
+
+    body_order = str(payload.get("order_nsu") or "")
+    if order_nsu and body_order and body_order != str(order_nsu):
+        return None, {"ok": True}, "order_nsu_mismatch"
+    nsu = str(order_nsu or body_order)
+    if not nsu:
+        return None, {"ok": True}, "no_order_nsu"
+
+    transaction_nsu = payload.get("transaction_nsu")
+    slug = payload.get("invoice_slug") or payload.get("slug")
+    if not transaction_nsu or not slug:
+        return None, {"ok": True, "paid": False}, "incomplete_payload"
+
+    row = Checkout.objects.filter(external_id=nsu).first()
+    if row is None:
+        return None, {"ok": True}, f"no_matching_checkout: {nsu}"
+    if row.status == Checkout.Status.PAID:
+        return row, {"ok": True, "paid": True, "duplicate": True}, "duplicate"
+
+    # A TRAVA real: reconfirma o pagamento direto na API antes de marcar pago.
+    try:
+        check = asyncio.run(
+            _payment_check(settings.INFINITEPAY_HANDLE, nsu, transaction_nsu, slug)
+        )
+    except InfinitePayError as e:
+        logger.warning("payment_check_failed", order_nsu=nsu, body=str(e.payload))
+        return None, {"ok": True, "paid": False}, f"payment_check_failed: {e.payload}"
+
+    if not check.get("success"):
+        return None, {"ok": True, "paid": False}, "payment_check_unsuccessful"
+    if not check.get("paid"):
+        return None, {"ok": True, "paid": False}, "not_paid"
+
+    row.status = Checkout.Status.PAID
+    row.transaction_nsu = transaction_nsu
+    row.slug = slug
+    row.paid_amount_cents = payload.get("paid_amount") or check.get("paid_amount")
+    row.installments = payload.get("installments") or check.get("installments")
+    row.capture_method = payload.get("capture_method") or check.get("capture_method")
+    row.receipt_url = payload.get("receipt_url")
+    row.save()
+    logger.info(
+        "checkout_paid",
+        external_id=nsu,
+        transaction_nsu=transaction_nsu,
+        capture_method=row.capture_method,
+    )
+    return row, {"ok": True, "paid": True}, "paid"
+
+
+async def _payment_check(handle, order_nsu, transaction_nsu, slug):
+    async with get_client() as c:
+        return await c.payment_check(
+            handle=handle,
+            order_nsu=order_nsu,
+            transaction_nsu=transaction_nsu,
+            slug=slug,
+        )
