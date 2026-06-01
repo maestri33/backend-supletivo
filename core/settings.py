@@ -136,6 +136,11 @@ USE_TZ = True
 
 STATIC_URL = "static/"
 
+# Media (arquivos servidos) — CONVENTION §6 (Django expõe /media/). Ex.: PNG do QR das cobranças.
+# Em dev o Django serve (core/urls.py, DEBUG); em prod é a infra/proxy.
+MEDIA_URL = "/media/"
+MEDIA_ROOT = BASE_DIR / "media"
+
 # Default primary key field type
 # https://docs.djangoproject.com/en/5.2/ref/settings/#default-auto-field
 
@@ -154,6 +159,8 @@ ASAAS_BASE_URL = env("ASAAS_BASE_URL", default="https://api.asaas.com")
 # dois endpoints que o Asaas chama de volta: webhook de eventos e mecanismo de validação de saque.
 ASAAS_WEBHOOK_SECRET = env("ASAAS_WEBHOOK_SECRET", default="")
 EXTERNAL_URL = env("EXTERNAL_URL", default="")
+# Prazo default (dias) da cobrança PIX quando o caller não passa due_date.
+ASAAS_CHARGE_DUE_DAYS = env.int("ASAAS_CHARGE_DUE_DAYS", default=3)
 
 
 # Django-Q2 — fila async com broker no próprio banco (sem Redis). `qcluster` roda o worker.

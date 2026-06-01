@@ -17,6 +17,8 @@ from django.views.decorators.http import require_GET, require_POST
 
 from core.validation import latest_checks
 
+from . import charge as charge_service
+from . import customers
 from . import transfer_validation as tv
 from . import webhooks
 from .client import AsaasError, get_client
@@ -122,6 +124,67 @@ def transfer_validation(request):
     if not check_access_token(request, settings.ASAAS_WEBHOOK_SECRET):
         return JsonResponse({"detail": "invalid_token"}, status=401)
     return JsonResponse(tv.decide(_parse_json(request)))
+
+
+# ── cobrança PIX (DMZ) — consumida depois por fees/enrollment via interface/ ──────────
+
+
+@csrf_exempt
+@require_POST
+def charge(request):
+    """Cria uma cobrança PIX (DMZ). Body: {amount, description?, due_date?, payment_id?,
+    payer:{name, cpf, email?, phone?}}. Retorna o Payment (status PENDING) + QR."""
+    data = _parse_json(request)
+    payer_d = data.get("payer") or {}
+    try:
+        payer = customers.PayerData(
+            name=payer_d.get("name") or "",
+            cpf_cnpj=payer_d.get("cpf") or payer_d.get("cpf_cnpj") or "",
+            email=payer_d.get("email"),
+            mobile_phone=payer_d.get("phone") or payer_d.get("mobile_phone"),
+        )
+        row = charge_service.create_charge(
+            amount=data.get("amount"),
+            payer=payer,
+            description=data.get("description"),
+            due_date=data.get("due_date"),
+            payment_id=data.get("payment_id"),
+        )
+    except (charge_service.ChargeError, customers.CustomerError) as e:
+        return JsonResponse({"detail": str(e)}, status=400)
+    return JsonResponse(charge_service.to_dict(row))
+
+
+@require_GET
+def charge_detail(request, payment_id):
+    """Lê uma cobrança pelo payment_id (DMZ)."""
+    try:
+        row = charge_service.get_charge(payment_id)
+    except charge_service.ChargeError as e:
+        return JsonResponse({"detail": str(e)}, status=404)
+    return JsonResponse(charge_service.to_dict(row))
+
+
+@csrf_exempt
+@require_POST
+def charge_cancel(request, payment_id):
+    """Cancela uma cobrança (DMZ)."""
+    try:
+        row = charge_service.cancel_charge(payment_id)
+    except charge_service.ChargeError as e:
+        return JsonResponse({"detail": str(e)}, status=404 if str(e) == "not_found" else 400)
+    return JsonResponse(charge_service.to_dict(row))
+
+
+@csrf_exempt
+@require_POST
+def charge_refund(request, payment_id):
+    """Estorna uma cobrança paga (DMZ)."""
+    try:
+        row = charge_service.refund_charge(payment_id)
+    except charge_service.ChargeError as e:
+        return JsonResponse({"detail": str(e)}, status=404 if str(e) == "not_found" else 400)
+    return JsonResponse(charge_service.to_dict(row))
 
 
 def _parse_json(request):

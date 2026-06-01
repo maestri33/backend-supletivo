@@ -3,7 +3,8 @@
 > **ESTADO:** fundação (1a-i) + status/onboarding (1a-ii) + **webhook receiver, validação de saque e
 > fallback logger (1a-iii)** — feitos e testados. **1a-iii aprovado no Portão 3** (Victor 2026-05-31);
 > 1a-i/1a-ii ficaram com aprovação formal "pra depois" (palavra dele), mas estão feitos e testados.
-> Faltam **charge (1a-iv)** e **payout + E2E 1-centavo (1a-v)**. Doc honesto — **não é "asaas pronto".**
+> + **charge (1a-iv)** — aprovado com **E2E real** (pagamento real → webhook → PAID). Falta **payout
+> + E2E de saída (1a-v)**. Doc honesto — **não é "asaas pronto".**
 
 App Django que porta o gateway de pagamento **Asaas** do micro legado (`~/coders/backend/asaas`,
 FastAPI) pro monólito. Caminho do MVP §4 item 1-a. Label do app: `asaas`.
@@ -59,6 +60,27 @@ authToken = o valor de `ASAAS_WEBHOOK_SECRET`. O mecanismo de saque (Menu > Inte
 de Segurança) usa o **mesmo** token; **só habilitar quando 1a-v existir** (senão barra toda saída via
 API). Auto-registro via API do Asaas = **deferido** ("expandimos depois", `asaas2.md`).
 
+## 1a-iv — charge (cobrança PIX inbound) ✅ (Portão 3 aprovado, E2E real)
+
+Cria cobrança PIX e recebe o pagamento. `charge.py` (create/get/cancel/refund), `customers.py`
+(find-or-create por **CPF**), `qr.py` (PNG do Asaas no `/media/`). Endpoints **DMZ**:
+`POST /integrations/asaas/charge/` + `GET`/`cancel`/`refund` em `charge/<payment_id>/...`.
+
+- **Criar:** find-or-create customer → `POST /v3/payments` (billingType PIX) → `GET .../pixQrCode`
+  (copia-e-cola + PNG base64) → grava o PNG em `/media/qrcodes/<pid>.png` → persiste
+  `Payment(kind=charge, PENDING)`. `externalReference = payment_id` (idempotência). **Sem migração**
+  (os campos de charge já existem desde 1a-i).
+- **Webhook registrado via API** (`POST /v3/webhooks`, `sendType=SEQUENTIALLY`, `authToken` = nosso
+  `ASAAS_WEBHOOK_SECRET`, 13 eventos) apontando pro nosso `/webhook/`. O legado `asaas-app-managed`
+  (`api.v7m.org`) está caindo **502** — a desabilitar.
+- **E2E REAL:** cobrança de **R$5,00** (mínimo do Asaas) paga pelo Victor → Asaas (`ip 54.94.183.101`)
+  entregou `PAYMENT_RECEIVED` no `/webhook/` → status virou **PAID sozinho**. Print em
+  `.claude/tests/1a-iv-asaas-charge.md`.
+- **Gotchas:** (1) `EXTERNAL_URL` no `.env` **não pode ter comentário inline** (django-environ
+  engole). (2) **Registrar o webhook é pré-requisito** — pagar antes do webhook existir = evento
+  perdido (reconciliamos por `GET /payments`). (3) `/media/` ligado (settings + `core/urls` em DEBUG;
+  em prod é a infra). Pillow instalado (o Asaas já manda o PNG pronto; fica disponível).
+
 ## Decisões / desvios do legado (por CONVENTION)
 
 - `Payment` → `Customer`/`PixKey` = **FK real** (§4). `external_id` = UUID de borda; `Payment` usa
@@ -81,5 +103,5 @@ API). Auto-registro via API do Asaas = **deferido** ("expandimos depois", `asaas
 
 ## Próximo
 
-`1a-iv` — **charge** (PIX inbound). Depois `1a-v` — **payout** (PIX-out/transfer) + fila (Django-Q) +
-**E2E 1-centavo** + habilitar o mecanismo de saque no painel. Régua: `.claude/specs/asaas2.md`.
+`1a-v` — **payout** (PIX-out/transfer) + fila (Django-Q) + mecanismo de saque (APPROVED/REFUSED) ao
+vivo + **E2E de saída**. Régua: `.claude/specs/asaas2.md`.
