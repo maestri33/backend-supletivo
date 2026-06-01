@@ -19,17 +19,31 @@ class Command(BaseCommand):
     help = "Envia um email real via SMTP (template por slug OU html cru)."
 
     def add_arguments(self, parser):
-        parser.add_argument("to_email", help="Destinatário (ex.: victormaestri@gmail.com)")
-        parser.add_argument("--slug", default="default", help="Slug do template (default: default)")
-        parser.add_argument("--title", default="Teste — Supletivo Brasil", help="Título/assunto")
+        parser.add_argument(
+            "to_email", help="Destinatário (ex.: victormaestri@gmail.com)"
+        )
+        parser.add_argument(
+            "--slug", default="default", help="Slug do template (default: default)"
+        )
+        parser.add_argument(
+            "--title", default="Teste — Supletivo Brasil", help="Título/assunto"
+        )
         parser.add_argument(
             "--content",
             default="Mensagem de teste enviada pelo app mail do mvp.",
             help="Texto do corpo (markdown bold suportado)",
         )
-        parser.add_argument("--html", default=None, help="HTML cru (ignora template/--slug)")
-        parser.add_argument("--subject", default=None, help="Assunto (default: --title)")
-        parser.add_argument("--media-url", default=None, help="URL pública de mídia a embutir (ex.: PNG)")
+        parser.add_argument(
+            "--html", default=None, help="HTML cru (ignora template/--slug)"
+        )
+        parser.add_argument(
+            "--subject", default=None, help="Assunto (default: --title)"
+        )
+        parser.add_argument(
+            "--media-url",
+            default=None,
+            help="URL pública de mídia a embutir (ex.: PNG)",
+        )
         parser.add_argument(
             "--media-type",
             default="image",
@@ -45,11 +59,16 @@ class Command(BaseCommand):
             plain_body = None
         elif options["media_url"]:
             # Texto acima + mídia embutida por URL abaixo (content_is_html: não re-escapar o snippet).
-            content_html = templates.text_to_html(options["content"]) + templates.media_html(
+            content_html = templates.text_to_html(
+                options["content"]
+            ) + templates.media_html(
                 options["media_url"], options["media_type"], caption=""
             )
             html_body = templates.render(
-                options["slug"], title=options["title"], content=content_html, content_is_html=True
+                options["slug"],
+                title=options["title"],
+                content=content_html,
+                content_is_html=True,
             )
             plain_body = f"{options['content']}\n\n{options['media_url']}"
         else:

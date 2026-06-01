@@ -104,5 +104,7 @@ async def validate_email(email: str, *, smtp_check: bool = False) -> EmailValida
         logger.info("mail.smtp_checked", email=_mask_email(email), valid=valid)
     else:
         result.is_valid = has_mx
-        logger.info("mail.validated", email=_mask_email(email), domain=domain, has_mx=has_mx)
+        logger.info(
+            "mail.validated", email=_mask_email(email), domain=domain, has_mx=has_mx
+        )
     return result

@@ -90,7 +90,9 @@ def media_html(media_url: str, media_type: str, caption: str = "") -> str:
             "Ouvir &aacute;udio</a>"
             "</div>"
         )
-    safe_name = _html.escape(media_url.rsplit("/", 1)[-1] if "/" in media_url else "arquivo")
+    safe_name = _html.escape(
+        media_url.rsplit("/", 1)[-1] if "/" in media_url else "arquivo"
+    )
     return (
         '<div style="margin:20px 0;text-align:center">'
         '<p style="font-size:36px;margin:0">&#128206;</p>'
