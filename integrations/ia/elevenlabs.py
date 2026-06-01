@@ -1,7 +1,9 @@
 """Client ElevenLabs — text-to-speech (TTS), via REST (httpx, sem SDK).
 
 API: `POST https://api.elevenlabs.io/v1/text-to-speech/<voice_id>` (header `xi-api-key`) → bytes mp3.
-Config (key/base_url/voz/modelo) vem do .env via settings (CONVENTION §10). Zero regra de negócio (§8).
+Config (key/base_url/voz/modelo/voice_settings) vem do .env via settings (CONVENTION §10). Os
+voice_settings (stability/similarity_boost/style/speaker_boost/speed) e a voz são sobrescrevíveis por
+request. Zero regra de negócio (§8). Consumido pelo `notify` (áudio quando contato sem WhatsApp).
 """
 
 from __future__ import annotations
@@ -35,16 +37,36 @@ class ElevenLabsClient:
     def _headers(self) -> dict[str, str]:
         return {"xi-api-key": self._api_key, "Content-Type": "application/json"}
 
+    def _voice_settings(self, override: dict | None = None) -> dict:
+        """Defaults do .env (stability/similarity/style/speaker_boost/speed); request pode sobrescrever."""
+        vs = {
+            "stability": settings.ELEVENLABS_STABILITY,
+            "similarity_boost": settings.ELEVENLABS_SIMILARITY_BOOST,
+            "style": settings.ELEVENLABS_STYLE,
+            "use_speaker_boost": settings.ELEVENLABS_SPEAKER_BOOST,
+            "speed": settings.ELEVENLABS_SPEED,
+        }
+        if override:
+            vs.update(override)
+        return vs
+
     async def tts(
-        self, text: str, *, voice_id: str | None = None, model_id: str | None = None
+        self,
+        text: str,
+        *,
+        voice_id: str | None = None,
+        model_id: str | None = None,
+        output_format: str | None = None,
+        voice_settings: dict | None = None,
     ) -> bytes:
         """Converte texto em fala. Devolve os bytes do áudio (mp3)."""
         voice = voice_id or self._voice_id
-        url = f"{self._base_url}/v1/text-to-speech/{voice}?output_format={self._output_format}"
+        fmt = output_format or self._output_format
+        url = f"{self._base_url}/v1/text-to-speech/{voice}?output_format={fmt}"
         body = {
             "text": text,
             "model_id": model_id or self._model_id,
-            "voice_settings": {"stability": 0.5, "similarity_boost": 0.75},
+            "voice_settings": self._voice_settings(voice_settings),
         }
         async with httpx.AsyncClient(
             timeout=httpx.Timeout(self._timeout, connect=10.0)
@@ -58,6 +80,7 @@ class ElevenLabsClient:
         logger.info(
             "elevenlabs.tts_done",
             voice=voice,
+            model=body["model_id"],
             text_len=len(text),
             audio_kb=round(len(audio) / 1024, 1),
         )
