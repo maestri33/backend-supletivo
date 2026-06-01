@@ -3,7 +3,7 @@
 > **ESTADO:** app de negócio do monólito; **despachante** in-process de notificações (WhatsApp +
 > e-mail + voice-note/TTS), **com envio de mídia/imagem**. **Testado REAL** (2026-06-01): os **3
 > canais** entregues no aparelho/e-mail do Victor numa passada. Consome `integrations/communication/
-> whatsapp` + `…/mail` + `integrations/ia` (TTS) — **não** é integração, **não** expõe endpoint/webhook.
+> whatsapp` + `…/mail` + `integrations/ai` (TTS) — **não** é integração, **não** expõe endpoint/webhook.
 
 App Django que **orquestra** o envio (o legado `~/coders/backend/notify` era um serviço FastAPI maior;
 aqui portamos só o **dispatcher**: contatos/logs-timeline/templates-em-DB/métricas/IA-gera-texto são de
@@ -24,7 +24,7 @@ send(
     title=None, subject=None,
     whatsapp=True, email_channel=False, tts=False,
     media_url=None, media_type=None,   # mídia por URL pública (auto-detect do tipo pela extensão)
-    gender=None,                       # "M"/"F" → voz do TTS (resolvido no integrations.ia)
+    gender=None,                       # "M"/"F" → voz do TTS (resolvido no integrations.ai)
     mail_template="default",           # slug do mail.templates
     idempotency_key=None,              # mesma key ⇒ devolve a notificação existente (não re-envia)
     run_sync=False,                    # True = despacho inline (testes/commands)
@@ -53,7 +53,7 @@ grava status+erro. Clientes async via `async_to_sync`.
 - **E-mail** — `mail.templates.render(template, title, content=text)`; com mídia, embute pela **URL
   pública** via `text_to_html(text) + media_html(url, type)` e `content_is_html=True`. Envia por
   `mail.client.send_email(...)`.
-- **TTS** — `ia.service.tts(text, caller=..., gender=...)` gera o mp3 (`media/ia/audio/...`) →
+- **TTS** — `ai.service.tts(text, caller=..., gender=...)` gera o mp3 (`media/ai/audio/...`) →
   `send_whatsapp_audio(num, audio_url)` (voice-note/PTT). `audio_url` pela **URL LAN**.
 
 ### Roteamento de URL de mídia (decisão do Victor)
@@ -63,9 +63,9 @@ grava status+erro. Clientes async via `async_to_sync`.
   e-mail do destinatário busca pela **internet**.
 - O áudio do TTS segue o mesmo padrão do WhatsApp (URL LAN).
 
-## Voz por gênero — em `integrations/ia` (não no notify)
+## Voz por gênero — em `integrations/ai` (não no notify)
 
-`notify` repassa `gender` (M/F); a **resolução gênero→voz** mora no `ia.service.tts` (ordem: `voice_id`
+`notify` repassa `gender` (M/F); a **resolução gênero→voz** mora no `ai.service.tts` (ordem: `voice_id`
 explícito > voz por gênero `ELEVENLABS_VOICE_MALE`/`ELEVENLABS_VOICE_FEMALE` > voz default
 `ELEVENLABS_VOICE_ID`). Os defaults M/F **apontam pra voz padrão**, então sem config o TTS não-quebra.
 

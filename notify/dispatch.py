@@ -2,7 +2,7 @@
 
 Cada canal é isolado em try/except: a falha de um não derruba os outros nem o caller (§12). Os
 clientes externos do `integrations/` são async → rodam via `async_to_sync` (padrão do codebase);
-`ia.service.tts` já é síncrona. Retry simples: uma tentativa por passada — o Django-Q re-executa
+`ai.service.tts` já é síncrona. Retry simples: uma tentativa por passada — o Django-Q re-executa
 a task em caso de erro não tratado (aqui tratamos por canal, então a task termina "ok" com o
 status gravado).
 
@@ -20,7 +20,7 @@ from django.conf import settings
 from integrations.communication.mail import client as mail_client
 from integrations.communication.mail import templates as mail_templates
 from integrations.communication.whatsapp.client import get_client as get_whatsapp_client
-from integrations.ia import service as ia_service
+from integrations.ai import service as ai_service
 from notify.models import STATUS_FAILED, STATUS_PENDING, STATUS_SENT, Notification
 
 logger = structlog.get_logger()
@@ -137,9 +137,9 @@ def _send_email(notif: Notification) -> None:
 
 def _send_tts(notif: Notification) -> None:
     try:
-        # ia.tts gera o mp3 e devolve o caminho RELATIVO a MEDIA_ROOT (ex.: "ia/audio/<uuid>.mp3").
-        # gender (M/F) escolhe a voz — a resolução gênero→voz mora no integrations.ia (§7 do plano).
-        rel_path = ia_service.tts(
+        # ai.tts gera o mp3 e devolve o caminho RELATIVO a MEDIA_ROOT (ex.: "ai/audio/<uuid>.mp3").
+        # gender (M/F) escolhe a voz — a resolução gênero→voz mora no integrations.ai (§7 do plano).
+        rel_path = ai_service.tts(
             notif.text, caller=f"notify:{notif.caller}", gender=notif.gender or None
         )
         notif.tts_audio_path = rel_path

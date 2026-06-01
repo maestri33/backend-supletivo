@@ -57,7 +57,7 @@ class Notification(models.Model):
     media_url = models.CharField(max_length=500, null=True, blank=True)
     media_type = models.CharField(max_length=20, null=True, blank=True)
 
-    # gênero do destinatário (M/F) → voz do TTS (resolvido no integrations.ia). Vazio = voz default.
+    # gênero do destinatário (M/F) → voz do TTS (resolvido no integrations.ai). Vazio = voz default.
     gender = models.CharField(max_length=1, null=True, blank=True)
 
     want_whatsapp = models.BooleanField(default=True)

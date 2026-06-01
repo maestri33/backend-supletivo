@@ -2,14 +2,14 @@
 
 Faz UMA geração de verdade (gasta centavos). Mostra o resultado + as últimas linhas AiCall (numa
 queda de provider aparecem a(s) tentativa(s) com erro + a que deu certo). Uso:
-`python manage.py ia_ping` (ou `--model X` p/ fixar um modelo da cadeia).
+`python manage.py ai_ping` (ou `--model X` p/ fixar um modelo da cadeia).
 """
 
 from django.core.management.base import BaseCommand
 
-from integrations.ia import service
-from integrations.ia.client import LLMError
-from integrations.ia.models import AiCall
+from integrations.ai import service
+from integrations.ai.client import LLMError
+from integrations.ai.models import AiCall
 
 
 class Command(BaseCommand):
@@ -25,7 +25,7 @@ class Command(BaseCommand):
             data = service.generate_json(
                 "Liste 3 cidades do Rio Grande do Sul.",
                 schema_description="Objeto JSON com a chave `cidades`: array de strings.",
-                caller="ia_ping",
+                caller="ai_ping",
                 model=options.get("model"),
             )
             self.stdout.write(self.style.SUCCESS(f"IA retornou: {data}"))

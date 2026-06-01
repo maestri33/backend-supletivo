@@ -1,4 +1,4 @@
-"""Models do app integrations.ia — auditoria/custo de cada chamada de IA (pedido do Victor, Portão 1 Q3).
+"""Models do app integrations.ai — auditoria/custo de cada chamada de IA (pedido do Victor, Portão 1 Q3).
 
 Design NOVO (o micro `ai` legado não tinha tabelas — só um schema vazio). É **telemetria interna**:
 não tem borda de API, então **não tem `external_id`** (CONVENTION §4: external_id só na borda). Uma

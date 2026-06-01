@@ -102,7 +102,7 @@ def _run(operation: str, caller: str, attempt, chain) -> tuple[ChatResult, str, 
             last_err = exc
             if exc.retryable:
                 logger.warning(
-                    "ia.fallback_next",
+                    "ai.fallback_next",
                     provider=provider,
                     model=model,
                     reason=str(exc)[:160],
@@ -324,7 +324,7 @@ def grade(
 
 # ---------------------------------------------------------------------------
 # Mídia (single-provider, SEM cadeia de fallback): Gemini visão/imagem, ElevenLabs TTS, Vision OCR.
-# Cada uma grava 1 AiCall (tokens=0 — não se aplica). Imagem/áudio gerados vão pro media/ia/.
+# Cada uma grava 1 AiCall (tokens=0 — não se aplica). Imagem/áudio gerados vão pro media/ai/.
 # ---------------------------------------------------------------------------
 
 
@@ -333,12 +333,12 @@ def _save_media(subdir: str, ext: str, data: bytes) -> str:
     import os
     import uuid
 
-    folder = os.path.join(settings.MEDIA_ROOT, "ia", subdir)
+    folder = os.path.join(settings.MEDIA_ROOT, "ai", subdir)
     os.makedirs(folder, exist_ok=True)
     name = f"{uuid.uuid4().hex}.{ext}"
     with open(os.path.join(folder, name), "wb") as fh:
         fh.write(data)
-    return f"ia/{subdir}/{name}"
+    return f"ai/{subdir}/{name}"
 
 
 def _media_call(*, operation: str, provider: str, model: str, caller: str, coro):
@@ -394,7 +394,7 @@ def describe_image(
 
 
 def generate_image(prompt: str, *, caller: str) -> str:
-    """Gemini imagem: gera uma imagem a partir de um prompt. Salva em media/ia/image/ e devolve o caminho."""
+    """Gemini imagem: gera uma imagem a partir de um prompt. Salva em media/ai/image/ e devolve o caminho."""
     from .gemini import GeminiClient
 
     client = GeminiClient()
@@ -436,7 +436,7 @@ def _voice_for_gender(gender: str | None) -> str | None:
 def tts(
     text: str, *, caller: str, voice_id: str | None = None, gender: str | None = None
 ) -> str:
-    """ElevenLabs TTS: gera áudio a partir do texto. Salva em media/ia/audio/ e devolve o caminho.
+    """ElevenLabs TTS: gera áudio a partir do texto. Salva em media/ai/audio/ e devolve o caminho.
 
     A voz segue a ordem: `voice_id` explícito > voz por `gender` (M/F → ELEVENLABS_VOICE_MALE/
     FEMALE do .env) > voz default do cliente (ELEVENLABS_VOICE_ID). Os defaults das vozes nominais

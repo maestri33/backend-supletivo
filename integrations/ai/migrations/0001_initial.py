@@ -69,7 +69,7 @@ class Migration(migrations.Migration):
             options={
                 "indexes": [
                     models.Index(
-                        fields=["created_at"], name="ia_aicall_created_7aaf41_idx"
+                        fields=["created_at"], name="ai_aicall_created_c0cafa_idx"
                     )
                 ],
             },

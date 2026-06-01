@@ -62,7 +62,7 @@ def send(
     Canal pedido sem destinatário nasce 'skipped' (nada a enviar). `idempotency_key` repetido
     devolve a notificação existente sem reenfileirar. `media_url` (URL pública) ativa o envio de
     mídia: WhatsApp busca pela LAN, e-mail embute pela URL pública; `media_type` é auto-detectado
-    pela extensão se não vier. `gender` (M/F) escolhe a voz do TTS (resolvido no integrations.ia).
+    pela extensão se não vier. `gender` (M/F) escolhe a voz do TTS (resolvido no integrations.ai).
     `run_sync=True` roda o despacho inline (testes/commands); o default é assíncrono (Django-Q).
     """
     if idempotency_key:

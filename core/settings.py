@@ -60,7 +60,7 @@ INSTALLED_APPS = [
     "integrations.finance.infinitepay.apps.InfinitepayConfig",
     "integrations.tools.cep.apps.CepConfig",
     "integrations.tools.cpf.apps.CpfConfig",
-    "integrations.ia.apps.IaConfig",
+    "integrations.ai.apps.AiConfig",
     "integrations.communication.whatsapp.apps.WhatsappConfig",
     "integrations.communication.mail.apps.MailConfig",
     # apps de negócio do monólito
@@ -213,12 +213,12 @@ CPFHUB_BASE_URL = env("CPFHUB_BASE_URL", default="https://api.cpfhub.io")
 CPFHUB_TIMEOUT = env.float("CPFHUB_TIMEOUT", default=5.0)
 
 
-# IA (integrations.ia) — engine LLM multi-provider OpenAI-compatible + fallback (CONVENTION §8/§10).
+# IA (integrations.ai) — engine LLM multi-provider OpenAI-compatible + fallback (CONVENTION §8/§10).
 # Todos os providers (deepseek, dashscope, groq, openai, openrouter, nvidia, …) falam o mesmo
 # protocolo: cada um precisa só de IA_<NAME>_BASE_URL + IA_<NAME>_API_KEY. Somar um novo é só .env.
 # As keys têm chars variados (pontos, hifens) → lemos via os.environ (read_env() já populou acima),
 # como no Asaas. IA_FALLBACK_CHAIN="provider:model,..." define a ORDEM de tentativa (1º = default);
-# falha rede/timeout/429/5xx cai pro próximo. Config incompleta => check ia.E001/E002/E003 trava o boot.
+# falha rede/timeout/429/5xx cai pro próximo. Config incompleta => check ai.E001/E002/E003 trava o boot.
 IA_PROVIDERS = {}
 for _ia_name in env.list("IA_PROVIDERS", default=[]):
     _ia_name = _ia_name.strip().lower()
@@ -237,8 +237,8 @@ IA_DEFAULT_TEMPERATURE = env.float("IA_DEFAULT_TEMPERATURE", default=0.3)
 IA_MAX_TOKENS = env.int("IA_MAX_TOKENS", default=0)
 IA_TIMEOUT = env.float("IA_TIMEOUT", default=60.0)
 
-# IA — modalidades de mídia (integrations.ia), via REST httpx. São OPCIONAIS: sem a key o check só
-# AVISA (ia.W001/W002/W003), não trava como a cadeia LLM (que é o núcleo). Keys AIza/sk_ (sem "$").
+# IA — modalidades de mídia (integrations.ai), via REST httpx. São OPCIONAIS: sem a key o check só
+# AVISA (ai.W001/W002/W003), não trava como a cadeia LLM (que é o núcleo). Keys AIza/sk_ (sem "$").
 # Gemini = visão (descrever imagem) + geração de imagem; ElevenLabs = TTS; Google Vision = OCR.
 GEMINI_API_KEY = env("GEMINI_API_KEY", default="")
 GEMINI_BASE_URL = env(

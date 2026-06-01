@@ -1,14 +1,14 @@
 """Valida cada provider de IA habilitado (§8): GET /models REAL com a key real → lista os modelos.
 
 Prova que a credencial de cada provider funciona, sem gastar tokens de geração. Uso:
-`python manage.py ia_providers`.
+`python manage.py ai_providers`.
 """
 
 from asgiref.sync import async_to_sync
 from django.core.management.base import BaseCommand
 
-from integrations.ia import providers
-from integrations.ia.client import LLMError
+from integrations.ai import providers
+from integrations.ai.client import LLMError
 
 
 class Command(BaseCommand):

@@ -4,13 +4,13 @@ Roda em todo runserver/manage (framework de checks do Django), então fica "prin
 .env ser preenchido. Padrão pedido pelo Victor (igual asaas, CONVENTION §8): integração não sobe
 silenciosa sem credencial real.
 
-- `ia.E001` (Error): nenhum provider habilitado com base_url+api_key → o engine não fala com IA.
-- `ia.E002` (Error): IA_FALLBACK_CHAIN vazia → não há o que chamar.
-- `ia.E003` (Error): a cadeia referencia provider sem credencial no .env.
+- `ai.E001` (Error): nenhum provider habilitado com base_url+api_key → o engine não fala com IA.
+- `ai.E002` (Error): IA_FALLBACK_CHAIN vazia → não há o que chamar.
+- `ai.E003` (Error): a cadeia referencia provider sem credencial no .env.
 Os E* TRAVAM o manage.py (padrão asaas: o núcleo LLM não sobe sem credencial real).
 
-As modalidades de MÍDIA são opcionais (só AVISAM, não travam): ia.W001 Gemini (visão/imagem),
-ia.W002 ElevenLabs (TTS), ia.W003 Google Vision (OCR).
+As modalidades de MÍDIA são opcionais (só AVISAM, não travam): ai.W001 Gemini (visão/imagem),
+ai.W002 ElevenLabs (TTS), ai.W003 Google Vision (OCR).
 """
 
 from django.conf import settings
@@ -28,7 +28,7 @@ def check_ia_config(app_configs, **kwargs):
                 "Nenhum provider de IA configurado — o app ia não consegue falar com nenhuma IA.",
                 hint="No .env: IA_PROVIDERS=deepseek,... e, p/ cada um, IA_<NAME>_BASE_URL + "
                 "IA_<NAME>_API_KEY.",
-                id="ia.E001",
+                id="ai.E001",
             )
         )
     if not chain:
@@ -36,7 +36,7 @@ def check_ia_config(app_configs, **kwargs):
             Error(
                 "IA_FALLBACK_CHAIN vazia — sem cadeia (provider:model) não há o que chamar.",
                 hint="No .env: IA_FALLBACK_CHAIN=deepseek:deepseek-v4-pro,dashscope:qwen3.7-max,...",
-                id="ia.E002",
+                id="ai.E002",
             )
         )
     missing = sorted({p for (p, _m) in chain if p not in providers})
@@ -45,15 +45,15 @@ def check_ia_config(app_configs, **kwargs):
             Error(
                 f"IA_FALLBACK_CHAIN referencia provider(s) sem base_url/api_key no .env: {missing}.",
                 hint="Adicione IA_<NAME>_BASE_URL + IA_<NAME>_API_KEY ou tire da cadeia.",
-                id="ia.E003",
+                id="ai.E003",
             )
         )
 
     # Modalidades de mídia — opcionais: avisam (não travam) se a key faltar.
     for key_attr, wid, nome in [
-        ("GEMINI_API_KEY", "ia.W001", "Gemini (visão/imagem)"),
-        ("ELEVENLABS_API_KEY", "ia.W002", "ElevenLabs (TTS)"),
-        ("GOOGLE_VISION_API_KEY", "ia.W003", "Google Vision (OCR)"),
+        ("GEMINI_API_KEY", "ai.W001", "Gemini (visão/imagem)"),
+        ("ELEVENLABS_API_KEY", "ai.W002", "ElevenLabs (TTS)"),
+        ("GOOGLE_VISION_API_KEY", "ai.W003", "Google Vision (OCR)"),
     ]:
         if not getattr(settings, key_attr, ""):
             errors.append(

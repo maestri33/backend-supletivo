@@ -33,9 +33,9 @@ Config em `backend/.env` (não versionado). Dev usa SQLite.
 - **integrations/communication/whatsapp (§4 item 1):** cliente WhatsApp (Evolution API 2.3.7) — porte
   completo, async, com resolução do 9º dígito BR. O app `notify` consome depois.
   → [[wiki/integrations/communication/whatsapp]]
-- **integrations/ia (§4 item 1):** engine LLM multi-provider OpenAI-compatible + fallback (DeepSeek,
+- **integrations/ai (§4 item 1):** engine LLM multi-provider OpenAI-compatible + fallback (DeepSeek,
   DashScope, Groq, OpenAI, OpenRouter, NVIDIA). Interface in-process (`service.py`) + auditoria
-  `AiCall`; somar provider é só `.env`. O `training` consome depois (correção). → [[wiki/integrations/ia]]
+  `AiCall`; somar provider é só `.env`. O `training` consome depois (correção). → [[wiki/integrations/ai]]
 - **integrations/communication/mail (§4 item 1):** cliente de email (SMTP STARTTLS:587) + validador
   (formato/MX) + templates HTML. Porte do legado, async; envia inclusive imagem por URL. O `notify`
   consome depois. → [[wiki/integrations/communication/mail]]
