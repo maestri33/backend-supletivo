@@ -15,6 +15,8 @@ from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_GET, require_POST
 
+from core.validation import latest_checks
+
 from . import transfer_validation as tv
 from . import webhooks
 from .client import AsaasError, get_client
@@ -39,6 +41,8 @@ def status(request):
         "external_url_in_env": bool(settings.EXTERNAL_URL),
         "ready": False,
         "hints": [],
+        # flags dos testes/validações que já rodamos (pedido do Victor: rastrear no futuro)
+        "validation_checks": latest_checks("asaas"),
     }
 
     if not out["api_key_in_env"]:

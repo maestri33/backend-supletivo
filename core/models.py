@@ -20,3 +20,28 @@ class UnroutedEvent(models.Model):
 
     def __str__(self):
         return f"{self.source}:{self.event} @ {self.received_at:%Y-%m-%d %H:%M:%S}"
+
+
+class ValidationCheck(models.Model):
+    """Registro persistente de teste/validação que a gente fez, com flag + horário.
+
+    Pedido do Victor: todo teste que rodarmos fica salvo, com a respectiva flag, pra **rastrear no
+    futuro** se algo der errado. Append-only (cada execução grava uma linha = histórico); o `/status/`
+    de cada integração mostra o ÚLTIMO resultado por `(scope, name)`. Ex.: `scope=asaas`,
+    `name=webhook_external`, `passed=True`, `mode=artificial` (testado via link externo, ainda não por
+    evento real do Asaas).
+    """
+
+    scope = models.CharField(max_length=64, db_index=True)  # ex.: asaas
+    name = models.CharField(max_length=128, db_index=True)  # ex.: webhook_external
+    passed = models.BooleanField()
+    mode = models.CharField(max_length=32, blank=True)  # artificial | real | link | ...
+    detail = models.TextField(blank=True)
+    checked_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        indexes = [models.Index(fields=["scope", "name", "-checked_at"])]
+
+    def __str__(self):
+        flag = "OK" if self.passed else "FAIL"
+        return f"{self.scope}:{self.name}={flag} @ {self.checked_at:%Y-%m-%d %H:%M}"

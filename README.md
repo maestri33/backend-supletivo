@@ -22,6 +22,8 @@ Config em `backend/.env` (não versionado). Dev usa SQLite.
   webhook receiver + validação de saque. Faltam charge e payout. → [[wiki/integrations/finance/asaas]]
 - **core/fallback:** logger rastreável de evento sem destino (usado pelo webhook do asaas).
   → [[wiki/core/fallback]]
+- **core/validation:** registro de validações (flags + horário) dos testes que rodamos, mostrado no
+  `/status/` de cada integração. → [[wiki/core/validation]]
 
 > Apps de negócio (`users`, `hub`, `notify`, `financeiro`, `integrations`...) entram um a um,
 > pelo `.claude/WORKFLOW.md`.
