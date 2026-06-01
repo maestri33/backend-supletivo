@@ -24,6 +24,8 @@ Config em `backend/.env` (não versionado). Dev usa SQLite.
   → [[wiki/core/fallback]]
 - **core/validation:** registro de validações (flags + horário) dos testes que rodamos, mostrado no
   `/status/` de cada integração. → [[wiki/core/validation]]
+- **integrations/tools/cep (§4 item 1):** tool de CEP — lookup ViaCEP (API pública, sem api-key).
+  Cliente async; o app `address` consome depois. → [[wiki/integrations/tools/cep]]
 
 > Apps de negócio (`users`, `hub`, `notify`, `financeiro`, `integrations`...) entram um a um,
 > pelo `.claude/WORKFLOW.md`.

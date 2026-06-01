@@ -57,6 +57,7 @@ INSTALLED_APPS = [
     "core.apps.CoreConfig",
     # integrações externas
     "integrations.finance.asaas.apps.AsaasConfig",
+    "integrations.tools.cep.apps.CepConfig",
 ]
 
 MIDDLEWARE = [
@@ -161,6 +162,12 @@ ASAAS_WEBHOOK_SECRET = env("ASAAS_WEBHOOK_SECRET", default="")
 EXTERNAL_URL = env("EXTERNAL_URL", default="")
 # Prazo default (dias) da cobrança PIX quando o caller não passa due_date.
 ASAAS_CHARGE_DUE_DAYS = env.int("ASAAS_CHARGE_DUE_DAYS", default=3)
+
+
+# ViaCEP (integrations.tools.cep) — lookup de CEP. API pública, sem api-key: só URL e timeout,
+# config no .env (CONVENTION §8/§10, nunca hardcoded).
+VIACEP_BASE_URL = env("VIACEP_BASE_URL", default="https://viacep.com.br")
+VIACEP_TIMEOUT_SECONDS = env.float("VIACEP_TIMEOUT_SECONDS", default=5.0)
 
 
 # Django-Q2 — fila async com broker no próprio banco (sem Redis). `qcluster` roda o worker.
