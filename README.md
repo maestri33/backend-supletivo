@@ -28,6 +28,8 @@ Config em `backend/.env` (não versionado). Dev usa SQLite.
   `/status/` de cada integração. → [[wiki/core/validation]]
 - **integrations/tools/cep (§4 item 1):** tool de CEP — lookup ViaCEP (API pública, sem api-key).
   Cliente async; o app `address` consome depois. → [[wiki/integrations/tools/cep]]
+- **integrations/tools/cpf (§4 item 1):** tool de CPF — lookup CPFHub.io (api-key `x-api-key`,
+  server-side). Cliente async; o app `profiles` consome depois. → [[wiki/integrations/tools/cpf]]
 - **integrations/comunicacao/whatsapp (§4 item 1):** cliente WhatsApp (Evolution API 2.3.7) — porte
   completo, async, com resolução do 9º dígito BR. O app `notify` consome depois.
   → [[wiki/integrations/comunicacao/whatsapp]]

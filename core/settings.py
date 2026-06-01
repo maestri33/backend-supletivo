@@ -59,6 +59,7 @@ INSTALLED_APPS = [
     "integrations.finance.asaas.apps.AsaasConfig",
     "integrations.finance.infinitepay.apps.InfinitepayConfig",
     "integrations.tools.cep.apps.CepConfig",
+    "integrations.tools.cpf.apps.CpfConfig",
     "integrations.comunicacao.whatsapp.apps.WhatsappConfig",
 ]
 
@@ -182,6 +183,14 @@ INFINITEPAY_REDIRECT_URL = env("INFINITEPAY_REDIRECT_URL", default="")
 # config no .env (CONVENTION §8/§10, nunca hardcoded).
 VIACEP_BASE_URL = env("VIACEP_BASE_URL", default="https://viacep.com.br")
 VIACEP_TIMEOUT_SECONDS = env.float("VIACEP_TIMEOUT_SECONDS", default=5.0)
+
+
+# CPFHub (integrations.tools.cpf) — lookup de identidade por CPF (server-side only). §8/§10.
+# Tem api-key (header x-api-key). A key é hex (sem "$"), então env() normal serve (a do Asaas
+# começa com "$" e exigiu os.environ). Sem a key o check cpf.W001 só AVISA (não trava — tool de apoio).
+CPFHUB_API_KEY = env("CPFHUB_API_KEY", default="")
+CPFHUB_BASE_URL = env("CPFHUB_BASE_URL", default="https://api.cpfhub.io")
+CPFHUB_TIMEOUT = env.float("CPFHUB_TIMEOUT", default=5.0)
 
 
 # WhatsApp (integrations.comunicacao.whatsapp) — cliente da Evolution API. Config via .env
