@@ -108,7 +108,10 @@ def _apply_charge(payload, event):
     row.status = new_status
     row.save()
     logger.info(
-        "charge_status_changed", payment_id=row.payment_id, status=new_status, asaas_event=event
+        "charge_status_changed",
+        payment_id=row.payment_id,
+        status=new_status,
+        asaas_event=event,
     )
     return row, "ok"
 
@@ -135,7 +138,10 @@ def _apply_payout(payload, event):
         row.last_error = data.get("failReason") or f"event={event}"
     row.save()
     logger.info(
-        "payout_status_changed", payment_id=row.payment_id, status=new_status, asaas_event=event
+        "payout_status_changed",
+        payment_id=row.payment_id,
+        status=new_status,
+        asaas_event=event,
     )
     return row, "ok"
 
