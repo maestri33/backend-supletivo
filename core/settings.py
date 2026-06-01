@@ -161,6 +161,9 @@ MEDIA_ROOT = BASE_DIR / "media"
 # aqui, não pela URL pública. Vazio => o notify cai no EXTERNAL_URL. Ex. dev: http://10.1.20.30
 MEDIA_LAN_BASE = env("MEDIA_LAN_BASE", default="")
 
+# Limite de upload de imagem dos documentos (users/documents) — config, não hardcoded (§10).
+MAX_UPLOAD_MB = env.int("MAX_UPLOAD_MB", default=10)
+
 # Default primary key field type
 # https://docs.djangoproject.com/en/5.2/ref/settings/#default-auto-field
 

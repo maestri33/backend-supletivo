@@ -1,9 +1,9 @@
 """Profile — dados pessoais/contato, 1-1 com o User (CONVENTION §4: "contato mora em profiles").
 
-ESCOPO MÍNIMO de hoje (Portão 1/2 2026-06-01): só o que o `auth` precisa pra cumprir a spec —
-unicidade absoluta de **cpf, phone, email** (§9) + `gender` (vem de brinde do CPFHub; usado depois
-p/ voz do TTS e doc de reservista). O `profiles` COMPLETO (chave Pix + validação Asaas, nome
-detalhado, FK pro address) é ciclo próprio mais pra frente — NÃO inventar campo aqui.
+Unicidade absoluta de **cpf, phone, email** (§9) + `gender` (brinde do CPFHub; usado p/ voz do TTS
+e doc de reservista). `profiles` COMPLETO (ciclo 3b 2026-06-01): `name` + `birth_date` (vêm do
+CPFHub no register), `pix_key` (só o campo; validação Asaas/DICT adiada pro ciclo do `candidate`),
+e FK pro `address` (Profile→Address, §4 — endereço é entidade própria).
 
 Unicidade "nem falsos" (spec auth) = `unique` no banco + validação de formato (auth.validation) +
 veracidade real no register (CPFHub p/ cpf, WhatsApp check_numbers p/ phone).
@@ -36,6 +36,18 @@ class Profile(models.Model):
         choices=GENDER_CHOICES,
         null=True,
         blank=True,
+    )
+    # profiles completo (ciclo 3b): name/birth_date vêm do CPFHub; pix_key só o campo (validação
+    # Asaas adiada); address = FK pra entidade própria (Profile→Address, §4), 1 endereço por profile.
+    name = models.CharField("nome", max_length=200, null=True, blank=True)
+    birth_date = models.DateField("data de nascimento", null=True, blank=True)
+    pix_key = models.CharField("chave Pix", max_length=140, null=True, blank=True)
+    address = models.OneToOneField(
+        "users.Address",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="profile",
     )
     created_at = models.DateTimeField("criado em", auto_now_add=True)
     updated_at = models.DateTimeField("atualizado em", auto_now=True)

@@ -29,6 +29,8 @@ urlpatterns = [
     path("integrations/infinitepay/", include("integrations.finance.infinitepay.urls")),
     # users — auth DMZ (register/check/recover/login) + JWKS público na raiz (RFC 7517)
     path("users/auth/", include("users.auth.urls")),
+    path("users/address/", include("users.address.urls")),
+    path("users/documents/", include("users.documents.urls")),
     path(".well-known/jwks.json", jwks, name="jwks"),
 ]
 

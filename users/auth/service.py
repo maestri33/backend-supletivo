@@ -33,6 +33,8 @@ from users.exceptions import (
     Unauthorized,
     ValidationError,
 )
+from users.address import interface as address_iface
+from users.documents import interface as documents_iface
 from users.profiles import interface as profiles
 from users.roles import interface as roles
 
@@ -136,9 +138,18 @@ def register(*, role: str, phone: str, cpf: str) -> dict:
     try:
         with transaction.atomic():
             user = User.objects.create_user()
-            profiles.create(
-                user=user, cpf=cpf, phone=resolved_phone, gender=identity.gender
+            # provisionamento (§9): Profile + Address vazio + Documents (sub-docs null) + role,
+            # tudo na MESMA transação. name/birth_date vêm de brinde do CPFHub (identity).
+            profile = profiles.create(
+                user=user,
+                cpf=cpf,
+                phone=resolved_phone,
+                gender=identity.gender,
+                name=identity.name,
+                birth_date=identity.birth_date,
             )
+            profiles.attach_address(profile, address_iface.create_empty())
+            documents_iface.create_empty(user)
             roles.assign(user, role)
     except IntegrityError as exc:
         # corrida na unicidade (cpf/phone) — outra request criou primeiro

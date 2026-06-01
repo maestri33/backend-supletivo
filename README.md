@@ -47,6 +47,10 @@ Config em `backend/.env` (não versionado). Dev usa SQLite.
   mínimo (unicidade cpf/phone/email), `jwt` (RS256 + JWKS), `otp` (login passwordless por WhatsApp),
   `roles` (catálogo no `.env` + histórico). register/check/recover/login (DMZ). **E2E real
   aprovado** (register→OTP no zap→login→JWT). → [[wiki/users/users]]
+- **users/address (§4 item 3, ciclo 3b):** entidade de endereço (DMZ) — GET/CEP(ViaCEP)/PATCH; nasce
+  vazio no provisionamento. → [[wiki/users/address]]
+- **users/documents (§4 item 3, ciclo 3b):** RG/CNH/certidão/militar (1-1, null no cadastro) + upload
+  de foto + gate de gênero no militar. → [[wiki/users/documents]]
 
 > Apps de negócio (`users`, `hub`, `notify`, `financeiro`, `integrations`...) entram um a um,
 > pelo `.claude/WORKFLOW.md`.

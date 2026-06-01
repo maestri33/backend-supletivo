@@ -1,7 +1,7 @@
 # users — identidade, papéis e dados pessoais (§4 item 3)
 
 > O "quem" da plataforma. Um **app Django** com sub-módulos (pacotes): `auth/` (+ `jwt/`, `otp/`),
-> `profiles/`, `roles/`. `documents/` e `address/` ficam pra ciclos futuros.
+> `profiles/`, `roles/`, **`address/`** e **`documents/`** (ciclo 3b).
 > Fonte de verdade da identidade (VISAO). Modelo B (CONVENTION §1): a lógica vive no Django; os
 > edges FastAPI (depois) chamam as **views DMZ** por HTTP.
 
@@ -16,7 +16,11 @@
 ## Models (app_label `users`, um migration set)
 - **`User`** (`auth/models.py`): `external_id` (UUID unique), flags admin, senha (inutilizável p/ user normal).
 - **`Profile`** (`profiles/models.py`): 1-1 `User` — `cpf`(11,unique), `phone`(13,unique, formato
-  `55`+DDD+`9`+8), `email`(unique,null), `gender`(M/F — vem do CPFHub).
+  `55`+DDD+`9`+8), `email`(unique,null), `gender`(M/F — vem do CPFHub). **Completo (3b):** `name` +
+  `birth_date` (brinde do CPFHub no register), `pix_key` (só o campo; validação Asaas adiada), FK 1-1
+  `address` (Profile→Address, §4).
+- **`Address`** (`address/models.py`): entidade própria de endereço → [[wiki/users/address]].
+- **`Document`** + `RG`/`CNH`/`Certificate`/`Military` (`documents/models.py`) → [[wiki/users/documents]].
 - **`UserRole`** (`roles/models.py`): FK `User`, `role`, `assigned_at`, `revoked_at` (ativa = nulo;
   histórico nas revogadas).
 - **`OtpCode`** + **`OtpRateLimit`** (`auth/otp/models.py`): auditoria (hash SHA256, nunca plaintext)
@@ -24,8 +28,9 @@
 
 ## auth — endpoints DMZ (`/users/auth/…`)
 - `POST register/` `{role, phone, cpf}` → valida entry-role + formato + **CPFHub** (identidade real)
-  + **WhatsApp `check_numbers`** (número real) → transação atômica `User`+`Profile`+role inicial →
-  dispara OTP → `{external_id}`.
+  + **WhatsApp `check_numbers`** (número real) → transação atômica `User`+`Profile`(com `name`/
+  `birth_date` do CPFHub)+**`Address` vazio**+**`Document`+sub-docs null**+role inicial → dispara OTP
+  → `{external_id}`.
 - `POST check/` `{cpf|phone|external_id}` → acha + dispara OTP. Resposta com `found`/`external_id`;
   não-encontrado = jitter + shape de sucesso (anti-enumeração). Rate-limit forte de IP fica no edge (§5).
 - `POST recover/` `{cpf|phone}` → OTP no canal conhecido; **nunca** devolve `external_id`.
@@ -55,8 +60,11 @@ Catálogo de transições no **`.env`** (`ROLE_RULES`, §9), validado no boot (`
 
 ## Rabo pra trás (specs novas)
 - `specs/log_otp_mask.md` — o código do OTP aparece no `text_preview` do log do cliente WhatsApp.
-- `documents`/`address` (sub-módulos do `users`) e `profiles` completo (Pix/Asaas) = ciclos futuros.
+- `specs/profiles_pix_validacao.md` — validar a chave Pix no Asaas (DICT) = ciclo do `candidate`.
+- `specs/selfie.md` — selfie (validação tipo-assinatura) = ciclo `candidate`/`enrollment`.
 
 ## Teste real
-`.claude/tests/3-users-auth-jwt-otp-roles.md` — register (CPFHub+WhatsApp) → OTP no zap → login →
-JWT validado pelo JWKS → unicidade 409 → promote com histórico. Tudo REAL.
+- `.claude/tests/3-users-auth-jwt-otp-roles.md` — register → OTP no zap → login → JWT/JWKS → 409 →
+  promote. Tudo REAL.
+- `.claude/tests/3b-users-address-documents-profiles.md` — provisionamento (Address+Documents null) →
+  CEP ViaCEP real → upload de foto real → gate de gênero. Tudo REAL.
