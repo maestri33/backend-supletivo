@@ -24,6 +24,7 @@ urlpatterns = [
     path("admin/", admin.site.urls),
     # views DMZ das integrações (internas — <servico>.prod)
     path("integrations/asaas/", include("integrations.finance.asaas.urls")),
+    path("integrations/infinitepay/", include("integrations.finance.infinitepay.urls")),
 ]
 
 # Em dev (DEBUG) o Django serve /media/ (ex.: PNG do QR das cobranças); em prod é a infra/proxy.

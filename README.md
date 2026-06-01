@@ -20,6 +20,8 @@ Config em `backend/.env` (não versionado). Dev usa SQLite.
 - **Bootstrap (step 0):** Django sobe, migra, `/admin/` no ar. → [[wiki/core/bootstrap]]
 - **integrations/asaas (§4 item 1-a):** gateway de pagamento — fundação + status/onboarding +
   webhook receiver + validação de saque. Faltam charge e payout. → [[wiki/integrations/finance/asaas]]
+- **integrations/infinitepay (§4 item 1-b):** gateway de checkout — link de pagamento + webhook que
+  reconfirma via payment_check. E2E real aprovado (pagou R$1 → PAID). → [[wiki/integrations/finance/infinitepay]]
 - **core/fallback:** logger rastreável de evento sem destino (usado pelo webhook do asaas).
   → [[wiki/core/fallback]]
 - **core/validation:** registro de validações (flags + horário) dos testes que rodamos, mostrado no

@@ -57,6 +57,7 @@ INSTALLED_APPS = [
     "core.apps.CoreConfig",
     # integrações externas
     "integrations.finance.asaas.apps.AsaasConfig",
+    "integrations.finance.infinitepay.apps.InfinitepayConfig",
     "integrations.tools.cep.apps.CepConfig",
     "integrations.comunicacao.whatsapp.apps.WhatsappConfig",
 ]
@@ -163,6 +164,18 @@ ASAAS_WEBHOOK_SECRET = env("ASAAS_WEBHOOK_SECRET", default="")
 EXTERNAL_URL = env("EXTERNAL_URL", default="")
 # Prazo default (dias) da cobrança PIX quando o caller não passa due_date.
 ASAAS_CHARGE_DUE_DAYS = env.int("ASAAS_CHARGE_DUE_DAYS", default=3)
+
+
+# InfinitePay (integrations.finance.infinitepay) — config via .env (CONVENTION §8/§10).
+# A InfinitePay NÃO usa api-key: autentica só pelo `handle` (InfiniteTag) — quem recebe é o dono da
+# conta, não há segredo no envio. Sem o handle, o system check infinitepay.E001 trava o boot. O handle
+# às vezes é colado com "$" à esquerda (InfiniteTag); removemos pra não furar a chamada. Lemos via
+# os.environ por simetria com a key do asaas (read_env() já populou os.environ acima).
+INFINITEPAY_HANDLE = os.environ.get("INFINITEPAY_HANDLE", "").lstrip("$")
+INFINITEPAY_BASE_URL = env("INFINITEPAY_BASE_URL", default="https://api.infinitepay.io")
+INFINITEPAY_HTTP_TIMEOUT = env.float("INFINITEPAY_HTTP_TIMEOUT", default=15.0)
+# URL de sucesso pós-pagamento (opcional; default = EXTERNAL_URL no serviço de checkout).
+INFINITEPAY_REDIRECT_URL = env("INFINITEPAY_REDIRECT_URL", default="")
 
 
 # ViaCEP (integrations.tools.cep) — lookup de CEP. API pública, sem api-key: só URL e timeout,
