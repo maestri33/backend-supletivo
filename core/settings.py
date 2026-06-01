@@ -68,6 +68,9 @@ INSTALLED_APPS = [
     # users = o "quem" (identidade + papéis + dados pessoais). auth/jwt/otp/profiles/roles vivem
     # dentro dele como pacotes; um migration set só (CONVENTION §2). É o AUTH_USER_MODEL.
     "users.apps.UsersConfig",
+    # finance = motor de comissão/payout (commissions + payout; fees vem depois). Consome users
+    # (FK→User, pix do profile), asaas.payout (PIX-out) e notify. Pasta em inglês (Victor 2026-06-01).
+    "finance.apps.FinanceConfig",
 ]
 
 # User custom (palavra do Victor 2026-06-01; sobrepõe o "User padrão" da CONVENTION §4): a
@@ -360,3 +363,14 @@ ROLE_RULES = env.json(
         },
     ],
 )
+
+# finance (app finance) — motor de comissão/payout. Valores em REAIS (string→Decimal no finance.config,
+# nunca float; só o infinitepay usa centavos). DEV mini de propósito: teste mexe DINHEIRO REAL →
+# comissão 1 / bônus 5 / coord 1 / threshold 5. PROD pede ao Victor (ref 100/500/50). §8/§10.
+COMMISSION_DIRECT = env("COMMISSION_DIRECT", default="1")
+COMMISSION_BONUS_FLAT = env("COMMISSION_BONUS_FLAT", default="5")
+COMMISSION_COORDINATOR = env("COMMISSION_COORDINATOR", default="1")
+COMMISSION_BONUS_THRESHOLD = env.int("COMMISSION_BONUS_THRESHOLD", default=5)
+# fechamento: dia (0=seg..4=sex) e hora em America/Sao_Paulo. O Schedule é WEEKLY (sem croniter).
+COMMISSION_CLOSING_WEEKDAY = env.int("COMMISSION_CLOSING_WEEKDAY", default=4)
+COMMISSION_CLOSING_HOUR = env.int("COMMISSION_CLOSING_HOUR", default=18)

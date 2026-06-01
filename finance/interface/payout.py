@@ -1,0 +1,189 @@
+"""Worker do payout (rodado pelo Django-Q): processa as `PaymentRequest` e reconcilia com o asaas.
+
+Reusa `integrations.finance.asaas.payout` (PIX-out síncrono + idempotente, provado real no 1a-vi). O
+finance é só a **camada de domínio do lote semanal**: claim atômico + backoff; `awaiting_pix` (sem
+chave no profile) e `awaiting_balance` (asaas sem saldo) são NÃO-terminais — esperam na fila, não
+falham, não perdem dinheiro. O join asaas↔finance é `PaymentRequest.external_reference` ==
+`asaas Payment.payment_id` (passado como `payment_id=external_reference` no `create_payout`).
+"""
+
+from __future__ import annotations
+
+from datetime import timedelta
+
+import structlog
+from django.db.models import Q
+from django.utils import timezone
+
+from finance.models import Commission, PaymentRequest
+from integrations.finance.asaas import payout as asaas_payout
+from users.profiles.interface import get as get_profile
+
+logger = structlog.get_logger()
+
+_ACTIVE = (
+    PaymentRequest.Status.QUEUED,
+    PaymentRequest.Status.AWAITING_PIX,
+    PaymentRequest.Status.SUBMITTED,
+    PaymentRequest.Status.AWAITING_BALANCE,
+)
+_BACKOFF_BASE_S = 60  # backoff = base * (attempts+1), com teto
+_BACKOFF_MAX_S = 3600
+_CLAIM_LOCK_S = 120  # janela do claim (evita re-pick na mesma volta do cluster)
+
+
+def _backoff(attempts: int) -> timedelta:
+    return timedelta(seconds=min(_BACKOFF_BASE_S * (attempts + 1), _BACKOFF_MAX_S))
+
+
+def _cascade(pr: PaymentRequest, status: str) -> None:
+    """Propaga o desfecho terminal da PaymentRequest pras comissões que a compõem."""
+    Commission.objects.filter(payment_request=pr).update(status=status)
+
+
+def process_payment_requests() -> dict:
+    """Uma passada do worker: envia as filas prontas e reconcilia as enviadas. Devolve um resumo."""
+    now = timezone.now()
+    ready = PaymentRequest.objects.filter(status__in=_ACTIVE).filter(
+        Q(next_attempt_at__isnull=True) | Q(next_attempt_at__lte=now)
+    )
+    summary = {"submitted": 0, "paid": 0, "failed": 0, "awaiting": 0, "skipped": 0}
+    for pr in list(ready):
+        # claim atômico (compare-and-set no next_attempt_at): só uma volta pega cada linha.
+        claimed = PaymentRequest.objects.filter(
+            id=pr.id, next_attempt_at=pr.next_attempt_at
+        ).update(next_attempt_at=now + timedelta(seconds=_CLAIM_LOCK_S))
+        if not claimed:
+            summary["skipped"] += 1
+            continue
+        pr.refresh_from_db()
+        _process_one(pr, summary)
+    logger.info("finance.payout_pass", **summary)
+    return summary
+
+
+def _process_one(pr: PaymentRequest, summary: dict) -> None:
+    # awaiting_pix: re-resolve a chave do profile; ainda vazia => continua esperando (não falha).
+    if pr.status == PaymentRequest.Status.AWAITING_PIX:
+        profile = get_profile(pr.payee)
+        pix = (profile.pix_key if profile else None) or ""
+        if not pix:
+            pr.next_attempt_at = timezone.now() + _backoff(pr.attempts)
+            pr.save(update_fields=["next_attempt_at", "updated_at"])
+            summary["awaiting"] += 1
+            return
+        pr.pix_key = pix
+        pr.status = PaymentRequest.Status.QUEUED
+        pr.save(update_fields=["pix_key", "status", "updated_at"])
+
+    if pr.status == PaymentRequest.Status.QUEUED:
+        _submit(pr, summary)
+    elif pr.status in (
+        PaymentRequest.Status.SUBMITTED,
+        PaymentRequest.Status.AWAITING_BALANCE,
+    ):
+        _reconcile(pr, summary)
+
+
+def _submit(pr: PaymentRequest, summary: dict) -> None:
+    """Submete o PIX-out via asaas (idempotente por payment_id=external_reference)."""
+    pr.attempts += 1
+    try:
+        payment = asaas_payout.create_payout(
+            amount=pr.amount,  # já em reais (Decimal) — mesma unidade do asaas, sem conversão
+            pix_key=pr.pix_key,
+            payment_id=pr.external_reference,
+            description=f"comissao {pr.payee_role} semana {pr.week_of}",
+        )
+    except asaas_payout.PayoutError as exc:
+        reason = str(exc)
+        if reason.startswith("asaas_rejected"):
+            # recusa definitiva do asaas: falha terminal, cascateia.
+            pr.status = PaymentRequest.Status.FAILED
+            pr.last_error = reason
+            pr.save(update_fields=["status", "last_error", "attempts", "updated_at"])
+            _cascade(pr, Commission.Status.FAILED)
+            summary["failed"] += 1
+            logger.warning(
+                "finance.payout_rejected", ref=pr.external_reference, error=reason
+            )
+            return
+        # incerto (submit_uncertain/pix_key_required transitório): mantém na fila com backoff,
+        # a menos que estoure max_attempts.
+        if pr.attempts >= pr.max_attempts:
+            pr.status = PaymentRequest.Status.FAILED
+            pr.last_error = f"max_attempts: {reason}"
+            pr.save(update_fields=["status", "last_error", "attempts", "updated_at"])
+            _cascade(pr, Commission.Status.FAILED)
+            summary["failed"] += 1
+            return
+        pr.last_error = reason
+        pr.next_attempt_at = timezone.now() + _backoff(pr.attempts)
+        pr.save(
+            update_fields=["last_error", "next_attempt_at", "attempts", "updated_at"]
+        )
+        summary["awaiting"] += 1
+        return
+
+    pr.asaas_payment_id = payment.payment_id
+    pr.asaas_status = payment.status
+    pr.status = PaymentRequest.Status.SUBMITTED
+    pr.next_attempt_at = timezone.now() + _backoff(pr.attempts)
+    pr.save(
+        update_fields=[
+            "asaas_payment_id",
+            "asaas_status",
+            "status",
+            "attempts",
+            "next_attempt_at",
+            "updated_at",
+        ]
+    )
+    summary["submitted"] += 1
+    logger.info(
+        "finance.payout_submitted",
+        ref=pr.external_reference,
+        asaas_status=payment.status,
+        amount=str(pr.amount),
+    )
+
+
+def _reconcile(pr: PaymentRequest, summary: dict) -> None:
+    """Lê o Payment no asaas e move a PaymentRequest conforme o status real."""
+    try:
+        payment = asaas_payout.get_payout(pr.external_reference)
+    except asaas_payout.PayoutError:
+        # ainda não achou o Payment (corrida) — tenta de novo com backoff.
+        pr.next_attempt_at = timezone.now() + _backoff(pr.attempts)
+        pr.save(update_fields=["next_attempt_at", "updated_at"])
+        summary["awaiting"] += 1
+        return
+
+    pr.asaas_status = payment.status
+    status = (payment.status or "").upper()
+    if status == "PAID":
+        pr.status = PaymentRequest.Status.PAID
+        pr.save(update_fields=["status", "asaas_status", "updated_at"])
+        _cascade(pr, Commission.Status.PAID)
+        summary["paid"] += 1
+        logger.info(
+            "finance.payout_paid", ref=pr.external_reference, amount=str(pr.amount)
+        )
+    elif status in ("FAILED", "CANCELLED"):
+        pr.status = PaymentRequest.Status.FAILED
+        pr.last_error = f"asaas {status}"
+        pr.save(update_fields=["status", "asaas_status", "last_error", "updated_at"])
+        _cascade(pr, Commission.Status.FAILED)
+        summary["failed"] += 1
+    elif status == "AWAITING_BALANCE":
+        pr.status = PaymentRequest.Status.AWAITING_BALANCE
+        pr.next_attempt_at = timezone.now() + _backoff(pr.attempts)
+        pr.save(
+            update_fields=["status", "asaas_status", "next_attempt_at", "updated_at"]
+        )
+        summary["awaiting"] += 1
+    else:
+        # ainda em trânsito (SUBMITTED/SUBMITTING/...): reconcilia de novo depois.
+        pr.next_attempt_at = timezone.now() + _backoff(pr.attempts)
+        pr.save(update_fields=["asaas_status", "next_attempt_at", "updated_at"])
+        summary["awaiting"] += 1
