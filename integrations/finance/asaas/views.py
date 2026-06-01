@@ -6,7 +6,6 @@
   header `asaas-access-token` == ASAAS_WEBHOOK_SECRET no .env (sem HMAC — não existe no Asaas).
 """
 
-import asyncio
 import json
 import secrets
 
@@ -19,79 +18,56 @@ from core.validation import latest_checks
 
 from . import charge as charge_service
 from . import customers
+from . import onboarding
+from . import payout as payout_service
 from . import transfer_validation as tv
+from . import url_verify
 from . import webhooks
-from .client import AsaasError, get_client
 from .security import check_access_token
 
 
 @require_GET
 def status(request):
-    """Status/onboarding do asaas (JSON, só DMZ) — sequência pedida pelo Victor (specs/asaas2.md):
+    """Status read-only do asaas (JSON, só DMZ). Roda a bateria de prontidão SEM mutar o Asaas:
+    flags de env + testa a key via saldo (leitura) + diz se o nosso webhook já está cadastrado.
 
-    1. `api_key_in_env`: ASAAS_API_KEY no .env? (senão o boot já erra vermelho — asaas.E001)
-    2. `api_key_tested_ok`: a key é válida? puxa o saldo (LEITURA, zero movimento de valor)
-    3. key ok e ainda sem token de webhook no .env → **gera um e retorna** (DMZ): o Victor cola o
-       MESMO valor em ASAAS_WEBHOOK_SECRET no .env e no painel do Asaas (webhook + mecanismo de saque)
-    4. `external_url_in_env`: EXTERNAL_URL no .env? (registrar o webhook no painel é manual por ora)
+    O auto-cadastro do webhook é efeito colateral -> fica no POST /setup/ (não num GET). Sem o
+    ASAAS_WEBHOOK_SECRET no .env, sugere um valor (gera) pra você colar.
     """
-    out = {
-        "integration": "asaas",
-        "api_key_in_env": bool(settings.ASAAS_API_KEY),
-        "api_key_tested_ok": False,
-        "webhook_secret_in_env": bool(settings.ASAAS_WEBHOOK_SECRET),
-        "external_url_in_env": bool(settings.EXTERNAL_URL),
-        "ready": False,
-        "hints": [],
-        # flags dos testes/validações que já rodamos (pedido do Victor: rastrear no futuro)
-        "validation_checks": latest_checks("asaas"),
-    }
-
-    if not out["api_key_in_env"]:
-        out["hints"].append(
-            "Cole ASAAS_API_KEY no .env (sem ela o boot erra: asaas.E001)."
-        )
-        return JsonResponse(out)
-
-    # 2. valida a key puxando o saldo (leitura pura, nenhum valor movimentado)
-    try:
-        balance = asyncio.run(_get_balance())
-        out["api_key_tested_ok"] = True
-        out["balance"] = balance.get("balance")
-    except AsaasError as e:
-        out["error"] = {"status_code": e.status_code, "body": e.body}
-        out["hints"].append(
-            "A key não validou no Asaas (ver error). Confira ASAAS_API_KEY."
-        )
-        return JsonResponse(out)
-
-    # 3. token do webhook: o .env é a fonte de verdade (palavra do Victor).
-    #    Tem no .env → use ESTE MESMO no painel. Não tem → gera e retorna pra colar nos dois lugares.
-    if out["webhook_secret_in_env"]:
-        out["hints"].append(
-            "ASAAS_WEBHOOK_SECRET já está no .env — use ESTE MESMO valor como authToken no painel do "
-            "Asaas (webhook de eventos E mecanismo de saque)."
-        )
-    else:
+    out = onboarding.run_checks()
+    out["validation_checks"] = latest_checks("asaas")
+    if out["api_key_in_env"] and not out["webhook_secret_in_env"]:
         out["generated_webhook_secret"] = secrets.token_hex(32)
         out["hints"].append(
-            "Cole generated_webhook_secret em ASAAS_WEBHOOK_SECRET no .env E como authToken no painel "
-            "do Asaas (o MESMO token no webhook de eventos e no mecanismo de saque)."
+            "Cole generated_webhook_secret em ASAAS_WEBHOOK_SECRET no .env (o MESMO valor que o "
+            "auto-cadastro usa como authToken)."
         )
-
-    # 4. external_url (registrar o webhook no painel do Asaas é manual por ora — 'expandimos depois')
-    if not out["external_url_in_env"]:
-        out["hints"].append(
-            "Defina EXTERNAL_URL no .env e registre o webhook no painel do Asaas apontando p/ "
-            "EXTERNAL_URL + /integrations/asaas/webhook/."
-        )
-
-    out["ready"] = (
-        out["api_key_tested_ok"]
-        and out["webhook_secret_in_env"]
-        and out["external_url_in_env"]
-    )
     return JsonResponse(out)
+
+
+@csrf_exempt
+@require_POST
+def setup(request):
+    """Roda a bateria + ping REAL da EXTERNAL_URL + AUTO-CADASTRA o webhook no Asaas (DMZ).
+
+    É o "endpoint pra repetir" os testes. `?force=1` deleta+recria o webhook (resync do authToken).
+    Efeito colateral no Asaas -> por isso é POST, não GET.
+    """
+    force = request.GET.get("force") in ("1", "true", "yes")
+    out = onboarding.setup(force=force)
+    out["validation_checks"] = latest_checks("asaas")
+    return JsonResponse(out)
+
+
+@require_GET
+def url_verify_echo(request, nonce):
+    """Echo PÚBLICO do ping de verificação de URL: consome o nonce single-use e responde 200.
+
+    Auth = o próprio nonce secreto single-use + TTL (CONVENTION §5 público). Que o nonce seja
+    consumido prova que a chamada à EXTERNAL_URL chegou NESTE backend.
+    """
+    ok, reason = url_verify.consume_nonce(nonce)
+    return JsonResponse({"ok": ok, "reason": reason}, status=200 if ok else 404)
 
 
 @csrf_exempt
@@ -187,6 +163,38 @@ def charge_refund(request, payment_id):
     return JsonResponse(charge_service.to_dict(row))
 
 
+# ── payout PIX (saída, DMZ) — 1a-vi ───────────────────────────────────────────────────
+
+
+@csrf_exempt
+@require_POST
+def payout(request):
+    """Cria um payout PIX (DMZ). Body: {amount, pix_key (ou cpf), description?, payment_id?}.
+
+    Status segue o webhook (TRANSFER_DONE -> PAID). Idempotente por payment_id (não reenvia)."""
+    data = _parse_json(request)
+    try:
+        row = payout_service.create_payout(
+            amount=data.get("amount"),
+            pix_key=data.get("pix_key") or data.get("cpf"),
+            description=data.get("description"),
+            payment_id=data.get("payment_id"),
+        )
+    except payout_service.PayoutError as e:
+        return JsonResponse({"detail": str(e)}, status=400)
+    return JsonResponse(payout_service.to_dict(row))
+
+
+@require_GET
+def payout_detail(request, payment_id):
+    """Lê um payout pelo payment_id (DMZ)."""
+    try:
+        row = payout_service.get_payout(payment_id)
+    except payout_service.PayoutError as e:
+        return JsonResponse({"detail": str(e)}, status=404)
+    return JsonResponse(payout_service.to_dict(row))
+
+
 def _parse_json(request):
     """Corpo JSON do request como dict (ou {} se vazio/malformado)."""
     try:
@@ -202,8 +210,3 @@ def _source_ip(request):
     if xff:
         return xff.split(",")[0].strip()
     return request.META.get("REMOTE_ADDR")
-
-
-async def _get_balance():
-    async with get_client() as c:
-        return await c.get_balance()
