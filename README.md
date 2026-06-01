@@ -39,6 +39,10 @@ Config em `backend/.env` (não versionado). Dev usa SQLite.
 - **integrations/comunicacao/mail (§4 item 1):** cliente de email (SMTP STARTTLS:587) + validador
   (formato/MX) + templates HTML. Porte do legado, async; envia inclusive imagem por URL. O `notify`
   consome depois. → [[wiki/integrations/comunicacao/mail]]
+- **notify (§4 item 2):** despachante multi-canal in-process (WhatsApp + e-mail + voice-note/TTS).
+  Model de auditoria `Notification` + envio async (Django-Q); dispatcher puro (o caller passa o
+  contato), conteúdo pronto do caller, **envia mídia/imagem** (WhatsApp pela LAN, e-mail pela URL
+  pública), falha isolada por canal. **3 canais provados REAIS.** → [[wiki/notify/notify]]
 
 > Apps de negócio (`users`, `hub`, `notify`, `financeiro`, `integrations`...) entram um a um,
 > pelo `.claude/WORKFLOW.md`.

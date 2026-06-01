@@ -415,14 +415,34 @@ def generate_image(prompt: str, *, caller: str) -> str:
     return _save_media("image", ext, raw)
 
 
-def tts(text: str, *, caller: str, voice_id: str | None = None) -> str:
-    """ElevenLabs TTS: gera áudio a partir do texto. Salva em media/ia/audio/ e devolve o caminho."""
+def _voice_for_gender(gender: str | None) -> str | None:
+    """Resolve a voz por gênero (M/F → vozes nominais do .env); outro/None → None (voz default)."""
+    if not gender:
+        return None
+    g = gender.strip().upper()
+    if g == "M":
+        return settings.ELEVENLABS_VOICE_MALE
+    if g == "F":
+        return settings.ELEVENLABS_VOICE_FEMALE
+    return None
+
+
+def tts(
+    text: str, *, caller: str, voice_id: str | None = None, gender: str | None = None
+) -> str:
+    """ElevenLabs TTS: gera áudio a partir do texto. Salva em media/ia/audio/ e devolve o caminho.
+
+    A voz segue a ordem: `voice_id` explícito > voz por `gender` (M/F → ELEVENLABS_VOICE_MALE/
+    FEMALE do .env) > voz default do cliente (ELEVENLABS_VOICE_ID). Os defaults das vozes nominais
+    apontam pra voz padrão, então sem config M/F o TTS segue funcionando (não-quebra).
+    """
     from .elevenlabs import ElevenLabsClient
 
     client = ElevenLabsClient()
+    voice = voice_id or _voice_for_gender(gender)
 
     async def coro():
-        return await client.tts(text, voice_id=voice_id)
+        return await client.tts(text, voice_id=voice)
 
     audio = _media_call(
         operation=AiCall.Operation.TTS,

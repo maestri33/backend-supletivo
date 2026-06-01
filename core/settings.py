@@ -63,6 +63,8 @@ INSTALLED_APPS = [
     "integrations.ia.apps.IaConfig",
     "integrations.comunicacao.whatsapp.apps.WhatsappConfig",
     "integrations.comunicacao.mail.apps.MailConfig",
+    # apps de negócio do monólito
+    "notify.apps.NotifyConfig",
 ]
 
 MIDDLEWARE = [
@@ -146,6 +148,10 @@ STATIC_URL = "static/"
 # Em dev o Django serve (core/urls.py, DEBUG); em prod é a infra/proxy.
 MEDIA_URL = "/media/"
 MEDIA_ROOT = BASE_DIR / "media"
+# Base LAN do /media/ pra serviços da MESMA sub-rede buscarem o arquivo pelo IP interno (sem TLS/
+# DNS/egress) — padrão do legado (`_to_lan`): a Evolution busca o áudio do voice-note (TTS) por
+# aqui, não pela URL pública. Vazio => o notify cai no EXTERNAL_URL. Ex. dev: http://10.1.20.30
+MEDIA_LAN_BASE = env("MEDIA_LAN_BASE", default="")
 
 # Default primary key field type
 # https://docs.djangoproject.com/en/5.2/ref/settings/#default-auto-field
