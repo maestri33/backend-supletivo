@@ -30,15 +30,15 @@ Config em `backend/.env` (não versionado). Dev usa SQLite.
   Cliente async; o app `address` consome depois. → [[wiki/integrations/tools/cep]]
 - **integrations/tools/cpf (§4 item 1):** tool de CPF — lookup CPFHub.io (api-key `x-api-key`,
   server-side). Cliente async; o app `profiles` consome depois. → [[wiki/integrations/tools/cpf]]
-- **integrations/comunicacao/whatsapp (§4 item 1):** cliente WhatsApp (Evolution API 2.3.7) — porte
+- **integrations/communication/whatsapp (§4 item 1):** cliente WhatsApp (Evolution API 2.3.7) — porte
   completo, async, com resolução do 9º dígito BR. O app `notify` consome depois.
-  → [[wiki/integrations/comunicacao/whatsapp]]
+  → [[wiki/integrations/communication/whatsapp]]
 - **integrations/ia (§4 item 1):** engine LLM multi-provider OpenAI-compatible + fallback (DeepSeek,
   DashScope, Groq, OpenAI, OpenRouter, NVIDIA). Interface in-process (`service.py`) + auditoria
   `AiCall`; somar provider é só `.env`. O `training` consome depois (correção). → [[wiki/integrations/ia]]
-- **integrations/comunicacao/mail (§4 item 1):** cliente de email (SMTP STARTTLS:587) + validador
+- **integrations/communication/mail (§4 item 1):** cliente de email (SMTP STARTTLS:587) + validador
   (formato/MX) + templates HTML. Porte do legado, async; envia inclusive imagem por URL. O `notify`
-  consome depois. → [[wiki/integrations/comunicacao/mail]]
+  consome depois. → [[wiki/integrations/communication/mail]]
 - **notify (§4 item 2):** despachante multi-canal in-process (WhatsApp + e-mail + voice-note/TTS).
   Model de auditoria `Notification` + envio async (Django-Q); dispatcher puro (o caller passa o
   contato), conteúdo pronto do caller, **envia mídia/imagem** (WhatsApp pela LAN, e-mail pela URL

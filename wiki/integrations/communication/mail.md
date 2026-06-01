@@ -1,4 +1,4 @@
-# mail — integrations/comunicacao/mail (SMTP)
+# mail — integrations/communication/mail (SMTP)
 
 > **ESTADO:** cliente de email (SMTP STARTTLS:587) + validador + templates — porte do micro legado
 > (`~/coders/backend/notify`), **testado com chamadas REAIS** (login + envio pro Gmail do Victor +
@@ -63,7 +63,7 @@ python manage.py mail_send victormaestri@gmail.com --slug receipt --title "Seu Q
     --content "Escaneie:" --media-url https://dev.m33.live/media/qrcodes/pay_xxx.png --media-type image
 ```
 
-Evidência: `.claude/tests/1-comunicacao-mail.md` (login real + 2 envios reais aprovados pelo Victor).
+Evidência: `.claude/tests/1-communication-mail.md` (login real + 2 envios reais aprovados pelo Victor).
 
 ## Rabo pra trás (vira spec/feature nova com o `notify`)
 - App `notify` (§4-item-2): contatos, logs em DB, orquestração multicanal (WhatsApp+email), flags

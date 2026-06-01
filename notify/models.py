@@ -28,7 +28,7 @@ _STATUS_CHOICES = [
     (STATUS_SKIPPED, "ignorado"),
 ]
 
-# Tipos de mídia (espelha integrations.comunicacao: whatsapp.send_media / mail.media_html).
+# Tipos de mídia (espelha integrations.communication: whatsapp.send_media / mail.media_html).
 MEDIA_TYPES = ("image", "video", "audio", "document")
 
 

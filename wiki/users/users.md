@@ -50,7 +50,7 @@ Catálogo de transições no **`.env`** (`ROLE_RULES`, §9), validado no boot (`
 `ROLE_RULES` (JSON). Defaults = porte do legado.
 
 ## Reusa (sem duplicar)
-[[wiki/integrations/tools/cpf]] (CPFHub) · [[wiki/integrations/comunicacao/whatsapp]] (check + envio)
+[[wiki/integrations/tools/cpf]] (CPFHub) · [[wiki/integrations/communication/whatsapp]] (check + envio)
 · [[wiki/notify/notify]] (despacho do OTP).
 
 ## Rabo pra trás (specs novas)

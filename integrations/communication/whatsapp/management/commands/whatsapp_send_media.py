@@ -16,20 +16,38 @@ from pathlib import Path
 from asgiref.sync import async_to_sync
 from django.core.management.base import BaseCommand, CommandError
 
-from integrations.comunicacao.whatsapp.client import MEDIA_TYPES, WhatsAppError, get_client
+from integrations.communication.whatsapp.client import (
+    MEDIA_TYPES,
+    WhatsAppError,
+    get_client,
+)
 
 
 class Command(BaseCommand):
     help = "Envia mídia real via Evolution (image/video/audio/document; --voice = nota de voz PTT)."
 
     def add_arguments(self, parser):
-        parser.add_argument("number", help="Destinatário DDI+DDD+número (ex.: 5543996648750)")
-        parser.add_argument("media_type", choices=sorted(MEDIA_TYPES), help="image|video|audio|document")
-        parser.add_argument("source", help="URL pública (http...) ou caminho de arquivo local")
-        parser.add_argument("--caption", default=None, help="Legenda (image/video/document)")
-        parser.add_argument("--filename", default=None, help="Nome do arquivo (document)")
-        parser.add_argument("--voice", action="store_true", help="Áudio como nota de voz nativa (PTT)")
-        parser.add_argument("--instance", default=None, help="Instância da Evolution (default: do .env)")
+        parser.add_argument(
+            "number", help="Destinatário DDI+DDD+número (ex.: 5543996648750)"
+        )
+        parser.add_argument(
+            "media_type", choices=sorted(MEDIA_TYPES), help="image|video|audio|document"
+        )
+        parser.add_argument(
+            "source", help="URL pública (http...) ou caminho de arquivo local"
+        )
+        parser.add_argument(
+            "--caption", default=None, help="Legenda (image/video/document)"
+        )
+        parser.add_argument(
+            "--filename", default=None, help="Nome do arquivo (document)"
+        )
+        parser.add_argument(
+            "--voice", action="store_true", help="Áudio como nota de voz nativa (PTT)"
+        )
+        parser.add_argument(
+            "--instance", default=None, help="Instância da Evolution (default: do .env)"
+        )
 
     def _resolve_source(self, source: str) -> str:
         """URL passa direto; caminho local vira base64 PURO (sem prefixo data:)."""

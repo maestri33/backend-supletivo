@@ -11,7 +11,7 @@ import json
 from asgiref.sync import async_to_sync
 from django.core.management.base import BaseCommand
 
-from integrations.comunicacao.mail.validator import validate_email
+from integrations.communication.mail.validator import validate_email
 
 
 class Command(BaseCommand):

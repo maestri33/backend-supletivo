@@ -2,7 +2,7 @@
 
 > **ESTADO:** app de negócio do monólito; **despachante** in-process de notificações (WhatsApp +
 > e-mail + voice-note/TTS), **com envio de mídia/imagem**. **Testado REAL** (2026-06-01): os **3
-> canais** entregues no aparelho/e-mail do Victor numa passada. Consome `integrations/comunicacao/
+> canais** entregues no aparelho/e-mail do Victor numa passada. Consome `integrations/communication/
 > whatsapp` + `…/mail` + `integrations/ia` (TTS) — **não** é integração, **não** expõe endpoint/webhook.
 
 App Django que **orquestra** o envio (o legado `~/coders/backend/notify` era um serviço FastAPI maior;

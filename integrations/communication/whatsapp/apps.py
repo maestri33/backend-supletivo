@@ -2,7 +2,7 @@ from django.apps import AppConfig
 
 
 class WhatsappConfig(AppConfig):
-    name = "integrations.comunicacao.whatsapp"
+    name = "integrations.communication.whatsapp"
     label = "whatsapp"
 
     def ready(self):

@@ -17,9 +17,9 @@ import structlog
 from asgiref.sync import async_to_sync
 from django.conf import settings
 
-from integrations.comunicacao.mail import client as mail_client
-from integrations.comunicacao.mail import templates as mail_templates
-from integrations.comunicacao.whatsapp.client import get_client as get_whatsapp_client
+from integrations.communication.mail import client as mail_client
+from integrations.communication.mail import templates as mail_templates
+from integrations.communication.whatsapp.client import get_client as get_whatsapp_client
 from integrations.ia import service as ia_service
 from notify.models import STATUS_FAILED, STATUS_PENDING, STATUS_SENT, Notification
 

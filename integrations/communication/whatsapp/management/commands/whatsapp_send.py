@@ -9,16 +9,22 @@ import json
 from asgiref.sync import async_to_sync
 from django.core.management.base import BaseCommand
 
-from integrations.comunicacao.whatsapp.client import WhatsAppError, get_client
+from integrations.communication.whatsapp.client import WhatsAppError, get_client
 
 
 class Command(BaseCommand):
-    help = "Envia uma mensagem de texto real via Evolution (resolve o 9º dígito BR antes)."
+    help = (
+        "Envia uma mensagem de texto real via Evolution (resolve o 9º dígito BR antes)."
+    )
 
     def add_arguments(self, parser):
-        parser.add_argument("number", help="Destinatário DDI+DDD+número (ex.: 5543996648750)")
+        parser.add_argument(
+            "number", help="Destinatário DDI+DDD+número (ex.: 5543996648750)"
+        )
         parser.add_argument("text", help="Texto da mensagem")
-        parser.add_argument("--instance", default=None, help="Instância da Evolution (default: do .env)")
+        parser.add_argument(
+            "--instance", default=None, help="Instância da Evolution (default: do .env)"
+        )
 
     def handle(self, *args, **options):
         number, text, instance = options["number"], options["text"], options["instance"]

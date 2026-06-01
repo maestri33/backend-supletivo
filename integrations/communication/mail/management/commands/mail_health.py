@@ -7,7 +7,7 @@ Fecha parte do Portão 3 (§8 — integração validada com chamada real).
 from asgiref.sync import async_to_sync
 from django.core.management.base import BaseCommand
 
-from integrations.comunicacao.mail.client import MailError, get_client
+from integrations.communication.mail.client import MailError, get_client
 
 
 class Command(BaseCommand):

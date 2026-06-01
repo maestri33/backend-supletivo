@@ -1,4 +1,4 @@
-# whatsapp — integrations/comunicacao/whatsapp (Evolution API)
+# whatsapp — integrations/communication/whatsapp (Evolution API)
 
 > **ESTADO:** cliente WhatsApp (Evolution API 2.3.7) — **porte completo** do micro legado, feito e
 > **testado com chamadas REAIS** (health + envio pro número do Victor, 2026-06-01). §4-item-1,
@@ -48,12 +48,12 @@ python manage.py whatsapp_send_media 5543996648750 audio https://.../som.mp3 --v
 
 Todos os tipos (image/video/audio/document) e os 2 modos de áudio (transmitido via `send_media` e
 nota de voz nativa via `send_whatsapp_audio`) foram **testados em envio real** — ver
-`.claude/tests/1-comunicacao-whatsapp.md`.
+`.claude/tests/1-communication-whatsapp.md`.
 
-Evidência: `.claude/tests/1-comunicacao-whatsapp.md`.
+Evidência: `.claude/tests/1-communication-whatsapp.md`.
 
 ## Rabo pra trás
 
 - App `notify` (§4-item-2): templates, contatos, logs, orquestração async e **webhook inbound** de
   WhatsApp (mensagens/chamadas recebidas).
-- Cliente de **mail** (`integrations/comunicacao/mail`) — o outro do subgrupo comunicação.
+- Cliente de **mail** (`integrations/communication/mail`) — o outro do subgrupo comunicação.

@@ -2,7 +2,7 @@ from django.apps import AppConfig
 
 
 class MailConfig(AppConfig):
-    name = "integrations.comunicacao.mail"
+    name = "integrations.communication.mail"
     label = "mail"
 
     def ready(self):

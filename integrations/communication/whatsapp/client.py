@@ -131,7 +131,9 @@ class WhatsAppClient:
         numbers: formato DDI+DDD+número (ex.: "5543996648750"). Resposta: lista de
         {jid, exists, number, name}.
         """
-        result = await self._post(self._chat_path("whatsappNumbers"), {"numbers": numbers})
+        result = await self._post(
+            self._chat_path("whatsappNumbers"), {"numbers": numbers}
+        )
         logger.info("whatsapp.check", count=len(numbers))
         return result
 
@@ -182,22 +184,38 @@ class WhatsAppClient:
         _br_jid_cache[phone] = (chosen, time.monotonic())
 
         if chosen is None:
-            logger.warning("whatsapp.resolve_br.none_exists", phone=phone, tried=variants)
+            logger.warning(
+                "whatsapp.resolve_br.none_exists", phone=phone, tried=variants
+            )
             return phone  # fallback
         if chosen != phone:
-            logger.info("whatsapp.resolve_br.normalized", phone_original=phone, phone_resolved=chosen)
+            logger.info(
+                "whatsapp.resolve_br.normalized",
+                phone_original=phone,
+                phone_resolved=chosen,
+            )
         return chosen
 
     async def fetch_profile(self, number: str) -> dict[str, Any]:
         """Perfil de um usuário (foto, nome, status). POST /chat/fetchProfile/{instance}."""
         result = await self._post(self._chat_path("fetchProfile"), {"number": number})
-        logger.info("whatsapp.profile_fetched", number=number, has_picture=bool(result.get("picture")))
+        logger.info(
+            "whatsapp.profile_fetched",
+            number=number,
+            has_picture=bool(result.get("picture")),
+        )
         return result
 
     async def fetch_business_profile(self, number: str) -> dict[str, Any]:
         """Perfil comercial (WhatsApp Business). POST /chat/fetchBusinessProfile/{instance}."""
-        result = await self._post(self._chat_path("fetchBusinessProfile"), {"number": number})
-        logger.info("whatsapp.business_profile_fetched", number=number, is_business=result.get("isBusiness", False))
+        result = await self._post(
+            self._chat_path("fetchBusinessProfile"), {"number": number}
+        )
+        logger.info(
+            "whatsapp.business_profile_fetched",
+            number=number,
+            is_business=result.get("isBusiness", False),
+        )
         return result
 
     # ---------- call ----------
@@ -270,9 +288,17 @@ class WhatsAppClient:
         (sem prefixo). filename obrigatório p/ document. caption: legenda (image/video/document).
         """
         if media_type not in MEDIA_TYPES:
-            raise WhatsAppError(0, media_type, f"media_type inválido: {media_type}. Use: {', '.join(sorted(MEDIA_TYPES))}")
+            raise WhatsAppError(
+                0,
+                media_type,
+                f"media_type inválido: {media_type}. Use: {', '.join(sorted(MEDIA_TYPES))}",
+            )
 
-        payload: dict[str, Any] = {"number": number, "mediatype": media_type, "media": media_url}
+        payload: dict[str, Any] = {
+            "number": number,
+            "mediatype": media_type,
+            "media": media_url,
+        }
         if caption:
             payload["caption"] = caption
         if filename:
@@ -291,7 +317,9 @@ class WhatsAppClient:
             payload["formatJid"] = format_jid
 
         result = await self._post(self._msg_path("sendMedia"), payload)
-        logger.info("whatsapp.media_sent", number=number, type=media_type, url=media_url[:80])
+        logger.info(
+            "whatsapp.media_sent", number=number, type=media_type, url=media_url[:80]
+        )
         return result
 
     # ---------- send whatsapp audio (nota de voz nativa / PTT) ----------
@@ -315,7 +343,9 @@ class WhatsAppClient:
         if quoted := self._build_quoted(quoted_msg_id, quoted_participant):
             payload["quoted"] = quoted
 
-        result = await self._post(self._msg_path("sendWhatsAppAudio"), payload, timeout=60.0)
+        result = await self._post(
+            self._msg_path("sendWhatsAppAudio"), payload, timeout=60.0
+        )
         logger.info("whatsapp.audio_sent", number=number, url=audio_url[:80])
         return result
 
@@ -354,7 +384,11 @@ class WhatsAppClient:
         quoted_participant: str | None = None,
     ) -> dict[str, Any]:
         """Localização (pin). POST /message/sendLocation/{instance}."""
-        payload: dict[str, Any] = {"number": number, "latitude": latitude, "longitude": longitude}
+        payload: dict[str, Any] = {
+            "number": number,
+            "latitude": latitude,
+            "longitude": longitude,
+        }
         if name:
             payload["name"] = name
         if address:
@@ -365,7 +399,9 @@ class WhatsAppClient:
             payload["quoted"] = quoted
 
         result = await self._post(self._msg_path("sendLocation"), payload)
-        logger.info("whatsapp.location_sent", number=number, lat=latitude, lon=longitude)
+        logger.info(
+            "whatsapp.location_sent", number=number, lat=latitude, lon=longitude
+        )
         return result
 
     # ---------- send contact (vCard) ----------
@@ -451,7 +487,12 @@ class WhatsAppClient:
             payload["quoted"] = quoted
 
         result = await self._post(self._msg_path("sendButtons"), payload)
-        logger.info("whatsapp.buttons_sent", number=number, title=title, button_count=len(buttons))
+        logger.info(
+            "whatsapp.buttons_sent",
+            number=number,
+            title=title,
+            button_count=len(buttons),
+        )
         return result
 
     # ---------- send reaction ----------
@@ -493,7 +534,11 @@ class WhatsAppClient:
         status_type ∈ {text, image}. content: texto ou URL. background_color/font p/ texto;
         caption p/ imagem. status_jid_list/all_contacts: audiência.
         """
-        payload: dict[str, Any] = {"number": number, "type": status_type, "content": content}
+        payload: dict[str, Any] = {
+            "number": number,
+            "type": status_type,
+            "content": content,
+        }
         if status_jid_list is not None:
             payload["statusJidList"] = status_jid_list
         if all_contacts:

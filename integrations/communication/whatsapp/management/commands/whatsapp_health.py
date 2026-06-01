@@ -9,7 +9,7 @@ import json
 from asgiref.sync import async_to_sync
 from django.core.management.base import BaseCommand
 
-from integrations.comunicacao.whatsapp.client import WhatsAppError, get_client
+from integrations.communication.whatsapp.client import WhatsAppError, get_client
 
 
 class Command(BaseCommand):
@@ -26,7 +26,9 @@ class Command(BaseCommand):
             self.stderr.write(self.style.ERROR(f"Evolution respondeu erro: {exc}"))
             return
         except Exception as exc:  # rede/DNS/timeout
-            self.stderr.write(self.style.ERROR(f"Falha ao falar com a Evolution: {exc!r}"))
+            self.stderr.write(
+                self.style.ERROR(f"Falha ao falar com a Evolution: {exc!r}")
+            )
             return
 
         self.stdout.write(self.style.SUCCESS("Evolution respondeu (auth ok):"))

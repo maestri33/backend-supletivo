@@ -61,8 +61,8 @@ INSTALLED_APPS = [
     "integrations.tools.cep.apps.CepConfig",
     "integrations.tools.cpf.apps.CpfConfig",
     "integrations.ia.apps.IaConfig",
-    "integrations.comunicacao.whatsapp.apps.WhatsappConfig",
-    "integrations.comunicacao.mail.apps.MailConfig",
+    "integrations.communication.whatsapp.apps.WhatsappConfig",
+    "integrations.communication.mail.apps.MailConfig",
     # apps de negócio do monólito
     "notify.apps.NotifyConfig",
     # users = o "quem" (identidade + papéis + dados pessoais). auth/jwt/otp/profiles/roles vivem
@@ -275,14 +275,14 @@ GOOGLE_VISION_SERVICE_ACCOUNT_JSON = env(
 )
 
 
-# WhatsApp (integrations.comunicacao.whatsapp) — cliente da Evolution API. Config via .env
+# WhatsApp (integrations.communication.whatsapp) — cliente da Evolution API. Config via .env
 # (CONVENTION §8/§10). A api-key global é alfanumérica (sem "$"), então env() normal serve. Sem
 # base_url/api-key os checks whatsapp.E001/E002 travam o boot.
 WHATSAPP_API_BASE_URL = env("WHATSAPP_API_BASE_URL", default="")
 WHATSAPP_GLOBAL_API_KEY = env("WHATSAPP_GLOBAL_API_KEY", default="")
 WHATSAPP_INSTANCE_NAME = env("WHATSAPP_INSTANCE_NAME", default="default")
 
-# Mail (integrations.comunicacao.mail) — cliente SMTP STARTTLS:587 autenticado. Config via .env
+# Mail (integrations.communication.mail) — cliente SMTP STARTTLS:587 autenticado. Config via .env
 # (CONVENTION §8/§10). A senha do noreply tem "!"/"@" (sem "$"), mas lemos via os.environ literal
 # por segurança/simetria com a key do Asaas (read_env() já populou os.environ acima). Sem
 # host/user/senha os checks mail.E001/E002/E003 travam o boot.
