@@ -60,7 +60,7 @@ Doc oficial (Context7): `/websites/api_infinitepay_io_invoices_public_checkout`.
 
 ## Teste (Portão 3 — E2E real)
 
-De fora via exit-node ([[../../../../.claude/skills/testar-url-via-exit-node/SKILL|skill]]), em
+De fora via exit-node (skill `.claude/skills/testar-url-via-exit-node`), em
 `dev.m33.live`: `GET /status/` 200, checkout real criado (`b5e61eaa-…`, link `checkout.infinitepay.io/v7m`),
 webhook sintético recebido (`src_ip` do exit-node). **PAID real:** Victor pagou R$1 (cartão, 105c) →
 webhook do servidor real da InfinitePay (`34.150.174.252`) → `payment_check` → **PAID**.
