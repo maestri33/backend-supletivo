@@ -60,7 +60,9 @@ INSTALLED_APPS = [
     "integrations.finance.infinitepay.apps.InfinitepayConfig",
     "integrations.tools.cep.apps.CepConfig",
     "integrations.tools.cpf.apps.CpfConfig",
+    "integrations.ia.apps.IaConfig",
     "integrations.comunicacao.whatsapp.apps.WhatsappConfig",
+    "integrations.comunicacao.mail.apps.MailConfig",
 ]
 
 MIDDLEWARE = [
@@ -165,6 +167,10 @@ ASAAS_WEBHOOK_SECRET = env("ASAAS_WEBHOOK_SECRET", default="")
 EXTERNAL_URL = env("EXTERNAL_URL", default="")
 # Prazo default (dias) da cobrança PIX quando o caller não passa due_date.
 ASAAS_CHARGE_DUE_DAYS = env.int("ASAAS_CHARGE_DUE_DAYS", default=3)
+# Onboarding/auto-cadastro do webhook (1a-v): nome do webhook que gerenciamos no Asaas (casamos por
+# URL; o nome é só fallback) e TTL (segundos) do nonce de verificação da URL pública.
+ASAAS_WEBHOOK_NAME = env("ASAAS_WEBHOOK_NAME", default="dmz-asaas-managed")
+URL_VERIFY_NONCE_TTL = env.int("URL_VERIFY_NONCE_TTL", default=600)
 
 
 # InfinitePay (integrations.finance.infinitepay) — config via .env (CONVENTION §8/§10).
@@ -193,12 +199,77 @@ CPFHUB_BASE_URL = env("CPFHUB_BASE_URL", default="https://api.cpfhub.io")
 CPFHUB_TIMEOUT = env.float("CPFHUB_TIMEOUT", default=5.0)
 
 
+# IA (integrations.ia) — engine LLM multi-provider OpenAI-compatible + fallback (CONVENTION §8/§10).
+# Todos os providers (deepseek, dashscope, groq, openai, openrouter, nvidia, …) falam o mesmo
+# protocolo: cada um precisa só de IA_<NAME>_BASE_URL + IA_<NAME>_API_KEY. Somar um novo é só .env.
+# As keys têm chars variados (pontos, hifens) → lemos via os.environ (read_env() já populou acima),
+# como no Asaas. IA_FALLBACK_CHAIN="provider:model,..." define a ORDEM de tentativa (1º = default);
+# falha rede/timeout/429/5xx cai pro próximo. Config incompleta => check ia.E001/E002/E003 trava o boot.
+IA_PROVIDERS = {}
+for _ia_name in env.list("IA_PROVIDERS", default=[]):
+    _ia_name = _ia_name.strip().lower()
+    _ia_base = os.environ.get(f"IA_{_ia_name.upper()}_BASE_URL", "")
+    _ia_key = os.environ.get(f"IA_{_ia_name.upper()}_API_KEY", "")
+    if _ia_base and _ia_key:
+        IA_PROVIDERS[_ia_name] = {"base_url": _ia_base, "api_key": _ia_key}
+
+IA_FALLBACK_CHAIN = []
+for _ia_item in env.list("IA_FALLBACK_CHAIN", default=[]):
+    if ":" in _ia_item:
+        _ia_p, _, _ia_m = _ia_item.partition(":")
+        IA_FALLBACK_CHAIN.append((_ia_p.strip(), _ia_m.strip()))
+
+IA_DEFAULT_TEMPERATURE = env.float("IA_DEFAULT_TEMPERATURE", default=0.3)
+IA_MAX_TOKENS = env.int("IA_MAX_TOKENS", default=0)
+IA_TIMEOUT = env.float("IA_TIMEOUT", default=60.0)
+
+# IA — modalidades de mídia (integrations.ia), via REST httpx. São OPCIONAIS: sem a key o check só
+# AVISA (ia.W001/W002/W003), não trava como a cadeia LLM (que é o núcleo). Keys AIza/sk_ (sem "$").
+# Gemini = visão (descrever imagem) + geração de imagem; ElevenLabs = TTS; Google Vision = OCR.
+GEMINI_API_KEY = env("GEMINI_API_KEY", default="")
+GEMINI_BASE_URL = env("GEMINI_BASE_URL", default="https://generativelanguage.googleapis.com/v1beta")
+GEMINI_VISION_MODEL = env("GEMINI_VISION_MODEL", default="gemini-3-flash-preview")
+GEMINI_IMAGE_MODEL = env("GEMINI_IMAGE_MODEL", default="gemini-3.1-flash-image-preview")
+
+ELEVENLABS_API_KEY = env("ELEVENLABS_API_KEY", default="")
+ELEVENLABS_BASE_URL = env("ELEVENLABS_BASE_URL", default="https://api.elevenlabs.io")
+ELEVENLABS_VOICE_ID = env("ELEVENLABS_VOICE_ID", default="JBFqnCBsd6RMkjVDRZzb")
+ELEVENLABS_MODEL_ID = env("ELEVENLABS_MODEL_ID", default="eleven_v3")
+ELEVENLABS_OUTPUT_FORMAT = env("ELEVENLABS_OUTPUT_FORMAT", default="mp3_44100_128")
+# voice_settings (0.0–1.0; speed 0.25–4.0) — defaults, sobrescrevíveis por request.
+ELEVENLABS_STABILITY = env.float("ELEVENLABS_STABILITY", default=0.5)
+ELEVENLABS_SIMILARITY_BOOST = env.float("ELEVENLABS_SIMILARITY_BOOST", default=0.75)
+ELEVENLABS_SPEED = env.float("ELEVENLABS_SPEED", default=1.0)
+ELEVENLABS_STYLE = env.float("ELEVENLABS_STYLE", default=0.0)
+ELEVENLABS_SPEAKER_BOOST = env.bool("ELEVENLABS_SPEAKER_BOOST", default=True)
+# vozes nominais que o notify usa (locução fem/masc pt-br).
+ELEVENLABS_VOICE_FEMALE = env("ELEVENLABS_VOICE_FEMALE", default="JBFqnCBsd6RMkjVDRZzb")
+ELEVENLABS_VOICE_MALE = env("ELEVENLABS_VOICE_MALE", default="JBFqnCBsd6RMkjVDRZzb")
+
+GOOGLE_VISION_API_KEY = env("GOOGLE_VISION_API_KEY", default="")
+GOOGLE_VISION_BASE_URL = env("GOOGLE_VISION_BASE_URL", default="https://vision.googleapis.com")
+# Alternativa de auth (prod, mais robusto): path pro JSON do service-account. Vazio => usa a api-key.
+GOOGLE_VISION_SERVICE_ACCOUNT_JSON = env("GOOGLE_VISION_SERVICE_ACCOUNT_JSON", default="")
+
+
 # WhatsApp (integrations.comunicacao.whatsapp) — cliente da Evolution API. Config via .env
 # (CONVENTION §8/§10). A api-key global é alfanumérica (sem "$"), então env() normal serve. Sem
 # base_url/api-key os checks whatsapp.E001/E002 travam o boot.
 WHATSAPP_API_BASE_URL = env("WHATSAPP_API_BASE_URL", default="")
 WHATSAPP_GLOBAL_API_KEY = env("WHATSAPP_GLOBAL_API_KEY", default="")
 WHATSAPP_INSTANCE_NAME = env("WHATSAPP_INSTANCE_NAME", default="default")
+
+# Mail (integrations.comunicacao.mail) — cliente SMTP STARTTLS:587 autenticado. Config via .env
+# (CONVENTION §8/§10). A senha do noreply tem "!"/"@" (sem "$"), mas lemos via os.environ literal
+# por segurança/simetria com a key do Asaas (read_env() já populou os.environ acima). Sem
+# host/user/senha os checks mail.E001/E002/E003 travam o boot.
+MAIL_SMTP_HOST = env("MAIL_SMTP_HOST", default="")
+MAIL_SMTP_PORT = env.int("MAIL_SMTP_PORT", default=587)
+MAIL_SMTP_USER = env("MAIL_SMTP_USER", default="")
+MAIL_SMTP_PASSWORD = os.environ.get("MAIL_SMTP_PASSWORD", "")
+MAIL_FROM_EMAIL = env("MAIL_FROM_EMAIL", default="") or MAIL_SMTP_USER
+MAIL_FROM_NAME = env("MAIL_FROM_NAME", default="Supletivo Brasil")
+MAIL_TIMEOUT = env.int("MAIL_TIMEOUT", default=30)
 
 
 # Django-Q2 — fila async com broker no próprio banco (sem Redis). `qcluster` roda o worker.
