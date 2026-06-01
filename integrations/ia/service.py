@@ -18,6 +18,7 @@ from dataclasses import dataclass
 
 import structlog
 from asgiref.sync import async_to_sync
+from django.conf import settings
 
 from . import providers
 from .client import ChatResult, LLMError
@@ -319,3 +320,133 @@ def grade(
     if not justification:
         raise LLMError("IA devolveu nota sem justificativa", retryable=False)
     return Grading(grade=grade_value, justification=justification)
+
+
+# ---------------------------------------------------------------------------
+# Mídia (single-provider, SEM cadeia de fallback): Gemini visão/imagem, ElevenLabs TTS, Vision OCR.
+# Cada uma grava 1 AiCall (tokens=0 — não se aplica). Imagem/áudio gerados vão pro media/ia/.
+# ---------------------------------------------------------------------------
+
+
+def _save_media(subdir: str, ext: str, data: bytes) -> str:
+    """Salva bytes em MEDIA_ROOT/ia/<subdir>/<uuid>.<ext>. Devolve o caminho relativo ao MEDIA_ROOT."""
+    import os
+    import uuid
+
+    folder = os.path.join(settings.MEDIA_ROOT, "ia", subdir)
+    os.makedirs(folder, exist_ok=True)
+    name = f"{uuid.uuid4().hex}.{ext}"
+    with open(os.path.join(folder, name), "wb") as fh:
+        fh.write(data)
+    return f"ia/{subdir}/{name}"
+
+
+def _media_call(*, operation: str, provider: str, model: str, caller: str, coro):
+    """Roda uma chamada de mídia (corrotina sem args), grava AiCall (success/error), devolve o resultado."""
+    started = time.monotonic()
+    try:
+        result = async_to_sync(coro)()
+    except Exception as exc:
+        _record(
+            operation=operation,
+            provider=provider,
+            model=model,
+            caller=caller,
+            result=None,
+            error=exc,
+            started_at=started,
+        )
+        raise
+    _record(
+        operation=operation,
+        provider=provider,
+        model=model,
+        caller=caller,
+        result=None,
+        error=None,
+        started_at=started,
+    )
+    return result
+
+
+def describe_image(
+    image_bytes: bytes,
+    *,
+    caller: str,
+    mime_type: str = "image/jpeg",
+    prompt: str | None = None,
+) -> str:
+    """Gemini visão: descreve/analisa uma imagem (selfie/documento/recibo). Devolve o texto."""
+    from .gemini import GeminiClient
+
+    client = GeminiClient()
+
+    async def coro():
+        return await client.describe(image_bytes, mime_type=mime_type, prompt=prompt)
+
+    return _media_call(
+        operation=AiCall.Operation.VISION,
+        provider="gemini",
+        model=settings.GEMINI_VISION_MODEL,
+        caller=caller,
+        coro=coro,
+    )
+
+
+def generate_image(prompt: str, *, caller: str) -> str:
+    """Gemini imagem: gera uma imagem a partir de um prompt. Salva em media/ia/image/ e devolve o caminho."""
+    from .gemini import GeminiClient
+
+    client = GeminiClient()
+
+    async def coro():
+        return await client.generate_image(prompt)
+
+    raw, mime = _media_call(
+        operation=AiCall.Operation.IMAGE,
+        provider="gemini",
+        model=settings.GEMINI_IMAGE_MODEL,
+        caller=caller,
+        coro=coro,
+    )
+    ext = {"image/png": "png", "image/jpeg": "jpg", "image/webp": "webp"}.get(
+        mime, "png"
+    )
+    return _save_media("image", ext, raw)
+
+
+def tts(text: str, *, caller: str, voice_id: str | None = None) -> str:
+    """ElevenLabs TTS: gera áudio a partir do texto. Salva em media/ia/audio/ e devolve o caminho."""
+    from .elevenlabs import ElevenLabsClient
+
+    client = ElevenLabsClient()
+
+    async def coro():
+        return await client.tts(text, voice_id=voice_id)
+
+    audio = _media_call(
+        operation=AiCall.Operation.TTS,
+        provider="elevenlabs",
+        model=settings.ELEVENLABS_MODEL_ID,
+        caller=caller,
+        coro=coro,
+    )
+    return _save_media("audio", "mp3", audio)
+
+
+def ocr(image_bytes: bytes, *, caller: str, document: bool = False) -> str:
+    """Google Vision OCR: extrai o texto de uma imagem. Devolve o texto."""
+    from .vision_ocr import VisionOCRClient
+
+    client = VisionOCRClient()
+
+    async def coro():
+        return await client.detect_text(image_bytes, document=document)
+
+    return _media_call(
+        operation=AiCall.Operation.OCR,
+        provider="google_vision",
+        model="vision-v1",
+        caller=caller,
+        coro=coro,
+    )

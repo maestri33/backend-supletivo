@@ -7,11 +7,14 @@ silenciosa sem credencial real.
 - `ia.E001` (Error): nenhum provider habilitado com base_url+api_key → o engine não fala com IA.
 - `ia.E002` (Error): IA_FALLBACK_CHAIN vazia → não há o que chamar.
 - `ia.E003` (Error): a cadeia referencia provider sem credencial no .env.
-Qualquer um TRAVA o manage.py (padrão asaas: integração não sobe sem credencial real).
+Os E* TRAVAM o manage.py (padrão asaas: o núcleo LLM não sobe sem credencial real).
+
+As modalidades de MÍDIA são opcionais (só AVISAM, não travam): ia.W001 Gemini (visão/imagem),
+ia.W002 ElevenLabs (TTS), ia.W003 Google Vision (OCR).
 """
 
 from django.conf import settings
-from django.core.checks import Error
+from django.core.checks import Error, Warning
 
 
 def check_ia_config(app_configs, **kwargs):
@@ -45,4 +48,19 @@ def check_ia_config(app_configs, **kwargs):
                 id="ia.E003",
             )
         )
+
+    # Modalidades de mídia — opcionais: avisam (não travam) se a key faltar.
+    for key_attr, wid, nome in [
+        ("GEMINI_API_KEY", "ia.W001", "Gemini (visão/imagem)"),
+        ("ELEVENLABS_API_KEY", "ia.W002", "ElevenLabs (TTS)"),
+        ("GOOGLE_VISION_API_KEY", "ia.W003", "Google Vision (OCR)"),
+    ]:
+        if not getattr(settings, key_attr, ""):
+            errors.append(
+                Warning(
+                    f"{key_attr} ausente — a modalidade {nome} fica indisponível (as demais funcionam).",
+                    hint=f"Opcional: cole {key_attr}=... no .env quando for usar.",
+                    id=wid,
+                )
+            )
     return errors

@@ -27,6 +27,11 @@ class AiCall(models.Model):
         SUMMARIZE = "summarize", "summarize"
         EXTRACT = "extract", "extract"
         GRADE = "grade", "grade"
+        # mídia (single-provider, sem cadeia de fallback): Gemini visão/imagem, ElevenLabs TTS, Vision OCR
+        VISION = "vision", "vision"
+        IMAGE = "image", "image"
+        TTS = "tts", "tts"
+        OCR = "ocr", "ocr"
 
     class Status(models.TextChoices):
         SUCCESS = "success", "success"

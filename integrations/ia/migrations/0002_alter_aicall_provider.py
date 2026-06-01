@@ -4,15 +4,14 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
-        ('ia', '0001_initial'),
+        ("ia", "0001_initial"),
     ]
 
     operations = [
         migrations.AlterField(
-            model_name='aicall',
-            name='provider',
+            model_name="aicall",
+            name="provider",
             field=models.CharField(db_index=True, max_length=20),
         ),
     ]

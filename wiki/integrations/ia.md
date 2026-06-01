@@ -55,7 +55,20 @@ nota = service.grade(question=..., expected_answer=..., student_answer=..., call
 As 6 keys validadas via `/models`; geração real em DeepSeek e DashScope (JSON mode); fallback real
 (provider morto → próximo) com as 2 linhas `AiCall` gravadas. Prints em `.claude/tests/1-ia-i-...`.
 
-## Próximas etapas (mesmo padrão)
+## Mídia (single-provider, SEM cadeia de fallback)
 
-ii Gemini (visão/imagem) · iii ElevenLabs (TTS) · iv Google Vision (OCR) — modalidades diferentes,
-mesma casa `integrations/ia/`.
+Além do chat LLM, o engine tem 4 modalidades de mídia (clients httpx REST próprios, 1 provider cada).
+Cada uma grava `AiCall` (provider/operation, tokens=0). Imagem/áudio gerados vão pro `media/ia/`.
+
+| função (`service.py`) | provider | client |
+|---|---|---|
+| `describe_image(bytes, caller=...)` → texto | Gemini (visão) | `gemini.py` |
+| `generate_image(prompt, caller=...)` → caminho media | Gemini (imagem) | `gemini.py` |
+| `tts(text, caller=...)` → caminho media (mp3) | ElevenLabs | `elevenlabs.py` |
+| `ocr(bytes, caller=..., document=False)` → texto | Google Vision | `vision_ocr.py` |
+
+Config no `.env`: `GEMINI_API_KEY`, `ELEVENLABS_API_KEY`, `GOOGLE_VISION_API_KEY` (+ defaults de
+modelo/voz no settings). São **opcionais**: sem a key, o check só **avisa** (`ia.W001/W002/W003`),
+não trava (≠ a cadeia LLM, que é o núcleo e trava). **Validado real (§8):** OCR + visão leram texto de
+uma imagem; TTS gerou áudio; Gemini gerou imagem. Consumidores: `student`/`documents` (selfie/RG/recibo,
+visão), `notify` (áudio), `training` (correção, LLM).
