@@ -49,8 +49,8 @@ def handle_event(order_nsu, payload, *, source_ip=None, user_agent=None):
         # rastreável pra reprocesso futuro (CONVENTION §7.4).
         log_unrouted_event(
             "infinitepay",
-            reason,
-            "no_consumer_yet",
+            "checkout_paid",
+            f"applied_no_consumer: {reason}",
             payload if isinstance(payload, dict) else {},
         )
     else:

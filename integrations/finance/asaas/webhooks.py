@@ -68,7 +68,14 @@ def handle_event(payload, source_ip=None, user_agent=None):
         row.forwarded_ok = True
         row.forwarded_at = timezone.now()
         row.save(update_fields=["forwarded_ok", "forwarded_at"])
-        # TODO(fees/commissions): quando os apps destino existirem, disparar os hooks/ deles aqui (§7.3).
+        # Consumidor real (fees/commissions) ainda não existe -> POR ENQUANTO, em vez de disparar os
+        # hooks/ deles (§7.3), registra o evento APLICADO no fallback rastreável pra reprocesso futuro (§7.4).
+        log_unrouted_event(
+            "asaas",
+            event or "",
+            f"applied_no_consumer: {reason}",
+            payload if isinstance(payload, dict) else {},
+        )
     else:
         # nada nosso consumiu o evento -> fallback rastreável (não descarta em silêncio)
         log_unrouted_event(
