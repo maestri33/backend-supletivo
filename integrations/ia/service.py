@@ -416,7 +416,13 @@ def generate_image(prompt: str, *, caller: str) -> str:
 
 
 def _voice_for_gender(gender: str | None) -> str | None:
-    """Resolve a voz por gênero (M/F → vozes nominais do .env); outro/None → None (voz default)."""
+    """Voz do TTS pelo gênero do DESTINATÁRIO; outro/None → None (voz default do cliente).
+
+    Regra de negócio (Victor): a voz é CRUZADA — destinatário homem recebe voz de mulher e
+    vice-versa. Por isso `ELEVENLABS_VOICE_MALE` guarda a voz que o HOMEM recebe (na prática um
+    voice-id feminino) e `ELEVENLABS_VOICE_FEMALE` a que a MULHER recebe (voice-id masculino). O
+    nome fica "invertido" de propósito — NÃO 'corrigir' a inversão do `.env`.
+    """
     if not gender:
         return None
     g = gender.strip().upper()

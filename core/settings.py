@@ -233,7 +233,9 @@ IA_TIMEOUT = env.float("IA_TIMEOUT", default=60.0)
 # AVISA (ia.W001/W002/W003), não trava como a cadeia LLM (que é o núcleo). Keys AIza/sk_ (sem "$").
 # Gemini = visão (descrever imagem) + geração de imagem; ElevenLabs = TTS; Google Vision = OCR.
 GEMINI_API_KEY = env("GEMINI_API_KEY", default="")
-GEMINI_BASE_URL = env("GEMINI_BASE_URL", default="https://generativelanguage.googleapis.com/v1beta")
+GEMINI_BASE_URL = env(
+    "GEMINI_BASE_URL", default="https://generativelanguage.googleapis.com/v1beta"
+)
 GEMINI_VISION_MODEL = env("GEMINI_VISION_MODEL", default="gemini-3-flash-preview")
 GEMINI_IMAGE_MODEL = env("GEMINI_IMAGE_MODEL", default="gemini-3.1-flash-image-preview")
 
@@ -248,14 +250,21 @@ ELEVENLABS_SIMILARITY_BOOST = env.float("ELEVENLABS_SIMILARITY_BOOST", default=0
 ELEVENLABS_SPEED = env.float("ELEVENLABS_SPEED", default=1.0)
 ELEVENLABS_STYLE = env.float("ELEVENLABS_STYLE", default=0.0)
 ELEVENLABS_SPEAKER_BOOST = env.bool("ELEVENLABS_SPEAKER_BOOST", default=True)
-# vozes nominais que o notify usa (locução fem/masc pt-br).
+# Voz do TTS por gênero do DESTINATÁRIO — CRUZADO de propósito (regra do Victor): homem recebe voz
+# de mulher e vice-versa. Logo ELEVENLABS_VOICE_MALE = a voz que o HOMEM recebe (voice-id feminino)
+# e ELEVENLABS_VOICE_FEMALE = a que a MULHER recebe (voice-id masculino). Default = voz padrão
+# (não-quebra). NÃO "corrigir" a inversão.
 ELEVENLABS_VOICE_FEMALE = env("ELEVENLABS_VOICE_FEMALE", default="JBFqnCBsd6RMkjVDRZzb")
 ELEVENLABS_VOICE_MALE = env("ELEVENLABS_VOICE_MALE", default="JBFqnCBsd6RMkjVDRZzb")
 
 GOOGLE_VISION_API_KEY = env("GOOGLE_VISION_API_KEY", default="")
-GOOGLE_VISION_BASE_URL = env("GOOGLE_VISION_BASE_URL", default="https://vision.googleapis.com")
+GOOGLE_VISION_BASE_URL = env(
+    "GOOGLE_VISION_BASE_URL", default="https://vision.googleapis.com"
+)
 # Alternativa de auth (prod, mais robusto): path pro JSON do service-account. Vazio => usa a api-key.
-GOOGLE_VISION_SERVICE_ACCOUNT_JSON = env("GOOGLE_VISION_SERVICE_ACCOUNT_JSON", default="")
+GOOGLE_VISION_SERVICE_ACCOUNT_JSON = env(
+    "GOOGLE_VISION_SERVICE_ACCOUNT_JSON", default=""
+)
 
 
 # WhatsApp (integrations.comunicacao.whatsapp) — cliente da Evolution API. Config via .env

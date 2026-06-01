@@ -68,8 +68,14 @@ grava status+erro. Clientes async via `async_to_sync`.
 `notify` repassa `gender` (M/F); a **resolução gênero→voz** mora no `ia.service.tts` (ordem: `voice_id`
 explícito > voz por gênero `ELEVENLABS_VOICE_MALE`/`ELEVENLABS_VOICE_FEMALE` > voz default
 `ELEVENLABS_VOICE_ID`). Os defaults M/F **apontam pra voz padrão**, então sem config o TTS não-quebra.
-`«PENDÊNCIA»`: setar voice-ids masc/fem distintos no `.env`; e a **fonte do gênero** (hoje o caller
-passa) virá do `profiles`/`users` (§4-3) quando existir.
+
+**⚠️ Regra CRUZADA de propósito (Victor):** o destinatário **homem recebe voz de mulher** e a **mulher
+voz de homem**. Por isso os valores no `.env` ficam "invertidos" no nome: `ELEVENLABS_VOICE_MALE` = a voz
+que o **homem** recebe (voice-id **feminino**), `ELEVENLABS_VOICE_FEMALE` = a que a **mulher** recebe
+(voice-id **masculino**). **NÃO "corrigir" a inversão.**
+
+`«PENDÊNCIA»`: setar os 2 voice-ids distintos no `.env` (cruzados, como acima); e a **fonte do gênero**
+(hoje o caller passa) virá do `profiles`/`users` (§4-3) quando existir.
 
 ## Config (.env) — reusa o existente, zero novo
 
