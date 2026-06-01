@@ -58,6 +58,7 @@ INSTALLED_APPS = [
     # integrações externas
     "integrations.finance.asaas.apps.AsaasConfig",
     "integrations.tools.cep.apps.CepConfig",
+    "integrations.comunicacao.whatsapp.apps.WhatsappConfig",
 ]
 
 MIDDLEWARE = [
@@ -168,6 +169,14 @@ ASAAS_CHARGE_DUE_DAYS = env.int("ASAAS_CHARGE_DUE_DAYS", default=3)
 # config no .env (CONVENTION §8/§10, nunca hardcoded).
 VIACEP_BASE_URL = env("VIACEP_BASE_URL", default="https://viacep.com.br")
 VIACEP_TIMEOUT_SECONDS = env.float("VIACEP_TIMEOUT_SECONDS", default=5.0)
+
+
+# WhatsApp (integrations.comunicacao.whatsapp) — cliente da Evolution API. Config via .env
+# (CONVENTION §8/§10). A api-key global é alfanumérica (sem "$"), então env() normal serve. Sem
+# base_url/api-key os checks whatsapp.E001/E002 travam o boot.
+WHATSAPP_API_BASE_URL = env("WHATSAPP_API_BASE_URL", default="")
+WHATSAPP_GLOBAL_API_KEY = env("WHATSAPP_GLOBAL_API_KEY", default="")
+WHATSAPP_INSTANCE_NAME = env("WHATSAPP_INSTANCE_NAME", default="default")
 
 
 # Django-Q2 — fila async com broker no próprio banco (sem Redis). `qcluster` roda o worker.
