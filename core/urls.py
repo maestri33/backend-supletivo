@@ -20,11 +20,16 @@ from django.conf.urls.static import static
 from django.contrib import admin
 from django.urls import include, path
 
+from users.auth.jwt.views import jwks
+
 urlpatterns = [
     path("admin/", admin.site.urls),
     # views DMZ das integrações (internas — <servico>.prod)
     path("integrations/asaas/", include("integrations.finance.asaas.urls")),
     path("integrations/infinitepay/", include("integrations.finance.infinitepay.urls")),
+    # users — auth DMZ (register/check/recover/login) + JWKS público na raiz (RFC 7517)
+    path("users/auth/", include("users.auth.urls")),
+    path(".well-known/jwks.json", jwks, name="jwks"),
 ]
 
 # Em dev (DEBUG) o Django serve /media/ (ex.: PNG do QR das cobranças); em prod é a infra/proxy.

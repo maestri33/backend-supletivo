@@ -43,6 +43,10 @@ Config em `backend/.env` (não versionado). Dev usa SQLite.
   Model de auditoria `Notification` + envio async (Django-Q); dispatcher puro (o caller passa o
   contato), conteúdo pronto do caller, **envia mídia/imagem** (WhatsApp pela LAN, e-mail pela URL
   pública), falha isolada por canal. **3 canais provados REAIS.** → [[wiki/notify/notify]]
+- **users (§4 item 3):** identidade da plataforma — custom `User` (`external_id`), `profiles`
+  mínimo (unicidade cpf/phone/email), `jwt` (RS256 + JWKS), `otp` (login passwordless por WhatsApp),
+  `roles` (catálogo no `.env` + histórico). register/check/recover/login (DMZ). **E2E real
+  aprovado** (register→OTP no zap→login→JWT). → [[wiki/users/users]]
 
 > Apps de negócio (`users`, `hub`, `notify`, `financeiro`, `integrations`...) entram um a um,
 > pelo `.claude/WORKFLOW.md`.

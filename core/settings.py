@@ -65,7 +65,15 @@ INSTALLED_APPS = [
     "integrations.comunicacao.mail.apps.MailConfig",
     # apps de negócio do monólito
     "notify.apps.NotifyConfig",
+    # users = o "quem" (identidade + papéis + dados pessoais). auth/jwt/otp/profiles/roles vivem
+    # dentro dele como pacotes; um migration set só (CONVENTION §2). É o AUTH_USER_MODEL.
+    "users.apps.UsersConfig",
 ]
+
+# User custom (palavra do Victor 2026-06-01; sobrepõe o "User padrão" da CONVENTION §4): a
+# identidade carrega o external_id (UUID na borda). Login é passwordless por OTP, então o
+# USERNAME_FIELD é o external_id (admin/superuser loga por UUID). Definido ANTES da 1ª migração.
+AUTH_USER_MODEL = "users.User"
 
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
@@ -294,3 +302,58 @@ Q_CLUSTER = {
     "timeout": 90,
     "retry": 120,
 }
+
+
+# users — auth (jwt, otp) · profiles · roles (CONVENTION §2/§4/§9). Config via .env (§10).
+# ── JWT (users.auth.jwt): RS256, par de chaves PEM. As chaves são geradas no 1º uso se faltarem
+# (users/auth/jwt/keys.py) num diretório gitignored — a privada NUNCA vai pro git. Paths relativos
+# ao BASE_DIR. issuer/audience e expirações são config (defaults = porte do legado).
+JWT_PRIVATE_KEY_PATH = BASE_DIR / env(
+    "JWT_PRIVATE_KEY_PATH", default="keys/jwt_private.pem"
+)
+JWT_PUBLIC_KEY_PATH = BASE_DIR / env(
+    "JWT_PUBLIC_KEY_PATH", default="keys/jwt_public.pem"
+)
+JWT_ALGORITHM = env("JWT_ALGORITHM", default="RS256")
+JWT_ACCESS_EXPIRE_MINUTES = env.int("JWT_ACCESS_EXPIRE_MINUTES", default=30)
+JWT_REFRESH_EXPIRE_MINUTES = env.int("JWT_REFRESH_EXPIRE_MINUTES", default=1440)
+JWT_ISSUER = env("JWT_ISSUER", default="supletivo")
+JWT_AUDIENCE = env("JWT_AUDIENCE", default="")
+
+# ── OTP (users.auth.otp): código numérico, hash SHA256 (plaintext nunca persiste), TTL/tentativas
+# e rate-limit em DB (sem Redis — Django-Q usa o banco). Defaults = porte do legado.
+OTP_TTL_S = env.int("OTP_TTL_S", default=300)
+OTP_NUM_DIGITS = env.int("OTP_NUM_DIGITS", default=6)
+OTP_MAX_ATTEMPTS = env.int("OTP_MAX_ATTEMPTS", default=3)
+OTP_RATELIMIT_WINDOW_S = env.int("OTP_RATELIMIT_WINDOW_S", default=30)
+OTP_RATELIMIT_HOURLY_MAX = env.int("OTP_RATELIMIT_HOURLY_MAX", default=5)
+OTP_FOOTER = env("OTP_FOOTER", default="")
+OTP_ACTIVE = env.bool("OTP_ACTIVE", default=True)
+
+# ── ROLES (users.roles): catálogo de transições no .env, NÃO em DB (§9). JSON: lista de
+# {from_role, to_role, mode: add|replace, requires_role?, forbids_role?, blocking?}. A tabela
+# users.UserRole guarda só quem tem qual role agora + histórico. Default = cadeia confirmada
+# pelo Victor (com training: candidate→training→promoter). Catálogo inválido derruba o boot.
+ROLE_RULES = env.json(
+    "ROLE_RULES",
+    default=[
+        {"from_role": None, "to_role": "lead", "mode": "add"},
+        {"from_role": "lead", "to_role": "enrollment", "mode": "replace"},
+        {"from_role": "enrollment", "to_role": "student", "mode": "replace"},
+        {
+            "from_role": None,
+            "to_role": "veteran",
+            "mode": "add",
+            "requires_role": "student",
+        },
+        {"from_role": None, "to_role": "candidate", "mode": "add"},
+        {"from_role": "candidate", "to_role": "training", "mode": "replace"},
+        {"from_role": "training", "to_role": "promoter", "mode": "replace"},
+        {
+            "from_role": None,
+            "to_role": "coordinator",
+            "mode": "add",
+            "requires_role": "promoter",
+        },
+    ],
+)
