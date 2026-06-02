@@ -22,6 +22,13 @@ from django.urls import include, path
 
 from users.auth.jwt.views import jwks
 
+# API pública (Django Ninja, in-process) — 4 grupos por público, versionados sob /api/v1/.
+# Nomes = PLACEHOLDER (CONVENTION §1; Victor decide depois). Ver plan/api-ninja-transicao.
+from api.clients import api as clients_api
+from api.collaborators import api as collaborators_api
+from api.leadership import api as leadership_api
+from api.staff import api as staff_api
+
 urlpatterns = [
     path("admin/", admin.site.urls),
     # views DMZ das integrações (internas — <servico>.prod)
@@ -32,6 +39,11 @@ urlpatterns = [
     path("users/address/", include("users.address.urls")),
     path("users/documents/", include("users.documents.urls")),
     path(".well-known/jwks.json", jwks, name="jwks"),
+    # API Ninja versionada — /api/v1/<grupo>/ (cada grupo serve /docs e /openapi.json).
+    path("api/v1/clients/", clients_api.urls),
+    path("api/v1/collaborators/", collaborators_api.urls),
+    path("api/v1/leadership/", leadership_api.urls),
+    path("api/v1/staff/", staff_api.urls),
 ]
 
 # Em dev (DEBUG) o Django serve /media/ (ex.: PNG do QR das cobranças); em prod é a infra/proxy.

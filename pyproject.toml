@@ -6,6 +6,7 @@ dependencies = [
     "django>=5.2,<5.3",
     "django-cors-headers>=4.9.0",
     "django-environ>=0.13.0",
+    "django-ninja>=1.6.2",
     "django-q2>=1.10.0",
     "dnspython>=2.8.0",
     "httpx>=0.28.1",
