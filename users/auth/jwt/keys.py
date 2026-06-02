@@ -45,23 +45,32 @@ def _generate_rsa_key_pair(key_size: int = 2048) -> tuple[str, str]:
     return private_pem, public_pem
 
 
+def read_or_create_pair(priv_path, pub_path) -> tuple[str, str]:
+    """Lê o par PEM (gera se faltar) a partir de paths EXPLÍCITOS — sem depender de `settings`.
+
+    Path-based de propósito: o `core/settings.py` chama isto no load pra alimentar o
+    `NINJA_JWT['SIGNING_KEY'/'VERIFYING_KEY']` (config do django-ninja-jwt) — e ali o objeto
+    `settings` ainda está sendo montado, então não dá pra ler `settings.JWT_*` por dentro.
+    """
+    priv_path, pub_path = Path(priv_path), Path(pub_path)
+    if not (priv_path.exists() and pub_path.exists()):
+        priv_path.parent.mkdir(parents=True, exist_ok=True)
+        pub_path.parent.mkdir(parents=True, exist_ok=True)
+        priv_pem, pub_pem = _generate_rsa_key_pair()
+        priv_path.write_text(priv_pem)
+        pub_path.write_text(pub_pem)
+        # Permissão restrita na privada (best-effort; em alguns FS não aplica).
+        try:
+            priv_path.chmod(0o600)
+        except OSError:
+            pass
+        logger.info("jwt.keys_generated", priv=str(priv_path), pub=str(pub_path))
+    return priv_path.read_text(), pub_path.read_text()
+
+
 def ensure_keys() -> None:
-    """Gera o par se faltar. Idempotente — só cria quando ambos os arquivos não existem."""
-    priv_path = Path(settings.JWT_PRIVATE_KEY_PATH)
-    pub_path = Path(settings.JWT_PUBLIC_KEY_PATH)
-    if priv_path.exists() and pub_path.exists():
-        return
-    priv_path.parent.mkdir(parents=True, exist_ok=True)
-    pub_path.parent.mkdir(parents=True, exist_ok=True)
-    priv_pem, pub_pem = _generate_rsa_key_pair()
-    priv_path.write_text(priv_pem)
-    pub_path.write_text(pub_pem)
-    # Permissão restrita na privada (best-effort; em alguns FS não aplica).
-    try:
-        priv_path.chmod(0o600)
-    except OSError:
-        pass
-    logger.info("jwt.keys_generated", priv=str(priv_path), pub=str(pub_path))
+    """Gera o par se faltar (idempotente). Usa os paths do `.env` via settings."""
+    read_or_create_pair(settings.JWT_PRIVATE_KEY_PATH, settings.JWT_PUBLIC_KEY_PATH)
 
 
 def load_private() -> str:

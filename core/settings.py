@@ -11,6 +11,7 @@ https://docs.djangoproject.com/en/5.2/ref/settings/
 """
 
 import os
+from datetime import timedelta
 from pathlib import Path
 
 import environ
@@ -53,6 +54,8 @@ INSTALLED_APPS = [
     "corsheaders",
     # fila async (broker no próprio banco, sem Redis)
     "django_q",
+    # JWT da API pública (django-ninja-jwt) — RS256 reusa as chaves em keys/ (CONVENTION §10).
+    "ninja_jwt",
     # app base do projeto (models base comuns — ex.: fallback logger de eventos sem destino)
     "core.apps.CoreConfig",
     # integrações externas
@@ -325,6 +328,24 @@ JWT_ACCESS_EXPIRE_MINUTES = env.int("JWT_ACCESS_EXPIRE_MINUTES", default=30)
 JWT_REFRESH_EXPIRE_MINUTES = env.int("JWT_REFRESH_EXPIRE_MINUTES", default=1440)
 JWT_ISSUER = env("JWT_ISSUER", default="supletivo")
 JWT_AUDIENCE = env("JWT_AUDIENCE", default="")
+
+# django-ninja-jwt (substitui o JWT escrito à mão — Victor 2026-06-02). RS256 REUSA o mesmo par
+# PEM em keys/ (lido path-based porque o objeto `settings` ainda está sendo montado aqui). Sem
+# consumidor externo de JWKS → o endpoint JWKS foi removido. issue/decode em users/auth/jwt/service.
+from users.auth.jwt import keys as _jwt_keys  # noqa: E402 (import tardio: precisa dos paths acima)
+
+_JWT_PRIVATE_PEM, _JWT_PUBLIC_PEM = _jwt_keys.read_or_create_pair(
+    JWT_PRIVATE_KEY_PATH, JWT_PUBLIC_KEY_PATH
+)
+NINJA_JWT = {
+    "ALGORITHM": JWT_ALGORITHM,
+    "SIGNING_KEY": _JWT_PRIVATE_PEM,
+    "VERIFYING_KEY": _JWT_PUBLIC_PEM,
+    "ACCESS_TOKEN_LIFETIME": timedelta(minutes=JWT_ACCESS_EXPIRE_MINUTES),
+    "REFRESH_TOKEN_LIFETIME": timedelta(minutes=JWT_REFRESH_EXPIRE_MINUTES),
+    "ISSUER": JWT_ISSUER or None,
+    "AUDIENCE": JWT_AUDIENCE or None,
+}
 
 # ── OTP (users.auth.otp): código numérico, hash SHA256 (plaintext nunca persiste), TTL/tentativas
 # e rate-limit em DB (sem Redis — Django-Q usa o banco). Defaults = porte do legado.

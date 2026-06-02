@@ -4,14 +4,13 @@ Casca fina (§3): valida o Bearer token reusando o JWT que já roda (`users/auth
 `type=access`, e devolve um `Principal` em `request.auth`. O gate de role por rota usa
 `require_roles`. SEM regra de negócio aqui.
 
-⚠️ Transição (`plan/api-ninja-transicao.md`): hoje valida o JWT custom (RS256 em `keys/`). O
-swap pra `django-ninja-jwt` é ciclo supervisionado (código money-path, E2E precisa do celular
-do Victor) — quando entrar, muda só o `decode` abaixo; grupos e rotas não mudam.
+Valida via `users/auth/jwt/service` (django-ninja-jwt, RS256, chaves em `keys/`). Mudança
+2026-06-02 (Victor): o swap pro ninja-jwt foi feito; grupos e rotas não mudaram (trocou só as
+tripas do `decode`/`issue`). O `AccessToken` do ninja-jwt já rejeita token expirado/refresh/inválido.
 """
 
 from __future__ import annotations
 
-import jwt as pyjwt
 import structlog
 from ninja.errors import HttpError
 from ninja.security import HttpBearer
@@ -33,14 +32,12 @@ class Principal:
 
 
 class JWTAuth(HttpBearer):
-    """Valida o access token. Inválido/expirado/tipo errado → 401 (retorna None)."""
+    """Valida o access token (assinatura+exp+tipo, via ninja-jwt). Inválido → 401 (retorna None)."""
 
     def authenticate(self, request, token):
         try:
             payload = jwt_service.decode(token)
-        except pyjwt.PyJWTError:
-            return None
-        if payload.get("type") != "access":
+        except jwt_service.TokenError:
             return None
         return Principal(payload.get("external_id", ""), payload.get("roles", []))
 

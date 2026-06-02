@@ -20,8 +20,6 @@ from django.conf.urls.static import static
 from django.contrib import admin
 from django.urls import include, path
 
-from users.auth.jwt.views import jwks
-
 # API pública (Django Ninja, in-process) — 4 grupos por público, versionados sob /api/v1/.
 # Nomes = PLACEHOLDER (CONVENTION §1; Victor decide depois). Ver plan/api-ninja-transicao.
 from api.clients import api as clients_api
@@ -38,7 +36,6 @@ urlpatterns = [
     path("users/auth/", include("users.auth.urls")),
     path("users/address/", include("users.address.urls")),
     path("users/documents/", include("users.documents.urls")),
-    path(".well-known/jwks.json", jwks, name="jwks"),
     # API Ninja versionada — /api/v1/<grupo>/ (cada grupo serve /docs e /openapi.json).
     path("api/v1/clients/", clients_api.urls),
     path("api/v1/collaborators/", collaborators_api.urls),
