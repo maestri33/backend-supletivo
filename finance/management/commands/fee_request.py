@@ -14,7 +14,7 @@ from zoneinfo import ZoneInfo
 
 from django.core.management.base import BaseCommand, CommandError
 
-from finance.interface.fees import request_fee_payment
+from finance.interface.fees import request_fee_payment, schedule_fee_on_due_date
 
 SP_TZ = ZoneInfo("America/Sao_Paulo")
 
@@ -24,7 +24,9 @@ class Command(BaseCommand):
 
     def add_arguments(self, parser):
         parser.add_argument(
-            "--amount", required=True, help="valor em reais (ex.: 1.00)"
+            "--amount",
+            default=None,
+            help="valor em reais (ex.: 1.00). Opcional com --at-due (usa o valor do QR).",
         )
         parser.add_argument(
             "--qr", required=True, help="payload copia-e-cola do PIX QR code"
@@ -38,26 +40,47 @@ class Command(BaseCommand):
             default=None,
             help="agendar p/ 'YYYY-MM-DD HH:MM' (America/Sao_Paulo); ausente = imediato",
         )
+        parser.add_argument(
+            "--at-due",
+            action="store_true",
+            help="agendar para a DATA DE VENCIMENTO lida do próprio QR (cobrança com vencimento)",
+        )
 
     def handle(self, *args, **o):
-        scheduled_for = None
-        if o["at"]:
+        if o["at_due"] and o["at"]:
+            raise CommandError("--at-due e --at são mutuamente exclusivos")
+
+        if o["at_due"]:
+            # vencimento lido do próprio QR; amount é opcional (usa o valor do QR se ausente).
             try:
-                scheduled_for = datetime.strptime(o["at"], "%Y-%m-%d %H:%M").replace(
-                    tzinfo=SP_TZ
+                pr = schedule_fee_on_due_date(
+                    qr_payload=o["qr"],
+                    amount=o["amount"],
+                    supplier_name=o["supplier"],
+                    description=o["description"],
                 )
             except ValueError as exc:
-                raise CommandError(
-                    f"data inválida: {o['at']} (use 'YYYY-MM-DD HH:MM')"
-                ) from exc
-
-        pr = request_fee_payment(
-            amount=o["amount"],
-            qr_payload=o["qr"],
-            supplier_name=o["supplier"],
-            description=o["description"],
-            scheduled_for=scheduled_for,
-        )
+                raise CommandError(str(exc)) from exc
+        else:
+            if o["amount"] is None:
+                raise CommandError("--amount é obrigatório (exceto com --at-due)")
+            scheduled_for = None
+            if o["at"]:
+                try:
+                    scheduled_for = datetime.strptime(
+                        o["at"], "%Y-%m-%d %H:%M"
+                    ).replace(tzinfo=SP_TZ)
+                except ValueError as exc:
+                    raise CommandError(
+                        f"data inválida: {o['at']} (use 'YYYY-MM-DD HH:MM')"
+                    ) from exc
+            pr = request_fee_payment(
+                amount=o["amount"],
+                qr_payload=o["qr"],
+                supplier_name=o["supplier"],
+                description=o["description"],
+                scheduled_for=scheduled_for,
+            )
         self.stdout.write(
             json.dumps(
                 {

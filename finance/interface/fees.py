@@ -9,14 +9,22 @@ Victor). 1º fornecedor = a instituição que credencia o aluno. Método inicial
 from __future__ import annotations
 
 import uuid
+from datetime import datetime, time
 from decimal import Decimal
+from zoneinfo import ZoneInfo
 
 import structlog
 from django.utils import timezone
 
 from finance.models import PaymentRequest
+from integrations.finance.asaas import qrpay
 
 logger = structlog.get_logger()
+
+SP_TZ = ZoneInfo("America/Sao_Paulo")
+# Hora do dia em que pagamos uma despesa AGENDADA pelo vencimento do QR (horário comercial SP).
+# Decisão técnica (Victor delegou 2026-06-02); CONFIG depois se precisar.
+_DUE_PAY_HOUR = 9
 
 
 def request_fee_payment(
@@ -58,3 +66,64 @@ def request_fee_payment(
         scheduled_for=str(scheduled_for) if scheduled_for else None,
     )
     return pr
+
+
+def _due_to_scheduled(due_date: str) -> datetime:
+    """Converte o `dueDate` do Asaas no instante de pagamento: 09:00 (SP) do dia de vencimento.
+
+    Aceita data `YYYY-MM-DD` ou datetime ISO. Se vier sem fuso (caso comum: só a data), casa às
+    `_DUE_PAY_HOUR` no fuso de SP. Levanta `ValueError` em formato inesperado (não chuta data).
+    """
+    try:
+        dt = datetime.fromisoformat(due_date.strip())
+    except ValueError as e:
+        raise ValueError(f"dueDate em formato inesperado: {due_date!r}") from e
+    if dt.tzinfo is None:
+        dt = datetime.combine(dt.date(), time(hour=_DUE_PAY_HOUR), tzinfo=SP_TZ)
+    return dt
+
+
+def schedule_fee_on_due_date(
+    *,
+    qr_payload,
+    amount=None,
+    supplier_name=None,
+    description=None,
+    external_reference=None,
+) -> PaymentRequest:
+    """Agenda o pagamento de uma despesa pra DATA DE VENCIMENTO lida do próprio QR (cobrança com vencimento).
+
+    Decodifica o QR no Asaas (resolve o payload dinâmico), exige `dueDate`, e enfileira agendado pra esse
+    dia (09:00 SP). O valor vem do CALLER se informado; senão usa o `value` da cobrança decodificada (§8:
+    ler o valor cobrado não é inventar dinheiro). Levanta `ValueError` com motivo claro se não der pra agendar.
+    """
+    info = qrpay.decode_qr(qr_payload)
+    if not info.get("canBePaid", False):
+        reason = info.get("cannotBePaidReason") or "motivo não informado pelo Asaas"
+        raise ValueError(f"QR não pode ser pago: {reason}")
+    due = info.get("dueDate")
+    if not due:
+        raise ValueError(
+            "QR sem data de vencimento (estático/imediato) — use pagamento imediato ou --at <data>."
+        )
+    scheduled_for = _due_to_scheduled(str(due))
+    value = amount if amount is not None else info.get("value")
+    if value is None:
+        raise ValueError(
+            "sem valor: o caller não informou e o QR decodificado não traz `value`."
+        )
+    logger.info(
+        "finance.fee_scheduled_on_due",
+        due_date=str(due),
+        scheduled_for=str(scheduled_for),
+        amount=str(value),
+        from_qr_value=amount is None,
+    )
+    return request_fee_payment(
+        amount=value,
+        qr_payload=qr_payload,
+        supplier_name=supplier_name,
+        description=description,
+        scheduled_for=scheduled_for,
+        external_reference=external_reference,
+    )

@@ -43,6 +43,26 @@ def _parse_amount(amount) -> Decimal:
     return amt
 
 
+def decode_qr(payload: str) -> dict:
+    """Decodifica um PIX QR code no Asaas (resolve o payload dinâmico de cobrança) — LEITURA, não paga.
+
+    Retorna o dict do Asaas. Campos relevantes: `type`, `value`, `totalValue`, `dueDate`
+    (None p/ QR estático/imediato), `canBePaid`, `cannotBePaidReason`, `receiver`.
+    Levanta `QrPayError` em payload vazio ou falha de leitura no Asaas.
+    """
+    if not payload:
+        raise QrPayError("qr_payload_required")
+    try:
+        return asyncio.run(_decode(payload))
+    except AsaasError as e:
+        raise QrPayError(f"decode_failed: {e.status_code}: {e.body}") from e
+
+
+async def _decode(payload: str) -> dict:
+    async with get_client() as c:
+        return await c.decode_qr_code(payload)
+
+
 def pay_qr_code(*, amount, qr_payload, payment_id, description=None) -> Payment:
     """Paga um PIX QR code (copia-e-cola). Retorna o Payment (kind=qrcode). Idempotente por payment_id."""
     amt = _parse_amount(amount)

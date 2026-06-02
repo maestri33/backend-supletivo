@@ -113,6 +113,14 @@ class AsaasClient:
         return await self._request("GET", "/v3/transfers", params=params)
 
     # ---------- PIX QR Code outbound (copia-e-cola, pagando) ----------
+    async def decode_qr_code(self, payload: str) -> dict:
+        # Decodifica um BR Code no Asaas (resolve o payload dinâmico de cobrança no servidor deles).
+        # Campos úteis: type, value, totalValue, dueDate, canBePaid, cannotBePaidReason, receiver.
+        # dueDate=None para QR estático/imediato.
+        return await self._request(
+            "POST", "/v3/pix/qrCodes/decode", json={"payload": payload}
+        )
+
     async def pay_qr_code(
         self,
         payload: str,
