@@ -8,14 +8,17 @@ O funil autenticado da matrícula (enrollment) entra na 6b.
 
 from __future__ import annotations
 
-from ninja import Schema
+from ninja import File, Schema
 from ninja.errors import HttpError
+from ninja.files import UploadedFile
 
+from api.auth import require_roles
 from api.base import build_group
 from users.auth import interface as auth_iface
 from users.auth.models import User
 from users.exceptions import DomainError
 from users.roles import interface as roles
+from users.roles.enrollment import interface as enrollment_iface
 from users.roles.lead import interface as lead_iface
 
 api = build_group("clients", "Funil do aluno: lead, enrollment, student, veteran.")
@@ -121,3 +124,140 @@ def login_lead(request, payload: LoginIn):
         )
     except DomainError as exc:
         raise _domain_http(exc) from exc
+
+
+# ── matrícula: funil de coleta (autenticado, role enrollment) — 6b ──────────
+# ⚠️ 6b NÃO TESTADO (nem in-process completo, nem com aluno real).
+class ProfileIn(Schema):
+    mother_name: str | None = None
+    father_name: str | None = None
+    marital_status: str | None = None
+    birthplace: str | None = None
+    nationality: str | None = None
+
+
+class AddressIn(Schema):
+    cep: str
+    number: str | None = None
+    complement: str | None = None
+
+
+class RgIn(Schema):
+    number: str
+    issuing_agency: str | None = None
+    issue_date: str | None = None
+
+
+class EducationIn(Schema):
+    last_year_studied: str
+    last_school: str
+    last_year_when: str | None = None
+
+
+class EnrollmentOut(Schema):
+    external_id: str
+    status: str
+    hub_external_id: str
+    selfie_verified: bool
+
+
+def _enr_guard(request) -> str:
+    """Gate role enrollment + devolve o external_id do aluno logado."""
+    require_roles(request.auth, "enrollment")
+    return request.auth.external_id
+
+
+@api.get("/enrollment/me", response=EnrollmentOut, tags=["enrollment"])
+def enrollment_me(request):
+    ext = _enr_guard(request)
+    enr = enrollment_iface.get_for_user_external_id(ext)
+    if enr is None:
+        raise HttpError(404, "Matrícula não encontrada.")
+    return enrollment_iface.to_dict(enr)
+
+
+@api.post("/enrollment/profile", response=EnrollmentOut, tags=["enrollment"])
+def enrollment_profile(request, payload: ProfileIn):
+    ext = _enr_guard(request)
+    try:
+        enr = enrollment_iface.set_profile(user_external_id=ext, **payload.dict())
+    except enrollment_iface.EnrollmentError as exc:
+        raise HttpError(422, str(exc)) from exc
+    return enrollment_iface.to_dict(enr)
+
+
+@api.post("/enrollment/address", response=EnrollmentOut, tags=["enrollment"])
+def enrollment_address(request, payload: AddressIn):
+    ext = _enr_guard(request)
+    try:
+        enrollment_iface.set_address(
+            user_external_id=ext,
+            cep=payload.cep,
+            number=payload.number,
+            complement=payload.complement,
+        )
+    except DomainError as exc:
+        raise _domain_http(exc) from exc
+    except enrollment_iface.EnrollmentError as exc:
+        raise HttpError(422, str(exc)) from exc
+    return enrollment_iface.to_dict(enrollment_iface.get_for_user_external_id(ext))
+
+
+@api.post("/enrollment/documents/rg", response=EnrollmentOut, tags=["enrollment"])
+def enrollment_rg(request, payload: RgIn):
+    ext = _enr_guard(request)
+    try:
+        enrollment_iface.set_documents_rg(
+            user_external_id=ext,
+            number=payload.number,
+            issuing_agency=payload.issuing_agency,
+            issue_date=payload.issue_date,
+        )
+    except DomainError as exc:
+        raise _domain_http(exc) from exc
+    except enrollment_iface.EnrollmentError as exc:
+        raise HttpError(422, str(exc)) from exc
+    return enrollment_iface.to_dict(enrollment_iface.get_for_user_external_id(ext))
+
+
+@api.post("/enrollment/documents/rg/photo/{slot}", tags=["enrollment"])
+def enrollment_rg_photo(request, slot: str, file: UploadedFile = File(...)):
+    ext = _enr_guard(request)
+    try:
+        path = enrollment_iface.upload_rg_photo(
+            user_external_id=ext, slot=slot, upload=file
+        )
+    except DomainError as exc:
+        raise _domain_http(exc) from exc
+    except enrollment_iface.EnrollmentError as exc:
+        raise HttpError(422, str(exc)) from exc
+    return {"slot": slot, "stored": path}
+
+
+@api.post("/enrollment/education", response=EnrollmentOut, tags=["enrollment"])
+def enrollment_education(request, payload: EducationIn):
+    ext = _enr_guard(request)
+    try:
+        enr = enrollment_iface.set_education(
+            user_external_id=ext,
+            last_year_studied=payload.last_year_studied,
+            last_school=payload.last_school,
+            last_year_when=payload.last_year_when,
+        )
+    except enrollment_iface.EnrollmentError as exc:
+        raise HttpError(422, str(exc)) from exc
+    return enrollment_iface.to_dict(enr)
+
+
+@api.post("/enrollment/selfie", response=EnrollmentOut, tags=["enrollment"])
+def enrollment_selfie(request, file: UploadedFile = File(...)):
+    ext = _enr_guard(request)
+    try:
+        enr = enrollment_iface.set_selfie(
+            user_external_id=ext,
+            image_bytes=file.read(),
+            content_type=getattr(file, "content_type", "image/jpeg"),
+        )
+    except enrollment_iface.EnrollmentError as exc:
+        raise HttpError(422, str(exc)) from exc
+    return enrollment_iface.to_dict(enr)

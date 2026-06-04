@@ -57,6 +57,17 @@ class Enrollment(models.Model):
     # dados da plataforma externa que o COORDENADOR posta na liberação (6c). Schema livre por ora
     # (legado guardava sem schema fixo); modelar campos exatos com o Victor no ciclo `student`.
     study_platform = models.JSONField(null=True, blank=True)
+    # dados pessoais extras da matrícula (etapa `profile`, 6b) — porte do legado (referência do Victor).
+    # «PENDÊNCIA»: confirmar o conjunto exato + se migram pro Profile (reuso) ou ficam aqui (Victor).
+    mother_name = models.CharField(max_length=255, null=True, blank=True)
+    father_name = models.CharField(max_length=255, null=True, blank=True)
+    marital_status = models.CharField(max_length=32, null=True, blank=True)
+    birthplace = models.CharField(max_length=128, null=True, blank=True)
+    nationality = models.CharField(max_length=64, null=True, blank=True)
+    # selfie (etapa `selfie`, 6b) — foto em media/enrollment/<ext>/ + validação IA best-effort (visão).
+    selfie_image = models.CharField(max_length=255, null=True, blank=True)
+    selfie_verified = models.BooleanField(default=False)
+    selfie_description = models.TextField(null=True, blank=True)
     created_at = models.DateTimeField("criado em", auto_now_add=True)
     updated_at = models.DateTimeField("atualizado em", auto_now=True)
 
