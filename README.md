@@ -1,8 +1,9 @@
 # backend — monólito Django (MVP)
 
-O **cérebro** da plataforma: toda a lógica de negócio + o banco moram aqui. À frente ficam
-edges FastAPI finos (fora deste repo) que chamam as views DMZ por HTTP. Arquitetura completa
-nas instruções do projeto (`.claude/CONVENTION.md`).
+O **cérebro** da plataforma: toda a lógica de negócio + o banco moram aqui. A **API pública
+vive DENTRO do Django, via Django Ninja** (in-process), em 4 grupos por público sob
+`/api/v1/` — sem serviço separado, sem hop HTTP (edges FastAPI foram descartados 2026-06-01).
+Arquitetura completa nas instruções do projeto (`.claude/CONVENTION.md`).
 
 ## Rodar em dev
 
@@ -51,11 +52,19 @@ Config em `backend/.env` (não versionado). Dev usa SQLite.
   vazio no provisionamento. → [[wiki/users/address]]
 - **users/documents (§4 item 3, ciclo 3b):** RG/CNH/certidão/militar (1-1, null no cadastro) + upload
   de foto + gate de gênero no militar. → [[wiki/users/documents]]
-- **finance (§4 item 4, Fatia 1):** motor de comissão/payout — creditar (valor do `.env`) → fechamento
+- **finance (§4 item 4):** motor de comissão/payout — creditar (valor do `.env`) → fechamento
   semanal (bônus FLAT ≥ threshold) → solicitação de pagamento → **PIX real** via `asaas.payout`, com
-  validação externa e reconciliação. FK→`users.User`, pix do profile. **R$1 real provado** (−R$1 no saldo).
-  **Fatia 2 (`fees`, pagar despesas via PIX QR code — imediato/agendado, mesma fila) iniciada; teste real
-  pendente.** → [[wiki/finance/finance]]
+  validação externa e reconciliação. FK→`users.User`, pix do profile. **Fechado e provado com dinheiro
+  real**: comissão (−R$1) e `fees` (despesas via PIX QR — imediato, dinâmico e **agendado por vencimento**
+  `--at-due`; R$1 + R$1,07 reais). → [[wiki/finance/finance]]
+- **hub (§4 item 5, Fatia 1):** o **polo** — entidade `Hub` (Address FK + marca do catálogo `.env` +
+  coordenador) + `seed_defaults` (conta-mãe = staff superuser + promoter + coordinator; hub padrão =
+  fallback de captação). Criação simples agora (a complexa é futuro). Testado in-process. → [[wiki/hub/hub]]
+- **api/ (§4 item 13):** API pública Django Ninja in-process — 4 grupos versionados
+  (`/api/v1/{clients,collaborators,leadership,staff}/`) + auth JWT compartilhada (reusa o
+  `users/auth/jwt`). Esqueleto (`health`/`whoami`) + **grupo `staff` com as rotas de hub/coordenador**
+  (cria/lista polo, lista promotores, designa coordenador; gate de superuser). Faltam os demais grupos,
+  nomes (placeholder), reexpor status. → [[wiki/api/ninja]] · [[wiki/api/staff]]
 
 > Apps de negócio (`users`, `hub`, `notify`, `finance`, `integrations`...) entram um a um,
 > pelo `.claude/WORKFLOW.md`.
