@@ -1,0 +1,39 @@
+"""Superfície pública in-process do `student` (CONVENTION §3): o que a API e o enrollment chamam.
+
+Fina de propósito — só reexporta o `service`. A borda (api/) traduz `external_id` ↔ User/objeto e
+trata os erros (`StudentError`); a regra mora no service.
+"""
+
+from users.roles.student.service import (
+    StudentError,
+    clear_documentation,
+    create_from_enrollment,
+    get_for_user_external_id,
+    grade_exam,
+    issue_diploma,
+    list_pendencies,
+    open_pendency,
+    register_pickup,
+    resolve_pendency,
+    schedule_exam,
+    set_blood_type,
+    to_dict,
+    upload_document,
+)
+
+__all__ = [
+    "StudentError",
+    "clear_documentation",
+    "create_from_enrollment",
+    "get_for_user_external_id",
+    "grade_exam",
+    "issue_diploma",
+    "list_pendencies",
+    "open_pendency",
+    "register_pickup",
+    "resolve_pendency",
+    "schedule_exam",
+    "set_blood_type",
+    "to_dict",
+    "upload_document",
+]

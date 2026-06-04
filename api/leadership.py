@@ -17,6 +17,7 @@ from api.auth import require_roles
 from api.base import build_group
 from users.auth.models import User
 from users.roles.enrollment import interface as enrollment_iface
+from users.roles.student import interface as student_iface
 from users.roles.training import interface as training_iface
 
 api = build_group(
@@ -37,9 +38,11 @@ def _coordinator(request) -> User:
 
 # ── funil do aluno: liberação da matrícula ──────────────────────────────────
 class ReleaseIn(Schema):
-    study_platform: dict | None = (
-        None  # dados de acesso à plataforma externa (schema livre por ora)
-    )
+    # dados de acesso à plataforma de estudo (campos estruturados — Victor 2026-06-04).
+    platform_url: str | None = None
+    platform_login: str | None = None
+    platform_password: str | None = None
+    platform_notes: str | None = None
 
 
 class ReleaseOut(Schema):
@@ -51,17 +54,104 @@ class ReleaseOut(Schema):
     "/enrollments/{external_id}/release", response=ReleaseOut, tags=["enrollment"]
 )
 def release_enrollment(request, external_id: str, payload: ReleaseIn):
-    """O coordenador do hub libera a matrícula → promove o aluno a `student`."""
+    """O coordenador do hub libera a matrícula → promove o aluno a `student` (cria o Student)."""
     coordinator = _coordinator(request)
     try:
         enr = enrollment_iface.release(
             enrollment_external_id=external_id,
             coordinator=coordinator,
-            study_platform=payload.study_platform,
+            platform_url=payload.platform_url,
+            platform_login=payload.platform_login,
+            platform_password=payload.platform_password,
+            platform_notes=payload.platform_notes,
         )
     except enrollment_iface.EnrollmentError as exc:
         raise HttpError(422, str(exc)) from exc
     return {"external_id": str(enr.external_id), "status": enr.status}
+
+
+# ── funil do aluno: coordenador conduz student→veteran (§4 item 9) ───────────
+# ⚠️ NÃO TESTADO (nem in-process completo, nem com fluxo real).
+class ExamGradeIn(Schema):
+    passed: bool
+    notes: str | None = None
+
+
+class PendencyIn(Schema):
+    kind: str  # "document" | "fee"
+    description: str
+    amount_cents: int | None = None  # só kind=fee (registro; NÃO move dinheiro aqui)
+
+
+def _student_action(external_id: str, coordinator, fn, **kw):
+    try:
+        return fn(student_external_id=external_id, coordinator=coordinator, **kw)
+    except student_iface.StudentError as exc:
+        raise HttpError(422, str(exc)) from exc
+
+
+@api.post("/students/{external_id}/exam/grade", tags=["student"])
+def grade_exam(request, external_id: str, payload: ExamGradeIn):
+    """Coordenador do hub corrige a prova: passou → conferência; reprovou → refazer."""
+    coordinator = _coordinator(request)
+    exam = _student_action(
+        external_id,
+        coordinator,
+        student_iface.grade_exam,
+        passed=payload.passed,
+        notes=payload.notes,
+    )
+    return {"external_id": str(exam.external_id), "result": exam.result}
+
+
+@api.post("/students/{external_id}/pendencies", tags=["student"])
+def open_pendency(request, external_id: str, payload: PendencyIn):
+    """Coordenador lança uma pendência (documento OU taxa) → aluno vai pra PENDING."""
+    coordinator = _coordinator(request)
+    pend = _student_action(
+        external_id,
+        coordinator,
+        student_iface.open_pendency,
+        kind=payload.kind,
+        description=payload.description,
+        amount_cents=payload.amount_cents,
+    )
+    return {"external_id": str(pend.external_id), "kind": pend.kind}
+
+
+@api.post("/pendencies/{external_id}/resolve", tags=["student"])
+def resolve_pendency(request, external_id: str):
+    """Coordenador resolve a pendência; sem pendência aberta o aluno segue pro diploma."""
+    coordinator = _coordinator(request)
+    try:
+        pend = student_iface.resolve_pendency(
+            pendency_external_id=external_id, coordinator=coordinator
+        )
+    except student_iface.StudentError as exc:
+        raise HttpError(422, str(exc)) from exc
+    return {
+        "external_id": str(pend.external_id),
+        "resolved": pend.resolved_at is not None,
+    }
+
+
+@api.post("/students/{external_id}/documentation/clear", tags=["student"])
+def clear_documentation(request, external_id: str):
+    """Coordenador confirma que não há pendência → libera a emissão do diploma."""
+    coordinator = _coordinator(request)
+    s = _student_action(external_id, coordinator, student_iface.clear_documentation)
+    return {"external_id": str(s.external_id), "status": s.status}
+
+
+@api.post("/students/{external_id}/diploma/issue", tags=["student"])
+def issue_diploma(request, external_id: str):
+    """Coordenador emite o diploma (certificado + histórico) → aluno fica AGUARDANDO RETIRADA."""
+    coordinator = _coordinator(request)
+    diploma = _student_action(external_id, coordinator, student_iface.issue_diploma)
+    return {
+        "external_id": str(diploma.external_id),
+        "issued_at": diploma.issued_at.isoformat(),
+    }
 
 
 # ── funil do colaborador: autoria de matéria (coordenador também — Victor) ──

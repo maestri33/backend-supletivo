@@ -15,6 +15,13 @@ from users.roles.enrollment.models import EducationalData, Enrollment
 from users.roles.lead.models import Checkout, Lead
 from users.roles.models import UserRole
 from users.roles.promoter.models import Promoter
+from users.roles.student.models import (
+    Student,
+    StudentDiploma,
+    StudentDocument,
+    StudentExam,
+    StudentPendency,
+)
 from users.roles.training.models import Material, Submission, Trainee
 
 __all__ = [
@@ -39,4 +46,9 @@ __all__ = [
     "Material",
     "Trainee",
     "Submission",
+    "Student",
+    "StudentDocument",
+    "StudentExam",
+    "StudentDiploma",
+    "StudentPendency",
 ]

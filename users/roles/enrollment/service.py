@@ -278,9 +278,18 @@ def _notify_coordinator_awaiting(enr: Enrollment) -> None:
 
 
 def release(
-    *, enrollment_external_id: str, coordinator, study_platform=None
+    *,
+    enrollment_external_id: str,
+    coordinator,
+    platform_url=None,
+    platform_login=None,
+    platform_password=None,
+    platform_notes=None,
 ) -> Enrollment:
-    """Coordenador do hub libera a matrícula: promove `enrollment→student` + COMPLETED + study_platform."""
+    """Coordenador do hub libera a matrícula: promove `enrollment→student`, marca COMPLETED e CRIA o
+    `Student` (§4 item 9) já com os dados estruturados da plataforma de estudo + o hub herdado."""
+    from users.roles.student import interface as student_iface
+
     enr = get_by_external_id(enrollment_external_id)
     if enr is None:
         raise EnrollmentError("enrollment_not_found")
@@ -292,9 +301,16 @@ def release(
     with transaction.atomic():
         if "student" not in roles.active_roles(enr.user):
             roles.promote(enr.user, "student")
-        enr.study_platform = study_platform
         enr.status = _S.COMPLETED
-        enr.save(update_fields=["study_platform", "status", "updated_at"])
+        enr.save(update_fields=["status", "updated_at"])
+        student_iface.create_from_enrollment(
+            user=enr.user,
+            hub=enr.hub,
+            platform_url=platform_url,
+            platform_login=platform_login,
+            platform_password=platform_password,
+            platform_notes=platform_notes,
+        )
 
     _notify_released(enr)
     logger.info("enrollment.released", external_id=str(enr.external_id))

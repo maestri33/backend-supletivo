@@ -20,6 +20,7 @@ from users.exceptions import DomainError
 from users.roles import interface as roles
 from users.roles.enrollment import interface as enrollment_iface
 from users.roles.lead import interface as lead_iface
+from users.roles.student import interface as student_iface
 
 api = build_group("clients", "Funil do aluno: lead, enrollment, student, veteran.")
 
@@ -261,3 +262,103 @@ def enrollment_selfie(request, file: UploadedFile = File(...)):
     except enrollment_iface.EnrollmentError as exc:
         raise HttpError(422, str(exc)) from exc
     return enrollment_iface.to_dict(enr)
+
+
+# ── aluno: funil final student→veteran (autenticado, role student) — §4 item 9 ──
+# ⚠️ NÃO TESTADO (nem in-process completo, nem com aluno/IA real).
+class BloodTypeIn(Schema):
+    blood_type: str  # A+/A-/B+/B-/AB+/AB-/O+/O-
+
+
+class ExamScheduleIn(Schema):
+    subject: str
+    scheduled_at: str  # ISO 8601 (ex.: 2026-06-10T14:00:00-03:00)
+
+
+def _student_guard(request) -> str:
+    """Gate role student + devolve o external_id do aluno logado."""
+    require_roles(request.auth, "student")
+    return request.auth.external_id
+
+
+def _student_dict(ext: str):
+    s = student_iface.get_for_user_external_id(ext)
+    if s is None:
+        raise HttpError(404, "Aluno não encontrado.")
+    return student_iface.to_dict(s)
+
+
+@api.get("/student/me", tags=["student"])
+def student_me(request):
+    return _student_dict(_student_guard(request))
+
+
+@api.post("/student/blood-type", tags=["student"])
+def student_blood_type(request, payload: BloodTypeIn):
+    ext = _student_guard(request)
+    try:
+        student_iface.set_blood_type(
+            user_external_id=ext, blood_type=payload.blood_type
+        )
+    except student_iface.StudentError as exc:
+        raise HttpError(422, str(exc)) from exc
+    return _student_dict(ext)
+
+
+@api.post("/student/documents/{doc_type}", tags=["student"])
+def student_document(request, doc_type: str, file: UploadedFile = File(...)):
+    ext = _student_guard(request)
+    try:
+        student_iface.upload_document(
+            user_external_id=ext,
+            doc_type=doc_type,
+            image_bytes=file.read(),
+            content_type=getattr(file, "content_type", "image/jpeg"),
+        )
+    except student_iface.StudentError as exc:
+        raise HttpError(422, str(exc)) from exc
+    return _student_dict(ext)
+
+
+@api.post("/student/exam/schedule", tags=["student"])
+def student_exam_schedule(request, payload: ExamScheduleIn):
+    ext = _student_guard(request)
+    try:
+        student_iface.schedule_exam(
+            user_external_id=ext,
+            subject=payload.subject,
+            scheduled_at=payload.scheduled_at,
+        )
+    except student_iface.StudentError as exc:
+        raise HttpError(422, str(exc)) from exc
+    return _student_dict(ext)
+
+
+@api.get("/student/pendencies", tags=["student"])
+def student_pendencies(request):
+    ext = _student_guard(request)
+    pends = student_iface.list_pendencies(ext, open_only=True)
+    return [
+        {
+            "external_id": str(p.external_id),
+            "kind": p.kind,
+            "description": p.description,
+            "amount_cents": p.amount_cents,
+        }
+        for p in pends
+    ]
+
+
+@api.post("/student/diploma/pickup", tags=["student"])
+def student_diploma_pickup(request, file: UploadedFile = File(...)):
+    """Aluno posta a foto tirando o diploma → vira veteran + dispara a comissão do coordenador."""
+    ext = _student_guard(request)
+    try:
+        student_iface.register_pickup(
+            user_external_id=ext,
+            image_bytes=file.read(),
+            content_type=getattr(file, "content_type", "image/jpeg"),
+        )
+    except student_iface.StudentError as exc:
+        raise HttpError(422, str(exc)) from exc
+    return _student_dict(ext)
