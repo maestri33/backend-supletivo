@@ -97,8 +97,12 @@ def _dispatch_otp(user) -> None:
 # ── register ───────────────────────────────────────────────────────────────
 
 
-def register(*, role: str, phone: str, cpf: str) -> dict:
-    """Cria usuário (entry role) e provisiona Profile + role numa transação; dispara OTP. Retorna external_id."""
+def register(*, role: str, phone: str, cpf: str, email: str | None = None) -> dict:
+    """Cria usuário (entry role) e provisiona Profile + role numa transação; dispara OTP. Retorna external_id.
+
+    `email` (opcional, aditivo — Victor 2026-06-04 p/ o lead) é gravado no Profile. Continua opcional pra
+    não quebrar os chamadores atuais (`users/auth/views.py`).
+    """
     if not roles.is_entry_role(role):
         raise ValidationError(
             f"Role '{role}' não é uma role de entrada válida.",
@@ -113,12 +117,16 @@ def register(*, role: str, phone: str, cpf: str) -> dict:
         phone = validation.validate_phone(phone)
     except ValueError as exc:
         raise ValidationError(str(exc), code="PHONE_INVALID") from exc
+    if email is not None:
+        email = email.strip().lower() or None
 
     # unicidade local (barato) antes da chamada externa
     if profiles.exists_cpf(cpf):
         raise Conflict("CPF já cadastrado.", code="CPF_EXISTS")
     if profiles.exists_phone(phone):
         raise Conflict("Telefone já cadastrado.", code="PHONE_EXISTS")
+    if email and profiles.exists_email(email):
+        raise Conflict("E-mail já cadastrado.", code="EMAIL_EXISTS")
 
     # veracidade REAL (§8) — CPF existe (identidade) + telefone existe no WhatsApp
     identity = _lookup_cpf(cpf)
@@ -144,6 +152,7 @@ def register(*, role: str, phone: str, cpf: str) -> dict:
                 user=user,
                 cpf=cpf,
                 phone=resolved_phone,
+                email=email,
                 gender=identity.gender,
                 name=identity.name,
                 birth_date=identity.birth_date,

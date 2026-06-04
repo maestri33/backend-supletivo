@@ -98,6 +98,23 @@ def default_coordinator_external_id() -> str | None:
     return str(hub.coordinator.external_id)
 
 
+def hub_of(user) -> Hub | None:
+    """O polo de um promotor (herança do plano §6-lead-funil): o hub que ele COORDENA; senão o padrão.
+
+    Quando o lead vira matrícula a responsabilidade passa pro HUB, herdado do promotor que indicou
+    (palavra do Victor 2026-06-04). Na Fatia 1 o único promotor é a conta-mãe (coordena o hub padrão)
+    → resolve pro padrão. Fatia 2 (relacionamentos) dará polo a promotores comuns; a herança pro
+    `enrollment`/`student` já fica pronta aqui.
+    """
+    coordinated = (
+        Hub.objects.select_related("coordinator")
+        .filter(coordinator=user)
+        .order_by("created_at")
+        .first()
+    )
+    return coordinated or get_default()
+
+
 def set_coordinator(*, hub_external_id: str, coordinator_external_id: str) -> Hub:
     """Designa/troca o coordenador do polo (um promotor); garante a role `coordinator` nele."""
     hub = get_by_external_id(hub_external_id)

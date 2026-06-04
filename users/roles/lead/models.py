@@ -4,9 +4,12 @@ Porte do legado (`~/coders/backend` lead/), adaptado ao monólito: **FK real** (
 §4). O Lead **nasce ligado a um PROMOTER** (o `?ref=` da landing; sem ref → promotor padrão) — palavra do
 Victor 2026-06-04. Ao PAGAR, vira `enrollment` (deixa de ser do promotor, passa a ser cuidado pelo hub).
 
-Máquina de status (legado): `captured` → `waiting` (cartão, criando checkout) | `checkout` (PIX direto) →
-`completed` (webhook do pagamento PAGO); `failed` = ramo de erro. Sub-pacote de `users` (app_label `users`,
-1 migration set — igual address/documents; CONVENTION §2).
+Máquina de status REDUZIDA (Victor 2026-06-04, plano §6-lead-funil: o método já vem na criação e o
+checkout é gerado síncrono → somem `captured`/`waiting`/`checkout` do legado):
+`PENDING` (criado + checkout gerado, aguardando pagar) → `PAID` (webhook confirmou → efeitos) | `FAILED`
+(gateway falhou ao gerar, ou pagamento expirou/cancelou). O detalhe (método/QR/link/pago) fica no
+`Checkout`; `Lead.status` é só o estado que a API/gate enxergam. Sub-pacote de `users` (app_label
+`users`, 1 migration set — igual address/documents; CONVENTION §2).
 """
 
 from __future__ import annotations
@@ -21,10 +24,8 @@ class Lead(models.Model):
     """Um lead (aspirante a aluno). 1-1 com o User; ligado ao promotor que o captou."""
 
     class Status(models.TextChoices):
-        CAPTURED = "captured", "captado"
-        WAITING = "waiting", "aguardando checkout"
-        CHECKOUT = "checkout", "em checkout"
-        COMPLETED = "completed", "pago"
+        PENDING = "pending", "aguardando pagamento"
+        PAID = "paid", "pago"
         FAILED = "failed", "falhou"
 
     external_id = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
@@ -42,7 +43,7 @@ class Lead(models.Model):
     status = models.CharField(
         max_length=12,
         choices=Status.choices,
-        default=Status.CAPTURED,
+        default=Status.PENDING,
         db_index=True,
     )
     failed_reason = models.CharField(max_length=64, null=True, blank=True)

@@ -9,6 +9,7 @@ fallback logger do core (consumidores reais — fees/commissions — ainda não 
 import structlog
 from django.utils import timezone
 
+from core import hooks as core_hooks
 from core.fallback import log_unrouted_event
 
 from .models import Payment, WebhookEvent
@@ -68,14 +69,23 @@ def handle_event(payload, source_ip=None, user_agent=None):
         row.forwarded_ok = True
         row.forwarded_at = timezone.now()
         row.save(update_fields=["forwarded_ok", "forwarded_at"])
-        # Consumidor real (fees/commissions) ainda não existe -> POR ENQUANTO, em vez de disparar os
-        # hooks/ deles (§7.3), registra o evento APLICADO no fallback rastreável pra reprocesso futuro (§7.4).
-        log_unrouted_event(
-            "asaas",
-            event or "",
-            f"applied_no_consumer: {reason}",
-            payload if isinstance(payload, dict) else {},
-        )
+        # COBRANÇA PAGA (kind=charge) -> dispara o hook do app destino (lead) §7.3.
+        consumed = False
+        if payment.status == "PAID" and payment.kind == Payment.Kind.CHARGE:
+            consumed = core_hooks.dispatch(
+                "payment.paid",
+                provider="asaas",
+                provider_payment_id=payment.payment_id,
+                amount_cents=int(payment.amount * 100),
+            )
+        # ninguém consumiu (ou não é cobrança paga) -> fallback rastreável (§7.4), não perde o evento.
+        if not consumed:
+            log_unrouted_event(
+                "asaas",
+                event or "",
+                f"applied_no_consumer: {reason}",
+                payload if isinstance(payload, dict) else {},
+            )
     else:
         # nada nosso consumiu o evento -> fallback rastreável (não descarta em silêncio)
         log_unrouted_event(

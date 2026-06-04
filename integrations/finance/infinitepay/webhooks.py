@@ -13,6 +13,7 @@ import structlog
 from django.conf import settings
 from django.utils import timezone
 
+from core import hooks as core_hooks
 from core.fallback import log_unrouted_event
 
 from .client import InfinitePayError, get_client
@@ -45,14 +46,23 @@ def handle_event(order_nsu, payload, *, source_ip=None, user_agent=None):
         row.forwarded_ok = True
         row.forwarded_at = timezone.now()
         row.save(update_fields=["forwarded_ok", "forwarded_at"])
-        # consumidor real (lead/enrollment) não existe ainda -> guarda o evento pago no fallback
-        # rastreável pra reprocesso futuro (CONVENTION §7.4).
-        log_unrouted_event(
-            "infinitepay",
-            "checkout_paid",
-            f"applied_no_consumer: {reason}",
-            payload if isinstance(payload, dict) else {},
-        )
+        # CHECKOUT PAGO -> dispara o hook do app destino (lead) §7.3.
+        consumed = False
+        if checkout.status == Checkout.Status.PAID:
+            consumed = core_hooks.dispatch(
+                "payment.paid",
+                provider="infinitepay",
+                provider_payment_id=str(checkout.external_id),
+                amount_cents=checkout.paid_amount_cents,
+            )
+        # ninguém consumiu -> fallback rastreável (§7.4), não perde o evento.
+        if not consumed:
+            log_unrouted_event(
+                "infinitepay",
+                "checkout_paid",
+                f"applied_no_consumer: {reason}",
+                payload if isinstance(payload, dict) else {},
+            )
     else:
         # nada nosso consumiu o evento -> fallback rastreável (não descarta em silêncio)
         log_unrouted_event(

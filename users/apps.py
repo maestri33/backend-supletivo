@@ -18,3 +18,10 @@ class UsersConfig(AppConfig):
 
         keys.ensure_keys()
         register(check_users)
+
+        # Hook de pagamento do lead (CONVENTION §7.3): o webhook do asaas/infinitepay dispara
+        # 'payment.paid' → o lead casa o checkout e marca pago. Registra no boot (apps já carregados).
+        from core import hooks as core_hooks
+        from users.roles.lead.hooks import on_payment_paid
+
+        core_hooks.register("payment.paid", on_payment_paid)
