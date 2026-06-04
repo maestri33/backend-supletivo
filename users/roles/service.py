@@ -96,3 +96,13 @@ def is_blocked(user) -> bool:
         return False
     blocking = catalog.blocking_roles()
     return any(r in blocking for r in active)
+
+
+def users_with_role(role: str) -> list:
+    """Todos os Users com a `role` ATIVA (revoked_at nulo). Ex.: listar promotores. Ordenado por id."""
+    from django.contrib.auth import get_user_model
+
+    user_ids = UserRole.objects.filter(role=role, revoked_at__isnull=True).values_list(
+        "user_id", flat=True
+    )
+    return list(get_user_model().objects.filter(id__in=user_ids).order_by("id"))

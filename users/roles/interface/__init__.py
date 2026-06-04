@@ -5,7 +5,13 @@ a borda (views/edges) traduz `external_id` ↔ User.
 """
 
 from users.roles.catalog import all_rules, find_rule
-from users.roles.service import active_roles, assign, is_blocked, promote
+from users.roles.service import (
+    active_roles,
+    assign,
+    is_blocked,
+    promote,
+    users_with_role,
+)
 
 
 def is_entry_role(role: str) -> bool:
@@ -19,5 +25,6 @@ __all__ = [
     "active_roles",
     "is_blocked",
     "is_entry_role",
+    "users_with_role",
     "all_rules",
 ]

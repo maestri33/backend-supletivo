@@ -1,0 +1,107 @@
+"""Seed IDEMPOTENTE dos padrões (Victor 2026-06-03): a conta-mãe + o hub padrão.
+
+No início **TUDO centralizado na conta do Victor**: staff (superuser) + promoter + coordinator do
+hub padrão, na MESMA conta. O hub padrão é o **fallback de captação** (candidato sem `ref` cai nele).
+Pode rodar a cada boot (em prod, no entrypoint do deploy) — não duplica. Dados vêm do `.env`
+(`DEFAULT_STAFF_*`, `DEFAULT_HUB_BRAND`). NÃO passa por CPFHub/WhatsApp: é seed de sistema, não register.
+
+As roles `promoter`/`coordinator` são criadas DIRETO (UserRole) — bypass do catálogo de propósito:
+`promoter` não é role de entrada (vem de training→promoter), então `roles.assign` recusaria; aqui é seed.
+"""
+
+from __future__ import annotations
+
+import structlog
+from django.conf import settings
+from django.core.management.base import BaseCommand, CommandError
+from django.db import transaction
+
+from hub import config
+from hub.models import Hub
+from users.address import interface as address_iface
+from users.auth.models import User
+from users.profiles import interface as profiles
+from users.profiles.models import Profile
+from users.roles.models import UserRole
+
+logger = structlog.get_logger()
+
+
+class Command(BaseCommand):
+    help = "Cria (idempotente) a conta-mãe (staff superuser + promoter + coordinator) e o hub padrão."
+
+    def handle(self, *args, **options):
+        cpf = settings.DEFAULT_STAFF_CPF
+        phone = settings.DEFAULT_STAFF_PHONE
+        name = settings.DEFAULT_STAFF_NAME
+        password = settings.DEFAULT_STAFF_PASSWORD
+        if not (cpf and phone and password):
+            raise CommandError(
+                "Configure DEFAULT_STAFF_CPF / DEFAULT_STAFF_PHONE / DEFAULT_STAFF_PASSWORD no .env."
+            )
+        brand = config.default_brand()
+        if not config.is_valid_brand(brand):
+            raise CommandError(
+                f"DEFAULT_HUB_BRAND '{brand}' não está em HUB_BRANDS ({config.brands()})."
+            )
+
+        with transaction.atomic():
+            user, user_created = self._ensure_staff(
+                cpf=cpf, phone=phone, name=name, password=password
+            )
+            self._ensure_roles(user)
+            hub, hub_created = self._ensure_default_hub(brand=brand, coordinator=user)
+
+        logger.info(
+            "hub.seed_defaults",
+            staff_external_id=str(user.external_id),
+            staff_created=user_created,
+            hub_external_id=str(hub.external_id),
+            hub_created=hub_created,
+        )
+        self.stdout.write(
+            self.style.SUCCESS(
+                f"staff external_id={user.external_id} (novo={user_created}); "
+                f"hub padrão external_id={hub.external_id} brand={hub.brand} (novo={hub_created})"
+            )
+        )
+
+    def _ensure_staff(self, *, cpf, phone, name, password):
+        """Acha a conta-mãe pelo cpf (idempotente) ou cria como superuser + Profile + Address vazio."""
+        existing = Profile.objects.filter(cpf=cpf).select_related("user").first()
+        if existing is not None:
+            user = existing.user
+            changed = []
+            if not user.is_superuser:
+                user.is_superuser = True
+                changed.append("is_superuser")
+            if not user.is_staff:
+                user.is_staff = True
+                changed.append("is_staff")
+            if changed:
+                user.save(update_fields=changed)
+            return user, False
+
+        user = User.objects.create_superuser(password=password)
+        profile = profiles.create(user=user, cpf=cpf, phone=phone, name=name)
+        profiles.attach_address(profile, address_iface.create_empty())
+        return user, True
+
+    def _ensure_roles(self, user):
+        """promoter + coordinator DIRETO (bypass catálogo — seed de sistema). Idempotente."""
+        for role in ("promoter", "coordinator"):
+            UserRole.objects.get_or_create(user=user, role=role, revoked_at=None)
+
+    def _ensure_default_hub(self, *, brand, coordinator):
+        """Garante o hub padrão (coordenador = conta-mãe). Idempotente pelo flag is_default."""
+        hub = Hub.objects.filter(is_default=True).first()
+        if hub is not None:
+            if hub.coordinator_id != coordinator.id:
+                hub.coordinator = coordinator
+                hub.save(update_fields=["coordinator", "updated_at"])
+            return hub, False
+        address = address_iface.create_empty()
+        hub = Hub.objects.create(
+            address=address, brand=brand, coordinator=coordinator, is_default=True
+        )
+        return hub, True
