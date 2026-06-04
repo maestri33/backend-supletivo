@@ -10,6 +10,7 @@ from users.auth.models import User, UserManager
 from users.auth.otp.models import OtpCode, OtpRateLimit
 from users.documents.models import CNH, RG, Certificate, Document, Military
 from users.profiles.models import Profile
+from users.roles.lead.models import Checkout, Lead
 from users.roles.models import UserRole
 
 __all__ = [
@@ -25,4 +26,6 @@ __all__ = [
     "CNH",
     "Certificate",
     "Military",
+    "Lead",
+    "Checkout",
 ]
