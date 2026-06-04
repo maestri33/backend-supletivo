@@ -46,3 +46,22 @@ def require_roles(principal: Principal, *roles: str) -> None:
     """Gate de role por rota: 403 se o principal não tem nenhuma das `roles`."""
     if roles and not principal.has_any(roles):
         raise HttpError(403, "Acesso negado para o seu papel.")
+
+
+def require_superuser(principal: Principal):
+    """Gate do grupo `staff`: exige SUPERUSER. 403 se não for. Retorna o User.
+
+    staff = superuser nativo do Django (Victor 2026-06-03): o JWT carrega só `roles`, então o gate
+    confere a flag `is_superuser` no banco (não nos claims). Endpoint administrativo, raro — tudo bem
+    tocar o banco aqui (ao contrário do gate de role, que é só claims).
+    """
+    from django.contrib.auth import get_user_model
+
+    user = (
+        get_user_model()
+        .objects.filter(external_id=principal.external_id, is_active=True)
+        .first()
+    )
+    if user is None or not user.is_superuser:
+        raise HttpError(403, "Acesso restrito ao staff.")
+    return user
