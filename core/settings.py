@@ -74,6 +74,9 @@ INSTALLED_APPS = [
     # finance = motor de comissão/payout (commissions + payout; fees vem depois). Consome users
     # (FK→User, pix do profile), asaas.payout (PIX-out) e notify. Pasta em inglês (Victor 2026-06-01).
     "finance.apps.FinanceConfig",
+    # hub = o POLO (§4 item 5). Hub→Address (FK §4); marca = catálogo no .env. Ações do
+    # coordenador entram depois (grupo leadership). Consome users (coordinator/promoter).
+    "hub.apps.HubConfig",
 ]
 
 # User custom (palavra do Victor 2026-06-01; sobrepõe o "User padrão" da CONVENTION §4): a
@@ -395,3 +398,17 @@ COMMISSION_BONUS_THRESHOLD = env.int("COMMISSION_BONUS_THRESHOLD", default=5)
 # fechamento: dia (0=seg..4=sex) e hora em America/Sao_Paulo. O Schedule é WEEKLY (sem croniter).
 COMMISSION_CLOSING_WEEKDAY = env.int("COMMISSION_CLOSING_WEEKDAY", default=4)
 COMMISSION_CLOSING_HOUR = env.int("COMMISSION_CLOSING_HOUR", default=18)
+
+
+# hub (app hub) — o POLO (§4 item 5). Marca = catálogo no .env (HUB_BRANDS), igual às roles (§9):
+# validado no hub/interface, NÃO choices fixo no model. `ieadpg`→`standard` (Victor 2026-06-03).
+HUB_BRANDS = env.list("HUB_BRANDS", default=["wyden", "estacio", "standard"])
+DEFAULT_HUB_BRAND = env("DEFAULT_HUB_BRAND", default="standard")
+# conta-mãe (seed_defaults): no início TUDO centralizado no Victor — staff (superuser) + promoter +
+# coordinator do hub padrão, na MESMA conta (Victor 2026-06-03). A senha é só p/ o /admin (a API loga
+# por OTP). DEV = placeholders; PROD = dados REAIS do Victor (cpf/phone só dígitos). Senha via os.environ
+# (pode ter char especial), simetria com asaas/mail.
+DEFAULT_STAFF_CPF = env("DEFAULT_STAFF_CPF", default="")
+DEFAULT_STAFF_PHONE = env("DEFAULT_STAFF_PHONE", default="")
+DEFAULT_STAFF_NAME = env("DEFAULT_STAFF_NAME", default="Staff")
+DEFAULT_STAFF_PASSWORD = os.environ.get("DEFAULT_STAFF_PASSWORD", "")
