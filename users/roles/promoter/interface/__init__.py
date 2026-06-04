@@ -1,0 +1,27 @@
+"""Superfície pública in-process do `promoter` (CONVENTION §3): o que o grupo `collaborators`, o
+`training` (cria na entrevista) e o funil do aluno (`validate_ref`) chamam. Fina — reexporta o `service`.
+"""
+
+from users.roles.promoter.service import (
+    PromoterError,
+    create_promoter,
+    get_by_user_external_id,
+    get_for_user,
+    list_commissions,
+    list_leads,
+    ref_url,
+    to_dict,
+    validate_ref,
+)
+
+__all__ = [
+    "PromoterError",
+    "create_promoter",
+    "get_for_user",
+    "get_by_user_external_id",
+    "validate_ref",
+    "ref_url",
+    "to_dict",
+    "list_leads",
+    "list_commissions",
+]

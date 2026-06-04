@@ -10,9 +10,12 @@ from users.auth.models import User, UserManager
 from users.auth.otp.models import OtpCode, OtpRateLimit
 from users.documents.models import CNH, RG, Certificate, Document, Military
 from users.profiles.models import Profile
+from users.roles.candidate.models import Candidate
 from users.roles.enrollment.models import EducationalData, Enrollment
 from users.roles.lead.models import Checkout, Lead
 from users.roles.models import UserRole
+from users.roles.promoter.models import Promoter
+from users.roles.training.models import Material, Submission, Trainee
 
 __all__ = [
     "User",
@@ -31,4 +34,9 @@ __all__ = [
     "Checkout",
     "Enrollment",
     "EducationalData",
+    "Candidate",
+    "Promoter",
+    "Material",
+    "Trainee",
+    "Submission",
 ]
