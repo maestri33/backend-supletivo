@@ -406,6 +406,10 @@ ENROLLMENT_PRICE_CARD = env("ENROLLMENT_PRICE_CARD", default="1")
 ENROLLMENT_PRICE_PIX = env("ENROLLMENT_PRICE_PIX", default="5")
 ENROLLMENT_DESCRIPTION = env("ENROLLMENT_DESCRIPTION", default="Matrícula Supletivo")
 
+# treino (LMS do funil do colaborador, §4 item 7) — nota de corte (0–10) p/ aprovar uma submissão da IA.
+# Default 6 (palavra do dono). PROD = pedir ao Victor se mudar.
+TRAINING_PASS_SCORE = env("TRAINING_PASS_SCORE", default="6")
+
 
 # hub (app hub) — o POLO (§4 item 5). Marca = catálogo no .env (HUB_BRANDS), igual às roles (§9):
 # validado no hub/interface, NÃO choices fixo no model. `ieadpg`→`standard` (Victor 2026-06-03).

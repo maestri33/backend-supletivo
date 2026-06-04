@@ -15,6 +15,7 @@ from api.base import build_group
 from hub import interface as hub_iface
 from users.profiles import interface as profiles
 from users.roles import interface as roles
+from users.roles.training import interface as training_iface
 
 api = build_group(
     "staff", "Administração da plataforma: hub, coordenador, saúde dos serviços."
@@ -105,3 +106,50 @@ def set_coordinator(request, external_id: str, payload: SetCoordinatorIn):
         status = 404 if exc.args and exc.args[0] == "hub_not_found" else 422
         raise HttpError(status, str(exc)) from exc
     return _hub_out(hub)
+
+
+# ── autoria de matéria do treino (staff — também o coordenador, no grupo leadership) ──
+class MaterialIn(Schema):
+    title: str
+    text_content: str
+    question: str
+    expected_answer: str
+    order: int = 0
+
+
+class MaterialUpdateIn(Schema):
+    title: str | None = None
+    text_content: str | None = None
+    question: str | None = None
+    expected_answer: str | None = None
+    order: int | None = None
+    active: bool | None = None
+
+
+@api.post("/training/materials", tags=["staff"])
+def create_material(request, payload: MaterialIn):
+    """Cria uma matéria do treino (texto+questão+gabarito)."""
+    require_superuser(request.auth)
+    m = training_iface.create_material(**payload.dict())
+    return training_iface.material_to_dict(m, include_answer=True)
+
+
+@api.put("/training/materials/{external_id}", tags=["staff"])
+def update_material(request, external_id: str, payload: MaterialUpdateIn):
+    """Edita uma matéria (campos enviados; `active=False` desativa)."""
+    require_superuser(request.auth)
+    try:
+        m = training_iface.update_material(external_id, **payload.dict())
+    except training_iface.TrainingError as exc:
+        raise HttpError(404, str(exc)) from exc
+    return training_iface.material_to_dict(m, include_answer=True)
+
+
+@api.get("/training/materials", tags=["staff"])
+def list_materials(request):
+    """Lista todas as matérias (com gabarito — visão de autoria)."""
+    require_superuser(request.auth)
+    return [
+        training_iface.material_to_dict(m, include_answer=True)
+        for m in training_iface.list_materials(active_only=False)
+    ]
