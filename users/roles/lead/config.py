@@ -31,7 +31,12 @@ def description() -> str:
 
 
 def frontend_url() -> str:
-    """URL pra onde o gateway redireciona APÓS o pagamento. Default = EXTERNAL_URL (`.env` FRONTEND_URL)."""
-    return getattr(settings, "FRONTEND_URL", "") or getattr(
-        settings, "EXTERNAL_URL", ""
-    )
+    """URL do FRONT pra onde o gateway redireciona APÓS o pagamento (`.env` FRONTEND_URL).
+
+    Vazia enquanto o front não existe — **NÃO** cai em EXTERNAL_URL: a raiz da API dá 404, e mandar
+    esse redirect ao Asaas (`callback.successUrl`) faria o gateway exigir um domínio cadastrado na
+    conta à toa (erro real visto 2026-06-05). Sem front → sem redirect: o Asaas não recebe `callback`
+    (a cobrança PIX passa) e o InfinitePay usa o próprio fallback (`INFINITEPAY_REDIRECT_URL`/EXTERNAL_URL).
+    Quando o front existir, basta setar `FRONTEND_URL` (e cadastrar o domínio no Asaas p/ o callback).
+    """
+    return getattr(settings, "FRONTEND_URL", "") or ""
