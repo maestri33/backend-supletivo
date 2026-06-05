@@ -17,7 +17,7 @@ def log_unrouted_event(source, event, reason, payload):
     logger.warning(
         "unrouted_event",
         source=source,
-        asaas_event=event,
+        provider_event=event,
         reason=reason,
     )
     return UnroutedEvent.objects.create(

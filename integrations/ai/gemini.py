@@ -102,19 +102,6 @@ class GeminiClient:
                 return raw, mime
         raise GeminiError("Gemini não retornou imagem")
 
-    async def list_models(self) -> list[str]:
-        """GET /models — lista os modelos (valida a key). §8."""
-        url = f"{self._base_url}/models?key={self._api_key}"
-        async with httpx.AsyncClient(
-            timeout=httpx.Timeout(self._timeout, connect=10.0)
-        ) as c:
-            resp = await c.get(url)
-        if resp.status_code >= 400:
-            raise GeminiError(
-                f"Gemini /models HTTP {resp.status_code}: {resp.text[:200]}"
-            )
-        return [m.get("name", "").split("/")[-1] for m in resp.json().get("models", [])]
-
     @staticmethod
     def _parts(data: dict) -> list[dict]:
         candidates = data.get("candidates") or [{}]

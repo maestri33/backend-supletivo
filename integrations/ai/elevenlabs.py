@@ -85,18 +85,3 @@ class ElevenLabsClient:
             audio_kb=round(len(audio) / 1024, 1),
         )
         return audio
-
-    async def list_voices(self) -> list[tuple[str, str]]:
-        """GET /v1/voices — lista (voice_id, nome). Valida a key. §8."""
-        async with httpx.AsyncClient(
-            timeout=httpx.Timeout(self._timeout, connect=10.0)
-        ) as c:
-            resp = await c.get(f"{self._base_url}/v1/voices", headers=self._headers())
-        if resp.status_code >= 400:
-            raise ElevenLabsError(
-                f"ElevenLabs /voices HTTP {resp.status_code}: {resp.text[:200]}"
-            )
-        return [
-            (v.get("voice_id", ""), v.get("name", ""))
-            for v in resp.json().get("voices", [])
-        ]

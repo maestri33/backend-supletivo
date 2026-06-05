@@ -40,7 +40,7 @@ async def lookup(zipcode: str) -> dict | None:
     try:
         async with httpx.AsyncClient(timeout=settings.VIACEP_TIMEOUT_SECONDS) as client:
             resp = await client.get(url)
-    except Exception as exc:
+    except httpx.RequestError as exc:
         logger.warning("viacep.request_failed", zipcode=clean)
         raise ViaCepUnavailable("ViaCEP indisponível no momento") from exc
 
