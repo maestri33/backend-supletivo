@@ -31,6 +31,9 @@ Config em `backend/.env` (não versionado). Dev usa SQLite.
   Cliente async; o app `address` consome depois. → [[wiki/integrations/tools/cep]]
 - **integrations/tools/cpf (§4 item 1):** tool de CPF — lookup CPFHub.io (api-key `x-api-key`,
   server-side). Cliente async; o app `profiles` consome depois. → [[wiki/integrations/tools/cpf]]
+- **integrations/tools/biometric:** biometria facial — face-match documento × selfie (InsightFace
+  `buffalo_l`, CPU; pesos fora do repo). Persiste templates no perfil + auditoria; "somado" à validação
+  de selfie por IA nos funis `candidate`/`enrollment`. Provado real. → [[wiki/integrations/tools/biometric]]
 - **integrations/communication/whatsapp (§4 item 1):** cliente WhatsApp (Evolution API 2.3.7) — porte
   completo, async, com resolução do 9º dígito BR. O app `notify` consome depois.
   → [[wiki/integrations/communication/whatsapp]]

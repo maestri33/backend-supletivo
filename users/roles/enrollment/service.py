@@ -180,9 +180,23 @@ def set_documents_rg(
 
 
 def upload_rg_photo(*, user_external_id: str, slot: str, upload) -> str:
-    """Foto do RG (slot `rg_front`/`rg_back`). Permitido enquanto coleta documentos/educação."""
-    _require(user_external_id, _S.DOCUMENTS, _S.EDUCATION)
-    return documents_iface.upload_photo(user_external_id, slot, upload)
+    """Foto do RG (slot `rg_front`/`rg_back`). Permitido enquanto coleta documentos/educação.
+
+    Na FRENTE (rg_front) o rosto vira biometria do documento, salva no perfil (best-effort — não quebra
+    o upload). Aluno: RG é obrigatório (Victor)."""
+    from pathlib import Path
+
+    from integrations.tools.biometric import service as biometric
+
+    enr = _require(user_external_id, _S.DOCUMENTS, _S.EDUCATION)
+    path = documents_iface.upload_photo(user_external_id, slot, upload)
+    biometric.try_enroll_document(
+        user=enr.user,
+        slot=slot,
+        image_path=str(Path(settings.MEDIA_ROOT) / path),
+        caller="enrollment.document",
+    )
+    return path
 
 
 def set_education(
@@ -213,9 +227,19 @@ def set_selfie(
     coordenador). REPROVADA → refazer (avisa o aluno). REVISÃO (IA fora/dúvida) → o coordenador decide."""
     from users.roles import _selfie
 
+    from pathlib import Path
+
     enr = _require(user_external_id, _S.EDUCATION, _S.SELFIE, _S.AWAITING_RELEASE)
     enr.selfie_image = _save_selfie(enr, image_bytes, content_type)
     status, desc = _selfie.verify(image_bytes, content_type, caller="enrollment.selfie")
+    # SOMAR (Victor 2026-06-05): face-match biométrico selfie × documento (RG). Avança só se os dois passarem.
+    status, desc = _selfie.add_face_match(
+        user=enr.user,
+        selfie_image_path=str(Path(settings.MEDIA_ROOT) / enr.selfie_image),
+        caller="enrollment.selfie",
+        liveness_status=status,
+        liveness_desc=desc,
+    )
     enr.selfie_status = status
     enr.selfie_verified = status == _selfie.APPROVED
     enr.selfie_description = desc

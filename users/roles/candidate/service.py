@@ -159,9 +159,23 @@ def set_documents(*, user_external_id, doc_type: str, **fields) -> dict:
 
 
 def upload_document_photo(*, user_external_id, slot: str, upload) -> str:
-    """Foto do documento (slots `rg_front`/`rg_back`/`cnh_front`/`cnh_back`)."""
-    _require(user_external_id, _S.DOCUMENTS, _S.PIX)
-    return documents_iface.upload_photo(user_external_id, slot, upload)
+    """Foto do documento (slots `rg_front`/`rg_back`/`cnh_front`/`cnh_back`).
+
+    Na FRENTE (rg_front/cnh_front) o rosto vira biometria do documento, salva no perfil (best-effort —
+    não quebra o upload; rosto ruim cai em review na selfie). Candidato aceita RG OU CNH (Victor)."""
+    from pathlib import Path
+
+    from integrations.tools.biometric import service as biometric
+
+    cand = _require(user_external_id, _S.DOCUMENTS, _S.PIX)
+    path = documents_iface.upload_photo(user_external_id, slot, upload)
+    biometric.try_enroll_document(
+        user=cand.user,
+        slot=slot,
+        image_path=str(Path(settings.MEDIA_ROOT) / path),
+        caller="candidate.document",
+    )
+    return path
 
 
 def set_pix(*, user_external_id, key: str, key_type: str) -> Candidate:
@@ -199,9 +213,19 @@ def set_selfie(
     REPROVADA → refazer (avisa o candidato). REVISÃO (IA fora/dúvida) → o coordenador decide o sim/não."""
     from users.roles import _selfie
 
+    from pathlib import Path
+
     cand = _require(user_external_id, _S.PIX, _S.SELFIE)
     cand.selfie_image = _save_selfie(cand, image_bytes, content_type)
     status, desc = _selfie.verify(image_bytes, content_type, caller="candidate.selfie")
+    # SOMAR (Victor 2026-06-05): face-match biométrico selfie × documento. Avança só se os dois passarem.
+    status, desc = _selfie.add_face_match(
+        user=cand.user,
+        selfie_image_path=str(Path(settings.MEDIA_ROOT) / cand.selfie_image),
+        caller="candidate.selfie",
+        liveness_status=status,
+        liveness_desc=desc,
+    )
     cand.selfie_status = status
     cand.selfie_verified = status == _selfie.APPROVED
     cand.selfie_description = desc

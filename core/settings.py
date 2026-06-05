@@ -66,6 +66,8 @@ INSTALLED_APPS = [
     "integrations.ai.apps.AiConfig",
     "integrations.communication.whatsapp.apps.WhatsappConfig",
     "integrations.communication.mail.apps.MailConfig",
+    # biometria facial (face-match doc×selfie com InsightFace, CPU) — checks só AVISAM (não travam boot)
+    "integrations.tools.biometric.apps.BiometricConfig",
     # apps de negócio do monólito
     "notify.apps.NotifyConfig",
     # users = o "quem" (identidade + papéis + dados pessoais). auth/jwt/otp/profiles/roles vivem
@@ -172,6 +174,25 @@ MEDIA_LAN_BASE = env("MEDIA_LAN_BASE", default="")
 
 # Limite de upload de imagem dos documentos (users/documents) — config, não hardcoded (§10).
 MAX_UPLOAD_MB = env.int("MAX_UPLOAD_MB", default=10)
+
+
+# Biometria facial (integrations.tools.biometric) — face-match doc×selfie com InsightFace (ArcFace, CPU). §8/§10.
+# BIOMETRIC_ENABLED liga/desliga o gate no funil (dev sem o modelo → desligar p/ não jogar tudo em review).
+# O modelo carrega PREGUIÇOSO (1º uso); os system checks só AVISAM (não travam o boot — biometria é apoio).
+# ⚠️ THRESHOLDS: são do COSSENO do ArcFace (~0.2–0.7, mesma pessoa ~0.4–0.7), NÃO a escala de "%" de APIs
+# comerciais. O 0.90/0.80 sugerido pelo Victor é de outra escala — default no padrão do buffalo_l e a
+# gente CALIBRA com pares reais no teste (Portão 3), ajustando aqui no .env sem mexer no código.
+BIOMETRIC_ENABLED = env.bool("BIOMETRIC_ENABLED", default=True)
+BIOMETRIC_MODEL_NAME = env("BIOMETRIC_MODEL_NAME", default="buffalo_l")
+# Pesos do modelo (~298MB) ficam FORA do backend/ (repo git) — em <mvp>/models/insightface — pra não
+# virar bloat/commit. Em prod aponte pra um volume persistente no .env. Baixa sozinho no 1º uso se faltar.
+BIOMETRIC_MODEL_ROOT = env(
+    "BIOMETRIC_MODEL_ROOT", default=str(BASE_DIR.parent / "models" / "insightface")
+)
+# Calibrado com par REAL 2026-06-05 (CNH×selfie mesma pessoa ≈0.42; pessoas diferentes <0.21). O .env manda.
+BIOMETRIC_MATCH_THRESHOLD = env.float("BIOMETRIC_MATCH_THRESHOLD", default=0.35)
+BIOMETRIC_REVIEW_THRESHOLD = env.float("BIOMETRIC_REVIEW_THRESHOLD", default=0.28)
+BIOMETRIC_LIVENESS_PROVIDER = env("BIOMETRIC_LIVENESS_PROVIDER", default="local")
 
 # Default primary key field type
 # https://docs.djangoproject.com/en/5.2/ref/settings/#default-auto-field

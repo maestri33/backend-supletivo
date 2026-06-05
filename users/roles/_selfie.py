@@ -60,3 +60,46 @@ def verify(
     if head.startswith("INVALIDA"):
         return REJECTED, desc
     return REVIEW, desc  # resposta inconclusiva → revisão humana
+
+
+# ── "somar" liveness + biometria facial (Victor 2026-06-05) ──────────────────────────────────────
+# Chaves = VALORES de SelfieStatus (literais), pra casar tanto o membro-enum (liveness) quanto a string
+# crua (biometria) sem depender de hash de Enum. min() → pior veredito vence.
+_RANK = {"rejected": 0, "review": 1, "approved": 2}
+
+
+def combine(*statuses: str) -> str:
+    """Pior veredito vence no lattice approved > review > rejected (avança só se TODOS aprovam)."""
+    return min(statuses, key=lambda s: _RANK.get(str(s), 1))
+
+
+def add_face_match(
+    *,
+    user,
+    selfie_image_path: str,
+    caller: str,
+    liveness_status: str,
+    liveness_desc: str | None,
+) -> tuple[str, str | None]:
+    """SOMAR (Victor 2026-06-05): combina a liveness com o face-match biométrico (selfie × documento).
+
+    Só roda se a liveness não reprovou de cara e a biometria estiver LIGADA (`BIOMETRIC_ENABLED`). Modelo
+    fora / sem rosto / sem documento → o face-match devolve `review` (= bloqueio; o coordenador decide).
+    Devolve (status_combinado, descrição_acumulada). Reuso único — candidate e enrollment chamam isto.
+    """
+    from django.conf import settings
+
+    if liveness_status == REJECTED or not getattr(settings, "BIOMETRIC_ENABLED", True):
+        return liveness_status, liveness_desc
+
+    from integrations.tools.biometric import service as biometric
+
+    fm = biometric.verify_identity(
+        user=user, selfie_image_path=selfie_image_path, caller=caller
+    )
+    status = combine(liveness_status, fm.status)
+    score = "—" if fm.score is None else f"{fm.score:.3f}"
+    desc = f"{liveness_desc or ''} | biometria[{fm.status} score={score}]: {fm.reason}".strip(
+        " |"
+    )
+    return status, desc
