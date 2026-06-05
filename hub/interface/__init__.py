@@ -35,9 +35,32 @@ def _coordinator_by_external_id(external_id: str) -> User:
 
 
 def _ensure_coordinator_role(user: User) -> None:
-    """Garante a role `coordinator` ativa no user (idempotente). A regra exige promoter (já validado)."""
+    """Garante a role `coordinator` ativa no user (idempotente). A regra exige promoter (já validado).
+
+    Troca de role → notifica o novo coordenador (Victor: toda troca de role avisa os envolvidos)."""
     if "coordinator" not in roles.active_roles(user):
         roles.assign(user, "coordinator")
+        _notify_coordinator_assigned(user)
+
+
+def _notify_coordinator_assigned(user: User) -> None:
+    """Avisa o usuário que acabou de virar coordenador de um polo (best-effort, §12)."""
+    from notify.interface.send import send
+    from users.profiles import interface as profiles
+    from users.roles import notifications as msgs
+
+    p = profiles.get(user)
+    try:
+        send(
+            text=msgs.text(
+                "hub.coordinator_assigned", name=msgs.first_name(p.name if p else None)
+            ),
+            caller="hub.coordinator_assigned",
+            phone=p.phone if p else None,
+            idempotency_key=f"hub_coord_assigned_{user.external_id}",
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("hub.notify_coordinator_failed", error=str(exc))
 
 
 def create_hub(

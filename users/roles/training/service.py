@@ -256,9 +256,14 @@ def _notify_coordinator_interview(trainee: Trainee) -> None:
     if coord is None:
         return
     cp = profiles.get(coord)
+    from users.roles import notifications as msgs
+
     try:
         send(
-            text="Um candidato concluiu o treino e aguarda a sua entrevista de aprovação.",
+            text=msgs.text(
+                "training.awaiting_interview",
+                name=msgs.first_name(cp.name if cp else None),
+            ),
             caller="training.awaiting_interview",
             phone=cp.phone if cp else None,
             idempotency_key=f"trainee_interview_{trainee.external_id}",
@@ -338,15 +343,22 @@ def reject_interview(*, trainee_external_id: str, coordinator, reason: str) -> T
 def _notify_approved(trainee: Trainee) -> None:
     from notify.interface.send import send
     from users.profiles import interface as profiles
+    from users.roles import notifications as msgs
 
     p = profiles.get(trainee.user)
     try:
         send(
-            text="Parabéns! Você foi aprovado e agora é PROMOTOR. 🎉 Seu link de captação já está ativo.",
+            text=msgs.text(
+                "training.approved", name=msgs.first_name(p.name if p else None)
+            ),
             caller="training.approved",
             phone=p.phone if p else None,
             email=p.email if p else None,
             email_channel=bool(p and p.email),
+            tts=msgs.is_tts(
+                "training.approved"
+            ),  # virou promotor = momento especial (voz)
+            gender=p.gender if p else None,
             idempotency_key=f"trainee_approved_{trainee.external_id}",
         )
     except Exception as exc:  # noqa: BLE001

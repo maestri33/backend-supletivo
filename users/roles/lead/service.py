@@ -16,6 +16,7 @@ from users.auth import interface as auth_iface
 from users.auth.models import User
 from users.profiles import interface as profiles
 from users.roles import interface as roles
+from users.roles import notifications as msgs
 from users.roles.lead import config
 from users.roles.lead.models import Checkout, Lead
 
@@ -84,22 +85,20 @@ def create_lead(
 def _notify_captured(lead: Lead) -> None:
     """Evento **LEAD CAPTURADO** → destinatário: o **LEAD** (aluno que acabou de entrar no sistema).
 
-    Canal: WhatsApp **+ TTS** (Victor: voz por gênero). Teor = boas-vindas/captação; o Victor edita o
-    texto final depois — aqui é o placeholder rastreável. Best-effort (§12)."""
+    Momento especial → WhatsApp **+ voz (TTS)**, voz por gênero. Teor no catálogo `notifications`
+    (nome 2×). Best-effort (§12)."""
     from notify.interface.send import send
 
     p = profiles.get(lead.user)
     if p is None:
         return
+    name = msgs.first_name(p.name)
     try:
         send(
-            text=(
-                f"Olá, {p.name or 'tudo bem'}! Seu cadastro foi criado — você acaba de dar o primeiro "
-                "passo na sua matrícula. Em seguida enviamos o link para concluir o pagamento."
-            ),
+            text=msgs.text("lead.captured", name=name),
             caller="lead.captured",
             phone=p.phone,
-            tts=True,  # voz (Victor: já implementando TTS no LEAD CAPTURADO)
+            tts=msgs.is_tts("lead.captured"),
             gender=p.gender,
             idempotency_key=f"lead_captured_{lead.external_id}",
         )
@@ -121,10 +120,14 @@ def _notify_promoter_new_lead(lead: Lead) -> None:
     prom_p = profiles.get(lead.promoter)
     if prom_p is None:
         return
-    nome = (lead_p.name if lead_p else None) or "Um novo lead"
+    lead_name = (lead_p.name if lead_p else None) or "Um novo lead"
     try:
         send(
-            text=f"{nome} acaba de entrar na sua rede pela sua indicação. Incentive a concluir o pagamento!",
+            text=msgs.text(
+                "lead.captured.promoter",
+                name=msgs.first_name(prom_p.name),
+                lead_name=lead_name,
+            ),
             caller="lead.captured.promoter",
             phone=prom_p.phone,
             idempotency_key=f"lead_new_promoter_{lead.external_id}",
@@ -149,15 +152,19 @@ def _notify_checkout(lead: Lead, checkout: Checkout) -> None:
     profile = profiles.get(lead.user)
     if profile is None:
         return
+    name = msgs.first_name(profile.name)
     link = checkout_links.short_url(checkout.short_token) or checkout.checkout_url
-    valor = f"R${checkout.amount}"
+    amount = f"R${checkout.amount}"
     if checkout.payment_method == Checkout.Method.PIX:
-        text = (
-            f"Para concluir sua matrícula, pague o PIX de {valor}:\n{link}\n\n"
-            f"Ou use o PIX copia-e-cola:\n{checkout.qrcode_payload or '-'}"
+        text = msgs.text(
+            "lead.checkout.pix",
+            name=name,
+            valor=amount,
+            link=link,
+            payload=checkout.qrcode_payload or "-",
         )
     else:
-        text = f"Para concluir sua matrícula, pague {valor} no cartão:\n{link}"
+        text = msgs.text("lead.checkout.card", name=name, valor=amount, link=link)
     try:
         send(
             text=text,
@@ -353,6 +360,7 @@ def _notify_paid(lead: Lead, hub, checkout: Checkout | None = None) -> None:
 
     profile = profiles.get(lead.user)
     base = str(lead.external_id)
+    name = msgs.first_name(profile.name) if profile else msgs.first_name(None)
 
     def _safe(label, **kw):
         try:
@@ -362,28 +370,45 @@ def _notify_paid(lead: Lead, hub, checkout: Checkout | None = None) -> None:
                 f"lead.notify_{label}_failed", external_id=base, error=str(exc)
             )
 
-    # evento PAGAMENTO CONFIRMADO → vai pro LEAD (o aluno). Inclui o comprovante quando o webhook traz.
-    receipt = checkout.receipt_url if checkout else None
-    lead_text = (
-        "Pagamento confirmado! 🎉 Sua matrícula começou — acesse para continuar."
-    )
-    if receipt:
-        lead_text += f"\n\nComprovante: {receipt}"
+    # PAGAMENTO CONFIRMADO → o LEAD. Momento especial = parabéns por VOZ (sem URL na voz). O comprovante
+    # vai numa mensagem SEPARADA de texto (URL não se lê em áudio).
     _safe(
         "lead",
-        text=lead_text,
+        text=msgs.text("lead.paid", name=name),
         caller="lead.paid",
         phone=profile.phone if profile else None,
         email=profile.email if profile else None,
         email_channel=bool(profile and profile.email),
+        tts=msgs.is_tts("lead.paid"),
+        gender=profile.gender if profile else None,
         idempotency_key=f"lead_paid_{base}",
     )
+    receipt = checkout.receipt_url if checkout else None
+    if receipt:
+        _safe(
+            "receipt",
+            text=msgs.text(
+                "lead.paid.receipt",
+                name=name,
+                valor=f"R${checkout.amount}",
+                link=receipt,
+            ),
+            caller="lead.paid.receipt",
+            phone=profile.phone if profile else None,
+            email=profile.email if profile else None,
+            email_channel=bool(profile and profile.email),
+            idempotency_key=f"lead_paid_receipt_{base}",
+        )
     coord = hub.coordinator if hub else None
     if coord is not None:
         coord_profile = profiles.get(coord)
         _safe(
             "coordinator",
-            text="Nova matrícula no seu polo. Acompanhe quando o aluno preencher os dados.",
+            text=msgs.text(
+                "lead.paid.coordinator", name=msgs.first_name(coord_profile.name)
+            )
+            if coord_profile
+            else msgs.text("lead.paid.coordinator"),
             caller="lead.paid.coordinator",
             phone=coord_profile.phone if coord_profile else None,
             idempotency_key=f"lead_paid_coord_{base}",
@@ -391,7 +416,11 @@ def _notify_paid(lead: Lead, hub, checkout: Checkout | None = None) -> None:
     promoter_profile = profiles.get(lead.promoter)
     _safe(
         "promoter",
-        text="Seu indicado pagou a matrícula — comissão no fechamento de sexta. 💸",
+        text=msgs.text(
+            "lead.paid.promoter", name=msgs.first_name(promoter_profile.name)
+        )
+        if promoter_profile
+        else msgs.text("lead.paid.promoter"),
         caller="lead.paid.promoter",
         phone=promoter_profile.phone if promoter_profile else None,
         idempotency_key=f"lead_paid_promoter_{base}",

@@ -89,6 +89,46 @@ que o **homem** recebe (voice-id **feminino**), `ELEVENLABS_VOICE_FEMALE` = a qu
 System check `notify.W001` (**Warning**, não trava): avisa se faltar `MEDIA_LAN_BASE`/`EXTERNAL_URL`.
 Os checks `E*` que travam o boot são dos integrations (whatsapp/mail/ia).
 
+## Catálogo de mensagens dos funis (teor + regra de TTS) — Victor 2026-06-05
+
+O **teor** de cada notificação dos funis mora num lugar só: **`users/roles/notifications.py`**
+(`_MESSAGES`, `_TTS_EVENTS`). Os serviços só citam a **chave do evento** + passam o nome do
+destinatário; o `notify` continua dispatcher puro. **Regras** (na cabeça do arquivo):
+
+- **Toda troca de role notifica os envolvidos** (cada serviço dispara no seu ponto).
+- **O 1º nome do destinatário aparece ≥2× em cada mensagem** (calor/proximidade).
+- **TTS (voz) só em MOMENTO ESPECIAL** (acolhimento/conquista); o resto é texto.
+
+> Aqui só **citamos** os eventos — o texto exato (editável pelo Victor) está no `notifications.py`.
+
+| Evento (caller) | Destinatário | TTS? | Disparado em |
+|---|---|---|---|
+| `lead.captured` | lead/aluno | 🔊 voz | `lead/service._notify_captured` |
+| `lead.captured.promoter` | promotor | texto | `lead/service._notify_promoter_new_lead` |
+| `lead.checkout.pix` / `.card` | lead/aluno | texto | `lead/service._notify_checkout` |
+| `lead.paid` | lead/aluno | 🔊 voz | `lead/service._notify_paid` (parabéns; **recibo à parte**) |
+| `lead.paid.receipt` | lead/aluno | texto | `lead/service._notify_paid` (comprovante = URL) |
+| `lead.paid.coordinator` / `.promoter` | coord. / promotor | texto | `lead/service._notify_paid` |
+| `enrollment.awaiting_release` | coordenador | texto | `enrollment/service._notify_coordinator_awaiting` |
+| `enrollment.released` | aluno | 🔊 voz | `enrollment/service._notify_released` |
+| `candidate.training_started` | candidato | texto | `candidate/service._notify_training_started` |
+| `training.awaiting_interview` | coordenador | texto | `training/service._notify_coordinator_interview` |
+| `training.approved` | novo promotor | 🔊 voz | `training/service._notify_approved` |
+| `student.document_rejected` | aluno | texto | `student/service.apply_validation` (reprova IA) |
+| `student.exam_released` | aluno | texto | `student/service._maybe_release_exam` |
+| `student.exam_scheduled` | coordenador | texto | `student/service.schedule_exam` |
+| `student.exam_passed` | aluno | 🔊 voz | `student/service.grade_exam` |
+| `student.exam_failed` | aluno | texto | `student/service.grade_exam` |
+| `student.pendency_opened` | aluno | texto | `student/service.open_pendency` |
+| `student.diploma_issued` | aluno | texto | `student/service.issue_diploma` |
+| `student.veteran` | aluno | 🔊 voz | `student/service.register_pickup` |
+| `student.veteran.coordinator` | coordenador | texto | `student/service.register_pickup` (comissão) |
+| `hub.coordinator_assigned` | novo coordenador | texto | `hub/interface._ensure_coordinator_role` |
+
+**🔊 voz (TTS) = momentos especiais:** captação, pagamento confirmado, virou aluno, virou promotor,
+passou na prova, formou (veteran). Tudo o mais é texto. O `otp` (login) é texto, fora deste catálogo
+(template `users/auth/otp/otp.md`).
+
 ## Como validar (§8 — chamada real)
 
 ```bash

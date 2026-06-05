@@ -241,11 +241,15 @@ def _verify_selfie(image_bytes: bytes, content_type: str):
 
 def _notify_training_started(cand: Candidate) -> None:
     from notify.interface.send import send
+    from users.roles import notifications as msgs
 
     p = profiles.get(cand.user)
     try:
         send(
-            text="Cadastro concluído! 🎓 Seu treinamento começou — acesse para estudar e responder.",
+            text=msgs.text(
+                "candidate.training_started",
+                name=msgs.first_name(p.name if p else None),
+            ),
             caller="candidate.training_started",
             phone=p.phone if p else None,
             email=p.email if p else None,

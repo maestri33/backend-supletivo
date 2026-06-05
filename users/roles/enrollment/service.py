@@ -258,6 +258,7 @@ def _verify_selfie(image_bytes: bytes, content_type: str):
 
 def _notify_coordinator_awaiting(enr: Enrollment) -> None:
     from notify.interface.send import send
+    from users.roles import notifications as msgs
 
     coord = enr.hub.coordinator
     if coord is None:
@@ -265,7 +266,10 @@ def _notify_coordinator_awaiting(enr: Enrollment) -> None:
     cp = profiles.get(coord)
     try:
         send(
-            text="Uma matrícula está aguardando sua liberação no polo.",
+            text=msgs.text(
+                "enrollment.awaiting_release",
+                name=msgs.first_name(cp.name if cp else None),
+            ),
             caller="enrollment.awaiting_release",
             phone=cp.phone if cp else None,
             idempotency_key=f"enr_awaiting_{enr.external_id}",
@@ -319,15 +323,22 @@ def release(
 
 def _notify_released(enr: Enrollment) -> None:
     from notify.interface.send import send
+    from users.roles import notifications as msgs
 
     p = profiles.get(enr.user)
     try:
         send(
-            text="Sua matrícula foi liberada! Bem-vindo(a). 🎓",
+            text=msgs.text(
+                "enrollment.released", name=msgs.first_name(p.name if p else None)
+            ),
             caller="enrollment.released",
             phone=p.phone if p else None,
             email=p.email if p else None,
             email_channel=bool(p and p.email),
+            tts=msgs.is_tts(
+                "enrollment.released"
+            ),  # virou aluno = momento especial (voz)
+            gender=p.gender if p else None,
             idempotency_key=f"enr_released_{enr.external_id}",
         )
     except Exception as exc:  # noqa: BLE001

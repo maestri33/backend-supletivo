@@ -310,6 +310,14 @@ def apply_validation(student_document_id: int, *, status: str, raw: str | None) 
     )
     if status == StudentDocument.Validation.APPROVED:
         _maybe_release_exam(doc.student)
+    elif status == StudentDocument.Validation.REJECTED:
+        # documento reprovado: avisa o aluno pra reenviar (antes reprovava em silêncio).
+        _notify(
+            doc.student,
+            event="student.document_rejected",
+            key=f"student_doc_rejected_{doc.external_id}",
+            doc_type=doc.get_doc_type_display(),
+        )
 
 
 def _required_doc_types_for(student: Student) -> set[str]:
@@ -339,8 +347,7 @@ def _maybe_release_exam(student: Student) -> None:
     _set_status(student, Student.Status.EXAM_RELEASED)
     _notify(
         student,
-        "Seus documentos foram aprovados! Você já pode agendar a sua prova.",
-        caller="student.exam_released",
+        event="student.exam_released",
         key=f"student_exam_released_{student.external_id}",
     )
 
@@ -374,8 +381,7 @@ def schedule_exam(*, user_external_id: str, subject: str, scheduled_at) -> Stude
     _set_status(student, Student.Status.EXAM_SCHEDULED)
     _notify_coordinator(
         student,
-        "Um aluno agendou a prova e aguarda a sua correção.",
-        caller="student.exam_scheduled",
+        event="student.exam_scheduled",
         key=f"student_exam_scheduled_{exam.external_id}",
     )
     logger.info(
@@ -405,16 +411,14 @@ def grade_exam(
         _set_status(student, Student.Status.AWAITING_DOCUMENTATION_DISPATCH)
         _notify(
             student,
-            "Você foi APROVADO na prova! 🎉 Estamos finalizando a sua documentação.",
-            caller="student.exam_passed",
+            event="student.exam_passed",
             key=f"student_exam_passed_{exam.external_id}",
         )
     else:
         _set_status(student, Student.Status.EXAM_FAILED)
         _notify(
             student,
-            "Você não atingiu a nota na prova. Reagende para uma nova tentativa.",
-            caller="student.exam_failed",
+            event="student.exam_failed",
             key=f"student_exam_failed_{exam.external_id}",
         )
     logger.info("student.exam_graded", external_id=str(exam.external_id), passed=passed)
@@ -455,9 +459,9 @@ def open_pendency(
         _set_status(student, Student.Status.PENDING)
     _notify(
         student,
-        f"Há uma pendência na sua matrícula: {pend.description}",
-        caller="student.pendency_opened",
+        event="student.pendency_opened",
         key=f"student_pendency_{pend.external_id}",
+        detail=pend.description,
     )
     logger.info("student.pendency_opened", external_id=str(pend.external_id), kind=kind)
     return pend
@@ -528,8 +532,7 @@ def issue_diploma(*, student_external_id: str, coordinator) -> StudentDiploma:
     _set_status(student, Student.Status.AWAITING_PICKUP)
     _notify(
         student,
-        "Seu diploma foi emitido e está disponível para retirada.",
-        caller="student.diploma_issued",
+        event="student.diploma_issued",
         key=f"student_diploma_issued_{diploma.external_id}",
     )
     logger.info("student.diploma_issued", external_id=str(diploma.external_id))
@@ -556,11 +559,16 @@ def register_pickup(
         diploma.picked_up_at = timezone.now()
         diploma.save(update_fields=["pickup_photo", "picked_up_at", "updated_at"])
         _become_veteran(student, diploma)
+    # troca de role student→veteran: notifica os DOIS envolvidos (o aluno + o coordenador da comissão).
     _notify(
         student,
-        "Parabéns, você se formou! 🎓 Agora você é veterano.",
-        caller="student.veteran",
+        event="student.veteran",
         key=f"student_veteran_{student.external_id}",
+    )
+    _notify_coordinator(
+        student,
+        event="student.veteran.coordinator",
+        key=f"student_veteran_coord_{student.external_id}",
     )
     logger.info("student.veteran", external_id=str(student.external_id))
     return student
@@ -614,27 +622,34 @@ def _coordinated(student_external_id: str, coordinator) -> Student:
     return student
 
 
-def _notify(student: Student, text: str, *, caller: str, key: str) -> None:
+def _notify(student: Student, *, event: str, key: str, **ctx) -> None:
+    """Notifica o ALUNO. Teor + regra de TTS vêm do catálogo `notifications` (nome do destinatário 2×)."""
     from notify.interface.send import send
     from users.profiles import interface as profiles
+    from users.roles import notifications as msgs
 
     p = profiles.get(student.user)
+    tts = msgs.is_tts(event)
     try:
         send(
-            text=text,
-            caller=caller,
+            text=msgs.text(event, name=msgs.first_name(p.name if p else None), **ctx),
+            caller=event,
             phone=p.phone if p else None,
             email=p.email if p else None,
             email_channel=bool(p and p.email),
+            tts=tts,
+            gender=p.gender if (p and tts) else None,
             idempotency_key=key,
         )
     except Exception as exc:  # noqa: BLE001 — notificação é best-effort (§12, canais isolados)
-        logger.warning("student.notify_failed", caller=caller, error=str(exc))
+        logger.warning("student.notify_failed", caller=event, error=str(exc))
 
 
-def _notify_coordinator(student: Student, text: str, *, caller: str, key: str) -> None:
+def _notify_coordinator(student: Student, *, event: str, key: str, **ctx) -> None:
+    """Notifica o COORDENADOR do polo do aluno. Teor no catálogo (nome do coordenador 2×)."""
     from notify.interface.send import send
     from users.profiles import interface as profiles
+    from users.roles import notifications as msgs
 
     coord = student.hub.coordinator
     if coord is None:
@@ -642,10 +657,10 @@ def _notify_coordinator(student: Student, text: str, *, caller: str, key: str) -
     cp = profiles.get(coord)
     try:
         send(
-            text=text,
-            caller=caller,
+            text=msgs.text(event, name=msgs.first_name(cp.name if cp else None), **ctx),
+            caller=event,
             phone=cp.phone if cp else None,
             idempotency_key=key,
         )
     except Exception as exc:  # noqa: BLE001
-        logger.warning("student.notify_coord_failed", caller=caller, error=str(exc))
+        logger.warning("student.notify_coord_failed", caller=event, error=str(exc))
