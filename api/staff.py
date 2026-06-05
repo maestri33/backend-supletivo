@@ -161,6 +161,11 @@ def list_materials(request):
 def list_all_leads(request, hub: str | None = None, status: str | None = None):
     """Lista TODOS os leads (link de pagamento + comprovante). Filtros: `hub` (external_id) e `status`."""
     require_superuser(request.auth)
-    hub_obj = hub_iface.get_by_external_id(hub) if hub else None
+    hub_obj = None
+    if hub:
+        # hub passado mas inexistente → 404 (não cair silenciosamente em "todos os leads")
+        hub_obj = hub_iface.get_by_external_id(hub)
+        if hub_obj is None:
+            raise HttpError(404, "hub_not_found")
     leads = lead_iface.list_leads(hub=hub_obj, status=status)
     return [lead_iface.lead_to_dict(lead) for lead in leads]
