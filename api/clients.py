@@ -138,10 +138,18 @@ class ProfileIn(Schema):
     nationality: str | None = None
 
 
-class AddressIn(Schema):
+class AddressCepIn(Schema):
     cep: str
+
+
+class AddressDataIn(Schema):
+    # demais campos — o backend só preenche os que estão VAZIOS (não sobrescreve o CEP).
+    street: str | None = None
     number: str | None = None
     complement: str | None = None
+    neighborhood: str | None = None
+    city: str | None = None
+    state: str | None = None
 
 
 class RgIn(Schema):
@@ -188,21 +196,40 @@ def enrollment_profile(request, payload: ProfileIn):
     return enrollment_iface.to_dict(enr)
 
 
-@api.post("/enrollment/address", response=EnrollmentOut, tags=["enrollment"])
-def enrollment_address(request, payload: AddressIn):
+@api.get("/enrollment/address", tags=["enrollment"])
+def enrollment_get_address(request):
+    """GET do endereço (o front vê o que está vazio p/ saber o que ainda pode preencher)."""
     ext = _enr_guard(request)
     try:
-        enrollment_iface.set_address(
-            user_external_id=ext,
-            cep=payload.cep,
-            number=payload.number,
-            complement=payload.complement,
+        return enrollment_iface.get_address(user_external_id=ext)
+    except enrollment_iface.EnrollmentError as exc:
+        raise HttpError(422, str(exc)) from exc
+
+
+@api.post("/enrollment/address/cep", tags=["enrollment"])
+def enrollment_address_cep(request, payload: AddressCepIn):
+    """Busca o CEP (ViaCEP) e preenche o endereço. Em cidade de CEP único a rua fica vazia p/ digitar."""
+    ext = _enr_guard(request)
+    try:
+        return enrollment_iface.set_address_cep(user_external_id=ext, cep=payload.cep)
+    except DomainError as exc:
+        raise _domain_http(exc) from exc
+    except enrollment_iface.EnrollmentError as exc:
+        raise HttpError(422, str(exc)) from exc
+
+
+@api.post("/enrollment/address/data", tags=["enrollment"])
+def enrollment_address_data(request, payload: AddressDataIn):
+    """Preenche os demais campos — SÓ os que estão VAZIOS (não sobrescreve o que o CEP trouxe)."""
+    ext = _enr_guard(request)
+    try:
+        return enrollment_iface.set_address_data(
+            user_external_id=ext, **payload.dict(exclude_none=True)
         )
     except DomainError as exc:
         raise _domain_http(exc) from exc
     except enrollment_iface.EnrollmentError as exc:
         raise HttpError(422, str(exc)) from exc
-    return enrollment_iface.to_dict(enrollment_iface.get_for_user_external_id(ext))
 
 
 @api.post("/enrollment/documents/rg", response=EnrollmentOut, tags=["enrollment"])

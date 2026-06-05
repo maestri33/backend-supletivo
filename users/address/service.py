@@ -109,3 +109,38 @@ def patch(*, external_id: str, **fields) -> Address:
         address.save()
     logger.info("address.patched", external_id=external_id, fields=changed)
     return address
+
+
+def fill_empty(*, external_id: str, **fields) -> Address:
+    """Preenche SÓ os campos que estão VAZIOS (Victor 2026-06-05): não sobrescreve o que o CEP já trouxe.
+
+    Em cidade de CEP único o ViaCEP não traz a rua → o usuário a digita aqui (e o que o CEP preencheu
+    fica intocado). Campos com valor não-vazio no payload mas já preenchidos no endereço são ignorados.
+    """
+    address = _require_address(external_id)
+
+    state = fields.get("state")
+    if state is not None and state and state.upper() not in _UF:
+        raise ValidationError("UF inválida.", code="STATE_INVALID")
+
+    changed = []
+    for key in _PATCHABLE:
+        incoming = fields.get(key)
+        current = getattr(address, key, None)
+        # só preenche se veio valor E o campo está vazio hoje
+        if incoming not in (None, "") and current in (None, ""):
+            setattr(address, key, incoming.upper() if key == "state" else incoming)
+            changed.append(key)
+    if changed:
+        address.save()
+    logger.info("address.filled_empty", external_id=external_id, fields=changed)
+    return address
+
+
+# campos essenciais p/ o endereço ser considerado pronto (avançar o funil / anexar).
+_REQUIRED = ("zipcode", "street", "number", "city", "state")
+
+
+def is_complete(address: Address | None) -> bool:
+    """True se os campos essenciais estão preenchidos (Victor: 'pra anexar, todos preenchidos')."""
+    return bool(address) and all(getattr(address, f, None) for f in _REQUIRED)

@@ -140,21 +140,34 @@ def set_profile(
     return enr
 
 
-def set_address(
-    *, user_external_id: str, cep: str, number=None, complement=None
-) -> dict:
+def get_address(*, user_external_id: str) -> dict:
+    """GET do endereço (o front vê o que está vazio p/ saber o que ainda pode preencher)."""
+    _require(user_external_id)
+    return address_iface.as_dict(address_iface.get_by_external_id(user_external_id))
+
+
+def set_address_cep(*, user_external_id: str, cep: str) -> dict:
+    """Busca o CEP (ViaCEP) e preenche o endereço. Em cidade de CEP único a rua fica vazia p/ digitar."""
     enr = _require(user_external_id, _S.PROFILE, _S.ADDRESS)
     address_iface.set_by_cep(external_id=user_external_id, cep=cep)
-    patch = {}
-    if number is not None:
-        patch["number"] = number
-    if complement is not None:
-        patch["complement"] = complement
-    if patch:
-        address_iface.patch(external_id=user_external_id, **patch)
-    if enr.status == _S.PROFILE:
-        _set_status(enr, _S.ADDRESS)
+    _advance_address(enr, user_external_id)
     return address_iface.as_dict(address_iface.get_by_external_id(user_external_id))
+
+
+def set_address_data(*, user_external_id: str, **fields) -> dict:
+    """Preenche os demais campos do endereço — SÓ os que estão VAZIOS (não sobrescreve o que o CEP trouxe)."""
+    enr = _require(user_external_id, _S.PROFILE, _S.ADDRESS)
+    address_iface.fill_empty(external_id=user_external_id, **fields)
+    _advance_address(enr, user_external_id)
+    return address_iface.as_dict(address_iface.get_by_external_id(user_external_id))
+
+
+def _advance_address(enr: Enrollment, user_external_id: str) -> None:
+    """Avança PROFILE→ADDRESS quando o endereço fica completo (campos essenciais preenchidos)."""
+    if enr.status == _S.PROFILE and address_iface.is_complete(
+        address_iface.get_by_external_id(user_external_id)
+    ):
+        _set_status(enr, _S.ADDRESS)
 
 
 def set_documents_rg(

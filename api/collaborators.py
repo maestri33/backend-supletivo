@@ -62,10 +62,18 @@ class ProfileIn(Schema):
     nationality: str | None = None
 
 
-class AddressIn(Schema):
+class AddressCepIn(Schema):
     cep: str
+
+
+class AddressDataIn(Schema):
+    # demais campos — o backend só preenche os que estão VAZIOS (não sobrescreve o CEP).
+    street: str | None = None
     number: str | None = None
     complement: str | None = None
+    neighborhood: str | None = None
+    city: str | None = None
+    state: str | None = None
 
 
 class DocumentsIn(Schema):
@@ -147,21 +155,40 @@ def candidate_profile(request, payload: ProfileIn):
     return candidate_iface.to_dict(cand)
 
 
-@api.post("/candidate/address", tags=["candidate"])
-def candidate_address(request, payload: AddressIn):
+@api.get("/candidate/address", tags=["candidate"])
+def candidate_get_address(request):
+    """GET do endereço (o front vê o que está vazio p/ saber o que ainda pode preencher)."""
     ext = _guard(request, "candidate")
     try:
-        candidate_iface.set_address(
-            user_external_id=ext,
-            cep=payload.cep,
-            number=payload.number,
-            complement=payload.complement,
+        return candidate_iface.get_address(user_external_id=ext)
+    except candidate_iface.CandidateError as exc:
+        raise HttpError(422, str(exc)) from exc
+
+
+@api.post("/candidate/address/cep", tags=["candidate"])
+def candidate_address_cep(request, payload: AddressCepIn):
+    """Busca o CEP (ViaCEP) e preenche o endereço. Em cidade de CEP único a rua fica vazia p/ digitar."""
+    ext = _guard(request, "candidate")
+    try:
+        return candidate_iface.set_address_cep(user_external_id=ext, cep=payload.cep)
+    except DomainError as exc:
+        raise _domain_http(exc) from exc
+    except candidate_iface.CandidateError as exc:
+        raise HttpError(422, str(exc)) from exc
+
+
+@api.post("/candidate/address/data", tags=["candidate"])
+def candidate_address_data(request, payload: AddressDataIn):
+    """Preenche os demais campos — SÓ os que estão VAZIOS (não sobrescreve o que o CEP trouxe)."""
+    ext = _guard(request, "candidate")
+    try:
+        return candidate_iface.set_address_data(
+            user_external_id=ext, **payload.dict(exclude_none=True)
         )
     except DomainError as exc:
         raise _domain_http(exc) from exc
     except candidate_iface.CandidateError as exc:
         raise HttpError(422, str(exc)) from exc
-    return candidate_iface.to_dict(candidate_iface.get_for_user_external_id(ext))
 
 
 @api.post("/candidate/documents", tags=["candidate"])
