@@ -17,7 +17,7 @@ import structlog
 from django.utils import timezone
 
 from finance.models import PaymentRequest
-from integrations.finance.asaas import qrpay
+from integrations.bank.asaas import qrpay
 
 logger = structlog.get_logger()
 

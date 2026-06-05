@@ -1,4 +1,4 @@
-"""Models do app integrations.finance.infinitepay — porte do micro legado pro ORM Django.
+"""Models do app integrations.bank.infinitepay — porte do micro legado pro ORM Django.
 
 Convenções (CONVENTION §4/§6/§8):
  - PK = BigAutoField interno (Django), nunca exposto.

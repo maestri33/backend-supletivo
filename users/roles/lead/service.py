@@ -209,9 +209,9 @@ def _build_checkout(lead: Lead, method: str) -> Checkout:
 
 
 def _build_pix(lead: Lead, profile) -> Checkout:
-    from integrations.finance.asaas import charge as asaas_charge
-    from integrations.finance.asaas.customers import PayerData
-    from integrations.finance.asaas.qr import qr_url_for
+    from integrations.bank.asaas import charge as asaas_charge
+    from integrations.bank.asaas.customers import PayerData
+    from integrations.bank.asaas.qr import qr_url_for
     from users.roles.lead import checkout_links
 
     amount = config.price_pix()
@@ -247,7 +247,7 @@ def _build_pix(lead: Lead, profile) -> Checkout:
 
 
 def _build_card(lead: Lead, profile) -> Checkout:
-    from integrations.finance.infinitepay import checkout as ip_checkout
+    from integrations.bank.infinitepay import checkout as ip_checkout
     from users.roles.lead import checkout_links
 
     amount = config.price_card()

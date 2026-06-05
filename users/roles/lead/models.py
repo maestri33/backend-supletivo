@@ -61,7 +61,7 @@ class Lead(models.Model):
 
 
 class Checkout(models.Model):
-    """O checkout de pagamento de um lead (1-1). Reusa os gateways `integrations/finance/{asaas,infinitepay}`."""
+    """O checkout de pagamento de um lead (1-1). Reusa os gateways `integrations/bank/{asaas,infinitepay}`."""
 
     class Method(models.TextChoices):
         CREDIT_CARD = "credit_card", "cartão de crédito"

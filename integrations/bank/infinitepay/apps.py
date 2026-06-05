@@ -2,7 +2,7 @@ from django.apps import AppConfig
 
 
 class InfinitepayConfig(AppConfig):
-    name = "integrations.finance.infinitepay"
+    name = "integrations.bank.infinitepay"
     label = "infinitepay"
 
     def ready(self):

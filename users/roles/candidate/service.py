@@ -166,7 +166,7 @@ def upload_document_photo(*, user_external_id, slot: str, upload) -> str:
 
 def set_pix(*, user_external_id, key: str, key_type: str) -> Candidate:
     """Valida a chave Pix no Asaas/DICT (confere que é do candidato, CPF do Profile) e grava. MEXE R$0,01."""
-    from integrations.finance.asaas import pixkey
+    from integrations.bank.asaas import pixkey
 
     cand = _require(user_external_id, _S.DOCUMENTS, _S.PIX)
     profile = profiles.find_by_external_id(user_external_id)

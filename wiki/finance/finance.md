@@ -3,7 +3,7 @@
 > **ESTADO:** app de negócio do monólito. Motor de **pagar promotores/coordenadores**: creditar comissão
 > → fechamento semanal → solicitação de pagamento → **PIX real** via `asaas.payout`. **Testado REAL**
 > (2026-06-01): R$1 saiu fim a fim (saldo 105.53→104.53). Consome `users`/`profiles` (FK→User, pix do
-> profile) e `integrations.finance.asaas.payout`. Pasta em **inglês** (`finance`, não `financeiro`). `fees`
+> profile) e `integrations.bank.asaas.payout`. Pasta em **inglês** (`finance`, não `financeiro`). `fees`
 > é a Fatia 2 (depois).
 
 ## Modelos (`finance/models.py`) — REAIS (Decimal, 2 casas), nunca float

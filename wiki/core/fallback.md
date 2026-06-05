@@ -16,7 +16,7 @@
 ## Quem usa
 
 Hoje só o **webhook receiver do asaas** (1a-iii): evento que não casa com nenhum `Payment` nosso
-(nem é evento conhecido) cai aqui. Ver [[../integrations/finance/asaas|asaas]].
+(nem é evento conhecido) cai aqui. Ver [[../integrations/bank/asaas|asaas]].
 
 ## Quando os apps destino existirem
 

@@ -33,8 +33,8 @@ urlpatterns = [
     # link curto do checkout: /lead/checkout/<token> → 302 pro checkout do gateway (manda por WhatsApp).
     path("lead/checkout/<str:token>", checkout_redirect),
     # views DMZ das integrações (internas — <servico>.prod)
-    path("integrations/asaas/", include("integrations.finance.asaas.urls")),
-    path("integrations/infinitepay/", include("integrations.finance.infinitepay.urls")),
+    path("integrations/asaas/", include("integrations.bank.asaas.urls")),
+    path("integrations/infinitepay/", include("integrations.bank.infinitepay.urls")),
     # users — auth (register/check/recover/login). JWKS removido no swap p/ django-ninja-jwt (sem consumidor externo).
     path("users/auth/", include("users.auth.urls")),
     path("users/address/", include("users.address.urls")),

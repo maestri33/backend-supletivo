@@ -7,7 +7,7 @@ from django.apps import AppConfig
 
 
 class AsaasConfig(AppConfig):
-    name = "integrations.finance.asaas"
+    name = "integrations.bank.asaas"
     label = "asaas"
 
     def ready(self):

@@ -1,4 +1,4 @@
-"""Models do app integrations.finance.asaas — porte do micro legado (SQLAlchemy) pro ORM Django.
+"""Models do app integrations.bank.asaas — porte do micro legado (SQLAlchemy) pro ORM Django.
 
 Convenções (CONVENTION §4/§6/§8):
  - PK = BigAutoField interno (Django). Nunca é exposto.

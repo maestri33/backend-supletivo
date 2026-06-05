@@ -1,4 +1,4 @@
-# infinitepay — integrations/finance/infinitepay
+# infinitepay — integrations/bank/infinitepay
 
 > **ESTADO:** checkout (1-b) — **feito e APROVADO no Portão 3 (E2E real, 2026-06-01)**: link de R$1 pago
 > por cartão → webhook real da InfinitePay → `payment_check` reconfirmou → **PAID**. 2º gateway do MVP

@@ -79,7 +79,7 @@ class PaymentRequest(models.Model):
 
     Idempotência do payout = `unique(external_reference)` (= o `payment_id` que mandamos ao asaas).
     `awaiting_pix`/`awaiting_balance` são NÃO-terminais: esperam na fila, não falham (não perde
-    dinheiro). O PIX-out real é executado pelo `integrations.finance.asaas.payout` (provado no 1a-vi).
+    dinheiro). O PIX-out real é executado pelo `integrations.bank.asaas.payout` (provado no 1a-vi).
     """
 
     class Status(models.TextChoices):

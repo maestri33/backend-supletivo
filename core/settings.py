@@ -59,8 +59,8 @@ INSTALLED_APPS = [
     # app base do projeto (models base comuns — ex.: fallback logger de eventos sem destino)
     "core.apps.CoreConfig",
     # integrações externas
-    "integrations.finance.asaas.apps.AsaasConfig",
-    "integrations.finance.infinitepay.apps.InfinitepayConfig",
+    "integrations.bank.asaas.apps.AsaasConfig",
+    "integrations.bank.infinitepay.apps.InfinitepayConfig",
     "integrations.tools.cep.apps.CepConfig",
     "integrations.tools.cpf.apps.CpfConfig",
     "integrations.ai.apps.AiConfig",
@@ -179,7 +179,7 @@ MAX_UPLOAD_MB = env.int("MAX_UPLOAD_MB", default=10)
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 
-# Asaas (integrations.finance.asaas) — config via .env (CONVENTION §8/§10).
+# Asaas (integrations.bank.asaas) — config via .env (CONVENTION §8/§10).
 # Sem a key o app ainda sobe, mas o system check asaas.E001 erra em vermelho no boot.
 # A api-key do Asaas começa com "$" ($aact_...), e o django-environ trata "$" como proxy de
 # variável (quebraria o settings). Por isso lemos via os.environ (valor literal) — read_env()
@@ -202,7 +202,7 @@ ASAAS_WEBHOOK_NAME = env("ASAAS_WEBHOOK_NAME", default="dmz-asaas-managed")
 URL_VERIFY_NONCE_TTL = env.int("URL_VERIFY_NONCE_TTL", default=600)
 
 
-# InfinitePay (integrations.finance.infinitepay) — config via .env (CONVENTION §8/§10).
+# InfinitePay (integrations.bank.infinitepay) — config via .env (CONVENTION §8/§10).
 # A InfinitePay NÃO usa api-key: autentica só pelo `handle` (InfiniteTag) — quem recebe é o dono da
 # conta, não há segredo no envio. Sem o handle, o system check infinitepay.E001 trava o boot. O handle
 # às vezes é colado com "$" à esquerda (InfiniteTag); removemos pra não furar a chamada. Lemos via

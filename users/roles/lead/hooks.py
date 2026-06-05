@@ -1,7 +1,7 @@
 """Hook de pagamento do lead (CONVENTION §7.3).
 
 Registrado em `core.hooks` no boot (`users` AppConfig.ready) para o evento `payment.paid`. O webhook
-do Asaas/InfinitePay (`integrations/finance/*`) valida o pagamento, mexe só no próprio estado e então
+do Asaas/InfinitePay (`integrations/bank/*`) valida o pagamento, mexe só no próprio estado e então
 `dispatch("payment.paid", ...)` — este handler casa o `Checkout` do lead e dispara os efeitos.
 """
 

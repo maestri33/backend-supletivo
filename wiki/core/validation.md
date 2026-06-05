@@ -22,7 +22,7 @@
 
 O `/status/` de cada integração (DMZ) inclui `validation_checks` = último resultado por `name`. Hoje,
 em `asaas`: `status_external` (link) e `webhook_external` (artificial) — provando que o webhook foi
-validado pela via externa (ver [[../integrations/finance/asaas|asaas]] e
+validado pela via externa (ver [[../integrations/bank/asaas|asaas]] e
 `.claude/tests/1a-iii-asaas-webhook.md`).
 
 ## Por quê

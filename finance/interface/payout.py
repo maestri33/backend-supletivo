@@ -1,6 +1,6 @@
 """Worker do payout (rodado pelo Django-Q): processa as `PaymentRequest` e reconcilia com o asaas.
 
-Reusa `integrations.finance.asaas.payout` (PIX-out síncrono + idempotente, provado real no 1a-vi). O
+Reusa `integrations.bank.asaas.payout` (PIX-out síncrono + idempotente, provado real no 1a-vi). O
 finance é só a **camada de domínio do lote semanal**: claim atômico + backoff; `awaiting_pix` (sem
 chave no profile) e `awaiting_balance` (asaas sem saldo) são NÃO-terminais — esperam na fila, não
 falham, não perdem dinheiro. O join asaas↔finance é `PaymentRequest.external_reference` ==
@@ -16,8 +16,8 @@ from django.db.models import Q
 from django.utils import timezone
 
 from finance.models import Commission, PaymentRequest
-from integrations.finance.asaas import payout as asaas_payout
-from integrations.finance.asaas import qrpay as asaas_qrpay
+from integrations.bank.asaas import payout as asaas_payout
+from integrations.bank.asaas import qrpay as asaas_qrpay
 from users.profiles.interface import get as get_profile
 
 logger = structlog.get_logger()

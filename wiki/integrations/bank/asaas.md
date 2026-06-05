@@ -1,4 +1,4 @@
-# asaas — integrations/finance/asaas
+# asaas — integrations/bank/asaas
 
 > **ESTADO:** fundação (1a-i) + status/onboarding (1a-ii) + **webhook receiver, validação de saque e
 > fallback logger (1a-iii)** — feitos e testados. **1a-iii aprovado no Portão 3** (Victor 2026-05-31);
