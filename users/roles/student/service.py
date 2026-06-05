@@ -680,12 +680,14 @@ def _credit_coordinator(student: Student, diploma: StudentDiploma) -> None:
         raise StudentError("no_hub_coordinator")
     try:
         commissions.credit_commission(
-            payee_external_id=coordinator.external_id,
+            payee=coordinator,
             payee_role=Commission.Role.COORDINATOR,
             source_type=Commission.Source.VETERAN,
             source_external_id=student.external_id,
         )
-    except ValueError as exc:  # coordenador sem profile → payee_not_found
+    except (
+        ValueError
+    ) as exc:  # payee None/inválido (defensivo; coordinator já checado acima)
         raise StudentError("commission_payee_invalid") from exc
     diploma.commission_triggered_at = timezone.now()
     diploma.save(update_fields=["commission_triggered_at", "updated_at"])

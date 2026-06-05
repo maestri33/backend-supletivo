@@ -11,15 +11,14 @@ FK real (§4): `user` 1-1, `promoter` e `hub` por FK de verdade.
 
 from __future__ import annotations
 
-import uuid
-
 from django.conf import settings
 from django.db import models
 
+from core.models import ExternalIdModel
 from users.roles._selfie import SelfieStatus
 
 
-class Enrollment(models.Model):
+class Enrollment(ExternalIdModel):
     """A matrícula de um aluno (1-1 com o User). Carrega o hub herdado do promotor que indicou."""
 
     class Status(models.TextChoices):
@@ -32,7 +31,6 @@ class Enrollment(models.Model):
         AWAITING_RELEASE = "awaiting_release", "aguardando liberação"
         COMPLETED = "completed", "concluída"
 
-    external_id = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
     user = models.OneToOneField(
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,

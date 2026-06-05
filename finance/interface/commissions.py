@@ -1,8 +1,8 @@
 """Superfície in-process do finance (CONVENTION §3): creditar comissão + fechamento semanal.
 
-`credit_commission` é o ponto que `lead`/`student` vão chamar no futuro (hoje: management command/
-teste). Resolve o `users.User` pelo `external_id` (borda), lê o valor do `.env` (corrige o bug do
-legado: o valor vinha do caller) e é idempotente por `(source_type, source_external_id)`.
+`credit_commission` é o ponto que `lead`/`student` chamam: recebe o **objeto `users.User`** (o caller
+já tem a FK), lê o valor do `.env` (corrige o bug do legado: o valor vinha do caller) e é idempotente
+por `(source_type, source_external_id)`.
 
 `run_weekly_closing` é a "sexta 18h": janela = **semana corrente** (seg→dom de `reference_date`,
 America/Sao_Paulo — corrige o bug do legado "tudo que está pending"), dispara o bônus FLAT (>= threshold
@@ -23,7 +23,6 @@ from django.utils import timezone
 
 from finance import config
 from finance.models import Commission, PaymentRequest
-from users.profiles.interface import find_by_external_id
 from users.profiles.interface import get as get_profile
 
 logger = structlog.get_logger()
@@ -41,24 +40,23 @@ _AMOUNT_BY_SOURCE = {
 
 
 def credit_commission(
-    *, payee_external_id, payee_role, source_type, source_external_id
+    *, payee, payee_role, source_type, source_external_id
 ) -> Commission:
     """Credita uma comissão (valor do .env) ao beneficiário. Idempotente pela fonte.
 
-    `payee_external_id` (UUID) é a borda → resolve o `users.User` via profiles. Beneficiário sem
-    profile/User levanta ValueError (não cria comissão órfã). `source_external_id` repetido devolve a
-    comissão já existente (get_or_create no `unique(source_type, source_external_id)`).
+    `payee` é o objeto `users.User` (o caller já tem a FK em mãos — sem ida-e-volta por external_id,
+    §1/§4). `payee` None levanta ValueError (não cria comissão órfã). `source_external_id` repetido
+    devolve a comissão já existente (get_or_create no `unique(source_type, source_external_id)`).
     """
-    profile = find_by_external_id(str(payee_external_id))
-    if profile is None:
-        raise ValueError(f"payee_not_found: {payee_external_id}")
+    if payee is None:
+        raise ValueError("payee_required")
 
     amount = _AMOUNT_BY_SOURCE[source_type]()
     commission, created = Commission.objects.get_or_create(
         source_type=source_type,
         source_external_id=source_external_id,
         defaults={
-            "payee": profile.user,
+            "payee": payee,
             "payee_role": payee_role,
             "amount": amount,
         },

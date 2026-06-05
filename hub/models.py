@@ -10,16 +10,15 @@ e um **coordenador** (um promotor; FK→User, identifica o polo na captação �
 
 from __future__ import annotations
 
-import uuid
-
 from django.conf import settings
 from django.db import models
 
+from core.models import ExternalIdModel
 
-class Hub(models.Model):
+
+class Hub(ExternalIdModel):
     """Um polo. Endereço (FK), marca (catálogo `.env`) e coordenador (um promotor, FK→User)."""
 
-    external_id = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
     address = models.ForeignKey(
         "users.Address",
         on_delete=models.PROTECT,

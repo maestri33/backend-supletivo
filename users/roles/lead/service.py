@@ -345,7 +345,7 @@ def _apply_effects(lead: Lead):
     from users.roles.enrollment import interface as enrollment_iface
 
     commissions.credit_commission(
-        payee_external_id=lead.promoter.external_id,
+        payee=lead.promoter,
         payee_role=Commission.Role.PROMOTER,
         source_type=Commission.Source.LEAD,
         source_external_id=lead.external_id,

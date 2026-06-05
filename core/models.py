@@ -1,6 +1,23 @@
 """Models base comuns do core (CONVENTION §2)."""
 
+import uuid
+
 from django.db import models
+
+
+class ExternalIdModel(models.Model):
+    """Base abstrata com o ÚNICO external_id de borda do projeto (CONVENTION §4).
+
+    Todo model exposto na API herda daqui em vez de redeclarar o campo. `external_id` (UUID, imutável) é
+    o id opaco da borda — nunca a PK. As relações INTERNAS continuam por FK de verdade; este campo só
+    aparece na fronteira da API. Como é abstrato, cada filho ganha sua própria coluna idêntica — então
+    quem já declarava o campo igual NÃO muda de schema.
+    """
+
+    external_id = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
+
+    class Meta:
+        abstract = True
 
 
 class UnroutedEvent(models.Model):

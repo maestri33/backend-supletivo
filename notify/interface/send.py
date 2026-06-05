@@ -136,3 +136,14 @@ def send(
         transaction.on_commit(lambda: async_task("notify.dispatch.dispatch", notif.id))
 
     return str(notif.external_id)
+
+
+def get_by_external_id(external_id) -> Notification | None:
+    """Busca a Notification pelo external_id (o handle de borda devolvido por `send`). None se não achar.
+
+    Permite que outro app guarde a relação por FK (em vez do external_id solto), respeitando §3 —
+    não fura o model do notify por fora.
+    """
+    if not external_id:
+        return None
+    return Notification.objects.filter(external_id=external_id).first()

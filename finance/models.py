@@ -10,13 +10,13 @@ Convenções (CONVENTION §4/§6/§8/§12):
  - `source_external_id` é UUID puro: lead/student (§4-8/9) não existem ainda → sem FK pra eles.
 """
 
-import uuid
-
 from django.conf import settings
 from django.db import models
 
+from core.models import ExternalIdModel
 
-class Commission(models.Model):
+
+class Commission(ExternalIdModel):
     """Uma comissão creditada a um beneficiário, aguardando o fechamento semanal."""
 
     class Role(models.TextChoices):
@@ -34,7 +34,6 @@ class Commission(models.Model):
         PAID = "paid", "paga"  # o PIX da PaymentRequest saiu (reconciliado)
         FAILED = "failed", "falhou"  # o PIX falhou em definitivo
 
-    external_id = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
     payee = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.PROTECT,
@@ -74,7 +73,7 @@ class Commission(models.Model):
         return f"Commission({self.payee_role}/{self.source_type} R${self.amount} {self.status})"
 
 
-class PaymentRequest(models.Model):
+class PaymentRequest(ExternalIdModel):
     """A "solicitação de pagamento" do fechamento: 1 por beneficiário/semana → 1 PIX.
 
     Idempotência do payout = `unique(external_reference)` (= o `payment_id` que mandamos ao asaas).
@@ -117,7 +116,6 @@ class PaymentRequest(models.Model):
             "matrícula",
         )  # fee da taxa do credenciador → a matrícula do aluno
 
-    external_id = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
     # {ordinal-sexta-no-mês}_{MM}_{AAAA}_{payee.external_id} (commission) ou fee_<uuid> (fee).
     external_reference = models.CharField(max_length=128, unique=True, db_index=True)
     # fila de saída GENÉRICA: é tudo dinheiro saindo da mesma conta Asaas (palavra do Victor).

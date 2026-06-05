@@ -14,13 +14,13 @@ checkout é gerado síncrono → somem `captured`/`waiting`/`checkout` do legado
 
 from __future__ import annotations
 
-import uuid
-
 from django.conf import settings
 from django.db import models
 
+from core.models import ExternalIdModel
 
-class Lead(models.Model):
+
+class Lead(ExternalIdModel):
     """Um lead (aspirante a aluno). 1-1 com o User; ligado ao promotor que o captou."""
 
     class Status(models.TextChoices):
@@ -28,7 +28,6 @@ class Lead(models.Model):
         PAID = "paid", "pago"
         FAILED = "failed", "falhou"
 
-    external_id = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
     user = models.OneToOneField(
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,

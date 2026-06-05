@@ -22,6 +22,8 @@ from django.contrib.auth.models import (
 from django.db import models
 from django.utils import timezone
 
+from core.models import ExternalIdModel
+
 
 class UserManager(BaseUserManager):
     """Manager do User custom. Login é por `external_id` (passwordless por OTP)."""
@@ -54,15 +56,9 @@ class UserManager(BaseUserManager):
         return self.create_user(external_id=external_id, password=password, **extra)
 
 
-class User(AbstractBaseUser, PermissionsMixin):
+class User(ExternalIdModel, AbstractBaseUser, PermissionsMixin):
     """Identidade da plataforma. `external_id` (UUID, imutável) = o id exposto na borda (§4)."""
 
-    external_id = models.UUIDField(
-        "external_id",
-        default=uuid.uuid4,
-        unique=True,
-        editable=False,
-    )
     is_staff = models.BooleanField("equipe", default=False)
     is_active = models.BooleanField("ativo", default=True)
     date_joined = models.DateTimeField("criado em", default=timezone.now)

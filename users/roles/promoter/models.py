@@ -7,20 +7,19 @@ Carrega o HUB herdado do candidato (promotor pertence a um polo). Sub-pacote de 
 
 from __future__ import annotations
 
-import uuid
-
 from django.conf import settings
 from django.db import models
 
+from core.models import ExternalIdModel
 
-class Promoter(models.Model):
+
+class Promoter(ExternalIdModel):
     """Um promotor ativo (1-1 com o User). Capta leads pelo link `?ref=<external_id>`."""
 
     class Status(models.TextChoices):
         ACTIVE = "active", "ativo"
         SUSPENDED = "suspended", "suspenso"  # não capta nem recebe
 
-    external_id = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
     user = models.OneToOneField(
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,

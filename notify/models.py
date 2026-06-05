@@ -9,9 +9,9 @@ Convenções (CONVENTION §4/§6/§12):
  - Mídia vai por URL: WhatsApp busca pela LAN (IP interno), e-mail embute pela URL pública (§0.2).
 """
 
-import uuid
-
 from django.db import models
+
+from core.models import ExternalIdModel
 
 # Status de envio por canal.
 STATUS_PENDING = "pending"
@@ -32,10 +32,9 @@ _STATUS_CHOICES = [
 MEDIA_TYPES = ("image", "video", "audio", "document")
 
 
-class Notification(models.Model):
+class Notification(ExternalIdModel):
     """Uma notificação despachada — pode atingir vários canais (whatsapp / email / tts)."""
 
-    external_id = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
     # dedup opcional: o caller passa uma chave estável; a mesma chave devolve a notificação já criada.
     idempotency_key = models.CharField(
         max_length=255, unique=True, null=True, blank=True

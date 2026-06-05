@@ -137,7 +137,7 @@ def generate_and_send(user) -> OtpCode:
     ttl_min = settings.OTP_TTL_S // 60
     content = _render(code, ttl_min)
 
-    from notify.interface.send import send
+    from notify.interface.send import get_by_external_id, send
 
     notif_external_id = send(
         text=content,
@@ -146,8 +146,8 @@ def generate_and_send(user) -> OtpCode:
         whatsapp=True,
     )
     otp.status = STATUS_SENT
-    otp.notification_external_id = notif_external_id
-    otp.save(update_fields=["status", "notification_external_id"])
+    otp.notification = get_by_external_id(notif_external_id)
+    otp.save(update_fields=["status", "notification"])
     logger.info("otp.sent", id=otp.id, notification=notif_external_id)
     return otp
 

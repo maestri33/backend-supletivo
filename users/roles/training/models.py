@@ -8,16 +8,15 @@ aguarda entrevista → coordenador aprova → promove a **promotor**. Sub-pacote
 
 from __future__ import annotations
 
-import uuid
-
 from django.conf import settings
 from django.db import models
 
+from core.models import ExternalIdModel
 
-class Material(models.Model):
+
+class Material(ExternalIdModel):
     """Uma matéria do treino: 1 texto + 1 questão + 1 gabarito (+ vídeo/foto opcionais)."""
 
-    external_id = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
     title = models.CharField(max_length=255)
     text_content = models.TextField()
     question = models.TextField()
@@ -40,7 +39,7 @@ class Material(models.Model):
         return f"material<{self.external_id}:{self.title}>"
 
 
-class Trainee(models.Model):
+class Trainee(ExternalIdModel):
     """Estado global do candidato no treino (1-1 com o User). Criado na transição candidate→training."""
 
     class Status(models.TextChoices):
@@ -49,7 +48,6 @@ class Trainee(models.Model):
         APPROVED = "approved", "aprovado"
         REJECTED = "rejected", "rejeitado"
 
-    external_id = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
     user = models.OneToOneField(
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,
@@ -84,7 +82,7 @@ class Trainee(models.Model):
         return f"trainee<{self.external_id}:{self.status}>"
 
 
-class Submission(models.Model):
+class Submission(ExternalIdModel):
     """Uma resposta a uma matéria, corrigida pela IA (nota 0-10 + justificativa)."""
 
     class Status(models.TextChoices):
@@ -92,7 +90,6 @@ class Submission(models.Model):
         APPROVED = "approved", "aprovada"
         REJECTED = "rejected", "reprovada"
 
-    external_id = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
     user = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,

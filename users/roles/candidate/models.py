@@ -7,15 +7,14 @@ Selfie validada → vira **training**. Sub-pacote de `users` (app_label `users`,
 
 from __future__ import annotations
 
-import uuid
-
 from django.conf import settings
 from django.db import models
 
+from core.models import ExternalIdModel
 from users.roles._selfie import SelfieStatus
 
 
-class Candidate(models.Model):
+class Candidate(ExternalIdModel):
     """Um candidato a promotor (1-1 com o User), ligado ao hub onde se cadastrou."""
 
     class Status(models.TextChoices):
@@ -27,7 +26,6 @@ class Candidate(models.Model):
         SELFIE = "selfie", "selfie"
         COMPLETED = "completed", "concluído"
 
-    external_id = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
     user = models.OneToOneField(
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,

@@ -12,13 +12,13 @@ Tudo sob o app_label `users` (sub-pacote, 1 migration set — igual enrollment/c
 
 from __future__ import annotations
 
-import uuid
-
 from django.conf import settings
 from django.db import models
 
+from core.models import ExternalIdModel
 
-class Student(models.Model):
+
+class Student(ExternalIdModel):
     """O aluno (1-1 com o User). Nasce na liberação da matrícula, em `AWAITING_DOCUMENTS`."""
 
     class Status(models.TextChoices):
@@ -50,7 +50,6 @@ class Student(models.Model):
         O_POS = "O+", "O+"
         O_NEG = "O-", "O-"
 
-    external_id = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
     user = models.OneToOneField(
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,
@@ -92,7 +91,7 @@ class Student(models.Model):
         return f"student<{self.external_id}:{self.status}>"
 
 
-class StudentDocument(models.Model):
+class StudentDocument(ExternalIdModel):
     """Documento que o aluno envia + estado da validação por IA (assíncrona). 1 por (aluno, tipo)."""
 
     class Type(models.TextChoices):
@@ -110,7 +109,6 @@ class StudentDocument(models.Model):
         REJECTED = "rejected", "reprovado"  # IA ou coordenador → dono refaz
         REVIEW = "review", "em revisão (coordenador decide)"  # IA falhou/em dúvida
 
-    external_id = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
     student = models.ForeignKey(
         Student, on_delete=models.CASCADE, related_name="documents"
     )
@@ -144,14 +142,13 @@ class StudentDocument(models.Model):
         return f"student_doc<{self.doc_type}:{self.validation_status}>"
 
 
-class StudentExam(models.Model):
+class StudentExam(ExternalIdModel):
     """Prova: o aluno agenda (matéria + data); o coordenador corrige. Reprovou → nova tentativa."""
 
     class Result(models.TextChoices):
         PASSED = "passed", "aprovado"
         FAILED = "failed", "reprovado"
 
-    external_id = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
     student = models.ForeignKey(Student, on_delete=models.CASCADE, related_name="exams")
     subject = models.CharField("matéria", max_length=120)
     scheduled_at = models.DateTimeField("agendada para")
@@ -182,10 +179,9 @@ class StudentExam(models.Model):
         return f"student_exam<{self.subject}:t{self.attempt_number}:{self.result}>"
 
 
-class StudentDiploma(models.Model):
+class StudentDiploma(ExternalIdModel):
     """Diploma: o coordenador emite (certificado + histórico); o aluno retira (foto). 1 por aluno."""
 
-    external_id = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
     student = models.OneToOneField(
         Student, on_delete=models.CASCADE, related_name="diploma"
     )
@@ -215,11 +211,11 @@ class StudentDiploma(models.Model):
         return f"student_diploma<{self.student_id}>"
 
 
-class StudentPendency(models.Model):
+class StudentPendency(ExternalIdModel):
     """O «conferir» do spec (Victor: ambos) — o coordenador lança pendência de DOCUMENTO ou de TAXA.
 
     DOCUMENTO: falta/reprovou um documento que a escola precisa despachar. TAXA: pendência financeira
-    (`amount_cents`/`fee_request_id` opcionais). ⚠️ taxa NÃO move dinheiro aqui — é registro; pagar de
+    (`amount_cents`/`fee_request` opcionais). ⚠️ taxa NÃO move dinheiro aqui — é registro; pagar de
     verdade é pelo motor `fees` com OK do Victor (Portão 3). O aluno vê a pendência (GET) e resolve.
     """
 
@@ -227,16 +223,20 @@ class StudentPendency(models.Model):
         DOCUMENT = "document", "documentação"
         FEE = "fee", "taxa/comissão"
 
-    external_id = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
     student = models.ForeignKey(
         Student, on_delete=models.CASCADE, related_name="pendencies"
     )
     kind = models.CharField(max_length=20, choices=Kind.choices)
     description = models.CharField(max_length=500)
     amount_cents = models.PositiveIntegerField(null=True, blank=True)  # só kind=fee
-    fee_request_id = models.CharField(
-        max_length=64, null=True, blank=True
-    )  # ref opcional ao fees
+    # FK real pro PaymentRequest do motor fees (era CharField solto). SET_NULL preserva a pendência.
+    fee_request = models.ForeignKey(
+        "finance.PaymentRequest",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="+",
+    )
     opened_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.SET_NULL,

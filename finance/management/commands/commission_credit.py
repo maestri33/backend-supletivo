@@ -16,6 +16,7 @@ from django.core.management.base import BaseCommand, CommandError
 
 from finance.interface.commissions import credit_commission
 from finance.models import Commission
+from users.profiles.interface import find_by_external_id
 
 
 class Command(BaseCommand):
@@ -45,9 +46,13 @@ class Command(BaseCommand):
 
     def handle(self, *args, **o):
         source_id = o["source_id"] or str(uuid.uuid4())
+        # borda da CLI: resolve o external_id → User (o oficial é o do User) antes de chamar o finance.
+        profile = find_by_external_id(o["payee"])
+        if profile is None:
+            raise CommandError(f"payee_not_found: {o['payee']}")
         try:
             commission = credit_commission(
-                payee_external_id=o["payee"],
+                payee=profile.user,
                 payee_role=o["role"],
                 source_type=o["source"],
                 source_external_id=source_id,

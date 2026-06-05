@@ -10,13 +10,13 @@ Convenções (CONVENTION §4/§6/§8):
    que transiciona entra nas etapas charge/payout (1a-iv / 1a-v).
 """
 
-import uuid
-
 from django.db import models
 from django.utils import timezone
 
+from core.models import ExternalIdModel
 
-class Customer(models.Model):
+
+class Customer(ExternalIdModel):
     """Pagadores cadastrados no Asaas (find-or-create).
 
     Necessário pra criar cobranças (Payment kind=charge): o Asaas /payments exige customer_id.
@@ -24,7 +24,6 @@ class Customer(models.Model):
     cobrança.
     """
 
-    external_id = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
     asaas_id = models.CharField(max_length=255, unique=True)
     name = models.CharField(max_length=255)
     cpf_cnpj = models.CharField(max_length=14, db_index=True)
@@ -37,13 +36,12 @@ class Customer(models.Model):
         return f"{self.name} ({self.asaas_id})"
 
 
-class PixKey(models.Model):
+class PixKey(ExternalIdModel):
     """Chaves PIX validadas no DICT e registradas no nosso namespace.
 
     `external_id` (borda) é como o resto do sistema referencia a chave; `key` é a chave PIX.
     """
 
-    external_id = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
     key = models.CharField(max_length=255, unique=True)
     key_type = models.CharField(max_length=10)  # CPF | CNPJ | EMAIL | PHONE | EVP
     holder_document = models.CharField(

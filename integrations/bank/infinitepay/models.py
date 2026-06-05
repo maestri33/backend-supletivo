@@ -9,20 +9,19 @@ Convenções (CONVENTION §4/§6/§8):
    do webhook. Aqui é só o schema.
 """
 
-import uuid
-
 from django.db import models
 
+from core.models import ExternalIdModel
 
-class Checkout(models.Model):
+
+class Checkout(ExternalIdModel):
     """Link de pagamento InfinitePay (cartão/pix). Um por cobrança."""
 
     class Status(models.TextChoices):
         PENDING = "PENDING"
         PAID = "PAID"
 
-    # external_id = borda (CONVENTION §4) E o order_nsu enviado à InfinitePay (token opaco do webhook).
-    external_id = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
+    # external_id (herdado de ExternalIdModel) = borda (CONVENTION §4) E o order_nsu enviado à InfinitePay.
     checkout_url = models.TextField(null=True, blank=True)
     slug = models.CharField(
         max_length=128, null=True, blank=True, db_index=True
