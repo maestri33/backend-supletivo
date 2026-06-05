@@ -1,12 +1,17 @@
 """Seed IDEMPOTENTE dos padrões (Victor 2026-06-03): a conta-mãe + o hub padrão.
 
 No início **TUDO centralizado na conta do Victor**: staff (superuser) + promoter + coordinator do
-hub padrão, na MESMA conta. O hub padrão é o **fallback de captação** (candidato sem `ref` cai nele).
-Pode rodar a cada boot (em prod, no entrypoint do deploy) — não duplica. Dados vêm do `.env`
-(`DEFAULT_STAFF_*`, `DEFAULT_HUB_BRAND`). NÃO passa por CPFHub/WhatsApp: é seed de sistema, não register.
+hub padrão, na MESMA conta. O hub padrão (marca `DEFAULT_HUB_BRAND`, dev = `standard`) é o **fallback
+de captação** (candidato/lead sem `ref` cai nele). Pode rodar a cada boot (em prod, no entrypoint do
+deploy) — não duplica. Dados vêm do `.env` (`DEFAULT_STAFF_*`, `DEFAULT_HUB_BRAND`). NÃO passa por
+CPFHub/WhatsApp: é seed de sistema, não register.
 
-As roles `promoter`/`coordinator` são criadas DIRETO (UserRole) — bypass do catálogo de propósito:
-`promoter` não é role de entrada (vem de training→promoter), então `roles.assign` recusaria; aqui é seed.
+A conta-mãe ganha **3 camadas** de promotor/coordenador, todas idempotentes:
+1. `UserRole` `promoter` + `coordinator` — DIRETO (bypass do catálogo: `promoter` não é role de entrada,
+   vem de training→promoter, então `roles.assign` recusaria; aqui é seed de sistema);
+2. `Hub` padrão coordenado por ela (fallback de captação);
+3. a row de domínio `Promoter` ligada ao hub padrão — sem ela `validate_ref` (captação por `?ref=`) e o
+   filtro de polo da listagem (`promoter__promoter__hub`) não pegam a conta-mãe (Victor 2026-06-05).
 """
 
 from __future__ import annotations
@@ -23,6 +28,7 @@ from users.auth.models import User
 from users.profiles import interface as profiles
 from users.profiles.models import Profile
 from users.roles.models import UserRole
+from users.roles.promoter import interface as promoter_iface
 
 logger = structlog.get_logger()
 
@@ -51,6 +57,7 @@ class Command(BaseCommand):
             )
             self._ensure_roles(user)
             hub, hub_created = self._ensure_default_hub(brand=brand, coordinator=user)
+            promoter = promoter_iface.create_promoter(user=user, hub=hub)  # idempotente
 
         logger.info(
             "hub.seed_defaults",
@@ -58,11 +65,13 @@ class Command(BaseCommand):
             staff_created=user_created,
             hub_external_id=str(hub.external_id),
             hub_created=hub_created,
+            promoter_external_id=str(promoter.external_id),
         )
         self.stdout.write(
             self.style.SUCCESS(
                 f"staff external_id={user.external_id} (novo={user_created}); "
-                f"hub padrão external_id={hub.external_id} brand={hub.brand} (novo={hub_created})"
+                f"hub padrão external_id={hub.external_id} brand={hub.brand} (novo={hub_created}); "
+                f"promoter external_id={promoter.external_id} (ref de captação = staff external_id)"
             )
         )
 
