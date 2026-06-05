@@ -110,6 +110,13 @@ class PaymentRequest(models.Model):
         PIX_KEY = "pix_key", "PIX por chave"  # comissão → asaas.payout
         PIX_QRCODE = "pix_qrcode", "PIX por QR code"  # fee → asaas.qrpay
 
+    class SourceType(models.TextChoices):
+        # a que entidade de domínio esta saída se relaciona (espelha o par source do Commission).
+        ENROLLMENT = (
+            "enrollment",
+            "matrícula",
+        )  # fee da taxa do credenciador → a matrícula do aluno
+
     external_id = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
     # {ordinal-sexta-no-mês}_{MM}_{AAAA}_{payee.external_id} (commission) ou fee_<uuid> (fee).
     external_reference = models.CharField(max_length=128, unique=True, db_index=True)
@@ -143,6 +150,12 @@ class PaymentRequest(models.Model):
     qrcode_payload = models.TextField(null=True, blank=True)
     supplier_name = models.CharField(max_length=200, null=True, blank=True)
     scheduled_for = models.DateTimeField(null=True, blank=True)  # null = imediato
+    # relação da saída com a entidade de origem (mesma convenção do Commission: soft-ref por external_id,
+    # SEM FK pra domínio — a fila é genérica). Hoje: fee da taxa → a matrícula (source_type=enrollment).
+    source_type = models.CharField(
+        max_length=20, choices=SourceType.choices, null=True, blank=True, db_index=True
+    )
+    source_external_id = models.UUIDField(null=True, blank=True, db_index=True)
     # snapshot de payee.profile.pix_key resolvido no fechamento (auditável/estável).
     pix_key = models.CharField(max_length=140, null=True, blank=True)
     status = models.CharField(

@@ -21,6 +21,9 @@ from integrations.finance.asaas import qrpay
 
 logger = structlog.get_logger()
 
+# Reexporta o enum de origem da fila pra o caller (ex.: enrollment) não furar a fronteira do interface (§3).
+SourceType = PaymentRequest.SourceType
+
 SP_TZ = ZoneInfo("America/Sao_Paulo")
 # Hora do dia em que pagamos uma despesa AGENDADA pelo vencimento do QR (horário comercial SP).
 # Decisão técnica (Victor delegou 2026-06-02); CONFIG depois se precisar.
@@ -35,12 +38,16 @@ def request_fee_payment(
     description=None,
     scheduled_for=None,
     external_reference=None,
+    source_type=None,
+    source_external_id=None,
 ) -> PaymentRequest:
     """Enfileira uma despesa pra pagamento via PIX QR code (imediato ou agendado).
 
     `scheduled_for=None` ⇒ **imediato** (o worker pega na próxima passada). Com data ⇒ **agendado**
     (a fila não pega até lá, via `next_attempt_at`). Idempotente por `external_reference` (default gerado).
     O `description` é guardado no Payment do Asaas no momento do envio (via supplier_name na fila).
+    `source_type`/`source_external_id` (opcionais): relacionam a fee à entidade de origem — hoje a taxa do
+    credenciador → a matrícula (`SourceType.ENROLLMENT` + `enrollment.external_id`); mesma convenção do Commission.
     """
     ref = external_reference or f"fee_{uuid.uuid4().hex[:16]}"
     existing = PaymentRequest.objects.filter(external_reference=ref).first()
@@ -57,6 +64,8 @@ def request_fee_payment(
         scheduled_for=scheduled_for,
         status=PaymentRequest.Status.QUEUED,
         next_attempt_at=scheduled_for or timezone.now(),
+        source_type=source_type,
+        source_external_id=source_external_id,
     )
     logger.info(
         "finance.fee_requested",
@@ -64,6 +73,8 @@ def request_fee_payment(
         amount=str(pr.amount),
         supplier=supplier_name,
         scheduled_for=str(scheduled_for) if scheduled_for else None,
+        source_type=source_type,
+        source_external_id=str(source_external_id) if source_external_id else None,
     )
     return pr
 

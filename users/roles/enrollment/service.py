@@ -424,9 +424,12 @@ def release(
             fees.request_fee_payment(
                 amount=plan["amount"],
                 qr_payload=qr,
-                supplier_name=f"credenciador (matrícula {enr.external_id})",
+                supplier_name="credenciador",
                 scheduled_for=plan["scheduled_for"],
                 external_reference=f"fee_enr_{enr.external_id}_{i}",
+                # relaciona a fee à matrícula (interno; o aluno NÃO sabe da taxa — palavra do Victor).
+                source_type=fees.SourceType.ENROLLMENT,
+                source_external_id=enr.external_id,
             )
 
     _notify_released(enr)
