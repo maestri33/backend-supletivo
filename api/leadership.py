@@ -95,6 +95,11 @@ class PendencyIn(Schema):
     amount_cents: int | None = None  # só kind=fee (registro; NÃO move dinheiro aqui)
 
 
+class DocDecideIn(Schema):
+    approve: bool  # sim/não do coordenador sobre o documento em REVISÃO
+    reason: str | None = None
+
+
 def _student_action(external_id: str, coordinator, fn, **kw):
     try:
         return fn(student_external_id=external_id, coordinator=coordinator, **kw)
@@ -114,6 +119,28 @@ def grade_exam(request, external_id: str, payload: ExamGradeIn):
         notes=payload.notes,
     )
     return {"external_id": str(exam.external_id), "result": exam.result}
+
+
+@api.post(
+    "/students/{external_id}/documents/{document_external_id}/decide", tags=["student"]
+)
+def decide_document(
+    request, external_id: str, document_external_id: str, payload: DocDecideIn
+):
+    """Coordenador decide um documento que a IA mandou pra REVISÃO (o sim/não dele)."""
+    coordinator = _coordinator(request)
+    doc = _student_action(
+        external_id,
+        coordinator,
+        student_iface.decide_document,
+        document_external_id=document_external_id,
+        approve=payload.approve,
+        reason=payload.reason,
+    )
+    return {
+        "external_id": str(doc.external_id),
+        "validation_status": doc.validation_status,
+    }
 
 
 @api.post("/students/{external_id}/pendencies", tags=["student"])

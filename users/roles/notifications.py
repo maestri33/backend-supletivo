@@ -97,6 +97,10 @@ _MESSAGES: dict[str, str] = {
         "{name}, seu documento ({doc_type}) precisa ser reenviado. "
         "Envie uma nova foto, nítida e legível, {name}."
     ),
+    "student.document_in_review": (
+        "{name}, um documento de aluno ({doc_type}) precisa da sua análise — a IA ficou em dúvida. "
+        "Aprove ou reprove no painel, {name}."
+    ),
     "student.exam_released": (
         "{name}, seus documentos foram aprovados! Você já pode agendar a sua prova quando quiser, {name}."
     ),

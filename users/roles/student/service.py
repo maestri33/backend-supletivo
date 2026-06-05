@@ -276,18 +276,21 @@ def _ai_validate(doc: StudentDocument) -> tuple[str, str | None]:
                 doc.doc_type, holder_name=holder_name, holder_birth=holder_birth
             ),
         )
-    except Exception as exc:  # noqa: BLE001 — validação best-effort; IA fora do ar → fica PENDING
+    except Exception as exc:  # noqa: BLE001 — IA fora do ar → REVIEW (coordenador resolve), Victor 2026-06-05
         logger.warning(
             "student.doc_ai_failed", external_id=str(doc.external_id), error=str(exc)
         )
-        return StudentDocument.Validation.PENDING, None
+        return (
+            StudentDocument.Validation.REVIEW,
+            "IA indisponível no momento — enviado para revisão manual do coordenador.",
+        )
     head = (desc or "").strip().upper()[:24]
     if "REPROVADO" in head:
         return StudentDocument.Validation.REJECTED, desc
     if "APROVADO" in head:
         return StudentDocument.Validation.APPROVED, desc
-    # resposta ambígua → não decide (não auto-aprova; spec "só muda status se aprovar").
-    return StudentDocument.Validation.PENDING, desc
+    # IA respondeu mas não foi conclusiva (dúvida) → revisão humana, NÃO auto-aprova (Victor 2026-06-05).
+    return StudentDocument.Validation.REVIEW, desc
 
 
 def apply_validation(student_document_id: int, *, status: str, raw: str | None) -> None:
@@ -300,7 +303,7 @@ def apply_validation(student_document_id: int, *, status: str, raw: str | None) 
     if doc is None or doc.validation_status != StudentDocument.Validation.PENDING:
         return
     if status == StudentDocument.Validation.PENDING:
-        return  # IA indecisa/fora do ar — deixa pra retry/coordenador
+        return  # sem foto — nada a aplicar
     doc.validation_status = status
     doc.validation_result = {"raw": raw} if raw else None
     doc.validated_at = timezone.now()
@@ -325,6 +328,14 @@ def apply_validation(student_document_id: int, *, status: str, raw: str | None) 
             doc.student,
             event="student.document_rejected",
             key=f"student_doc_rejected_{doc.external_id}",
+            doc_type=doc.get_doc_type_display(),
+        )
+    elif status == StudentDocument.Validation.REVIEW:
+        # IA em dúvida / fora do ar → aciona o coordenador pra decidir (sim/não).
+        _notify_coordinator(
+            doc.student,
+            event="student.document_in_review",
+            key=f"student_doc_review_{doc.external_id}",
             doc_type=doc.get_doc_type_display(),
         )
 
@@ -359,6 +370,66 @@ def _maybe_release_exam(student: Student) -> None:
         event="student.exam_released",
         key=f"student_exam_released_{student.external_id}",
     )
+
+
+def decide_document(
+    *,
+    student_external_id: str,
+    document_external_id: str,
+    coordinator,
+    approve: bool,
+    reason: str | None = None,
+) -> StudentDocument:
+    """Coordenador do hub decide um documento que a IA mandou pra REVISÃO (o sim/não dele).
+
+    aprova → APPROVED (+ pode liberar a prova); reprova → REJECTED (+ avisa o aluno pra refazer). Só age
+    em documento `review` (a decisão da IA aprovado/reprovado é final; o coordenador resolve a dúvida)."""
+    student = _coordinated(student_external_id, coordinator)
+    doc = StudentDocument.objects.filter(
+        student=student, external_id=document_external_id
+    ).first()
+    if doc is None:
+        raise StudentError("document_not_found")
+    if doc.validation_status != StudentDocument.Validation.REVIEW:
+        raise StudentError(f"not_in_review:{doc.validation_status}")
+    note = (reason or "").strip() or (
+        "aprovado pelo coordenador" if approve else "reprovado pelo coordenador"
+    )
+    doc.validation_status = (
+        StudentDocument.Validation.APPROVED
+        if approve
+        else StudentDocument.Validation.REJECTED
+    )
+    # preserva a justificativa da IA e soma a decisão humana (auditoria).
+    doc.validation_result = {
+        "ai": (doc.validation_result or {}).get("raw"),
+        "coordinator": note,
+    }
+    doc.validated_at = timezone.now()
+    doc.save(
+        update_fields=[
+            "validation_status",
+            "validation_result",
+            "validated_at",
+            "updated_at",
+        ]
+    )
+    logger.info(
+        "student.document_decided",
+        external_id=str(doc.external_id),
+        status=doc.validation_status,
+        approve=approve,
+    )
+    if approve:
+        _maybe_release_exam(student)
+    else:
+        _notify(
+            student,
+            event="student.document_rejected",
+            key=f"student_doc_rejected_{doc.external_id}",
+            doc_type=doc.get_doc_type_display(),
+        )
+    return doc
 
 
 # ── prova (aluno agenda; coordenador corrige) ────────────────────────────────

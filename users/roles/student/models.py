@@ -106,8 +106,9 @@ class StudentDocument(models.Model):
 
     class Validation(models.TextChoices):
         PENDING = "pending", "aguardando IA"
-        APPROVED = "approved", "aprovado pela IA"
-        REJECTED = "rejected", "reprovado pela IA"
+        APPROVED = "approved", "aprovado"  # IA ou coordenador
+        REJECTED = "rejected", "reprovado"  # IA ou coordenador → dono refaz
+        REVIEW = "review", "em revisão (coordenador decide)"  # IA falhou/em dúvida
 
     external_id = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
     student = models.ForeignKey(
