@@ -33,7 +33,9 @@ def _digits(value: str) -> str:
 def _validate_cpf_cnpj(raw: str) -> str:
     digits = _digits(raw)
     if len(digits) not in (11, 14):
-        raise CustomerError(f"invalid_cpf_cnpj: {len(digits)} dígitos (esperado 11 ou 14)")
+        raise CustomerError(
+            f"invalid_cpf_cnpj: {len(digits)} dígitos (esperado 11 ou 14)"
+        )
     return digits
 
 

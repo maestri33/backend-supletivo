@@ -4,20 +4,25 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
-        ('finance', '0002_paymentrequest_kind_paymentrequest_method_and_more'),
+        ("finance", "0002_paymentrequest_kind_paymentrequest_method_and_more"),
     ]
 
     operations = [
         migrations.AddField(
-            model_name='paymentrequest',
-            name='source_external_id',
+            model_name="paymentrequest",
+            name="source_external_id",
             field=models.UUIDField(blank=True, db_index=True, null=True),
         ),
         migrations.AddField(
-            model_name='paymentrequest',
-            name='source_type',
-            field=models.CharField(blank=True, choices=[('enrollment', 'matrícula')], db_index=True, max_length=20, null=True),
+            model_name="paymentrequest",
+            name="source_type",
+            field=models.CharField(
+                blank=True,
+                choices=[("enrollment", "matrícula")],
+                db_index=True,
+                max_length=20,
+                null=True,
+            ),
         ),
     ]

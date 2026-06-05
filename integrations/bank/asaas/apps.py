@@ -41,7 +41,9 @@ class AsaasConfig(AppConfig):
         )
         if reloader_launcher:
             return
-        threading.Thread(target=self._run_selftest, name="asaas-selftest", daemon=True).start()
+        threading.Thread(
+            target=self._run_selftest, name="asaas-selftest", daemon=True
+        ).start()
 
     def _run_selftest(self):
         """Espera o servidor subir e roda setup(): testa a key, pinga a URL e auto-cadastra o webhook.

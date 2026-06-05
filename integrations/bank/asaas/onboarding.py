@@ -110,34 +110,57 @@ def run_checks(*, record: bool = True) -> dict:
     }
 
     if not out["api_key_in_env"]:
-        out["hints"].append("Cole ASAAS_API_KEY no .env (sem ela o boot erra: asaas.E001).")
+        out["hints"].append(
+            "Cole ASAAS_API_KEY no .env (sem ela o boot erra: asaas.E001)."
+        )
         return out
 
     try:
         probe = asyncio.run(_probe())
     except AsaasError as e:
         out["error"] = {"status_code": e.status_code, "body": e.body}
-        out["hints"].append("A key não validou no Asaas (ver error). Confira ASAAS_API_KEY.")
+        out["hints"].append(
+            "A key não validou no Asaas (ver error). Confira ASAAS_API_KEY."
+        )
         if record:
-            record_check("asaas", "api_key_tested_ok", False, mode="real",
-                         detail=f"asaas {e.status_code}: {e.body}")
+            record_check(
+                "asaas",
+                "api_key_tested_ok",
+                False,
+                mode="real",
+                detail=f"asaas {e.status_code}: {e.body}",
+            )
         return out
 
     out["api_key_tested_ok"] = True
     out["balance"] = probe["balance"].get("balance") if probe["balance"] else None
     out["webhook_registered"] = _find_our_webhook(probe["webhooks"])
     if record:
-        record_check("asaas", "api_key_tested_ok", True, mode="real",
-                     detail=f"balance={out['balance']}")
-        record_check("asaas", "webhook_registered", bool(out["webhook_registered"]), mode="real",
-                     detail=(out["webhook_registered"] or {}).get("id") or "ausente")
+        record_check(
+            "asaas",
+            "api_key_tested_ok",
+            True,
+            mode="real",
+            detail=f"balance={out['balance']}",
+        )
+        record_check(
+            "asaas",
+            "webhook_registered",
+            bool(out["webhook_registered"]),
+            mode="real",
+            detail=(out["webhook_registered"] or {}).get("id") or "ausente",
+        )
 
     if not out["webhook_secret_in_env"]:
-        out["hints"].append("Defina ASAAS_WEBHOOK_SECRET no .env (authToken do webhook).")
+        out["hints"].append(
+            "Defina ASAAS_WEBHOOK_SECRET no .env (authToken do webhook)."
+        )
     if not out["external_url_in_env"]:
         out["hints"].append("Defina EXTERNAL_URL no .env (URL pública do webhook).")
     if not out["webhook_registered"]:
-        out["hints"].append("Webhook não cadastrado — rode POST /integrations/asaas/setup/.")
+        out["hints"].append(
+            "Webhook não cadastrado — rode POST /integrations/asaas/setup/."
+        )
 
     out["ready"] = bool(
         out["api_key_tested_ok"]
@@ -205,7 +228,9 @@ def setup(*, force: bool = False) -> dict:
     if not report.get("api_key_tested_ok"):
         return report
     if not settings.ASAAS_WEBHOOK_SECRET:
-        report["hints"].append("Sem ASAAS_WEBHOOK_SECRET no .env — webhook NÃO cadastrado.")
+        report["hints"].append(
+            "Sem ASAAS_WEBHOOK_SECRET no .env — webhook NÃO cadastrado."
+        )
         return report
     if not settings.EXTERNAL_URL:
         report["hints"].append("Sem EXTERNAL_URL no .env — webhook NÃO cadastrado.")
@@ -231,13 +256,25 @@ def setup(*, force: bool = False) -> dict:
     except AsaasError as e:
         report["webhook_action"] = "failed"
         report["error"] = {"status_code": e.status_code, "body": e.body}
-        record_check("asaas", "webhook_registered", False, mode="real",
-                     detail=f"asaas {e.status_code}: {e.body}")
+        record_check(
+            "asaas",
+            "webhook_registered",
+            False,
+            mode="real",
+            detail=f"asaas {e.status_code}: {e.body}",
+        )
         return report
 
     report["webhook_action"] = action
     report["webhook_registered"] = webhook
-    record_check("asaas", "webhook_registered", True, mode="real",
-                 detail=f"{action} id={webhook.get('id')} url={webhook.get('url')}")
-    report["ready"] = bool(settings.ASAAS_WEBHOOK_SECRET and settings.EXTERNAL_URL and webhook)
+    record_check(
+        "asaas",
+        "webhook_registered",
+        True,
+        mode="real",
+        detail=f"{action} id={webhook.get('id')} url={webhook.get('url')}",
+    )
+    report["ready"] = bool(
+        settings.ASAAS_WEBHOOK_SECRET and settings.EXTERNAL_URL and webhook
+    )
     return report

@@ -7,7 +7,9 @@ app_name = "asaas"
 urlpatterns = [
     # DMZ (rede interna) — onboarding/health da integração
     path("status/", views.status, name="status"),  # read-only
-    path("setup/", views.setup, name="setup"),  # roda a bateria + auto-cadastra o webhook
+    path(
+        "setup/", views.setup, name="setup"
+    ),  # roda a bateria + auto-cadastra o webhook
     # público — o que o Asaas chama de volta (auth = asaas-access-token)
     path("webhook/", views.webhook, name="webhook"),
     path("transfer-validation/", views.transfer_validation, name="transfer-validation"),

@@ -148,7 +148,9 @@ def charge_cancel(request, payment_id):
     try:
         row = charge_service.cancel_charge(payment_id)
     except charge_service.ChargeError as e:
-        return JsonResponse({"detail": str(e)}, status=404 if str(e) == "not_found" else 400)
+        return JsonResponse(
+            {"detail": str(e)}, status=404 if str(e) == "not_found" else 400
+        )
     return JsonResponse(charge_service.to_dict(row))
 
 
@@ -159,7 +161,9 @@ def charge_refund(request, payment_id):
     try:
         row = charge_service.refund_charge(payment_id)
     except charge_service.ChargeError as e:
-        return JsonResponse({"detail": str(e)}, status=404 if str(e) == "not_found" else 400)
+        return JsonResponse(
+            {"detail": str(e)}, status=404 if str(e) == "not_found" else 400
+        )
     return JsonResponse(charge_service.to_dict(row))
 
 
