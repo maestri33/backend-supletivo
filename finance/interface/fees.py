@@ -112,18 +112,23 @@ def schedule_fee_on_due_date(
         raise ValueError(
             "sem valor: o caller não informou e o QR decodificado não traz `value`."
         )
+    # VENCIDA (dueDate no passado): não dá pra agendar no passado — paga IMEDIATO, explícito e logado
+    # (não silencioso). Quem cola uma cobv vencida quer quitá-la; o worker pegaria na próxima passada de
+    # qualquer forma, mas aqui deixamos claro que é pagamento imediato, não "agendado".
+    overdue = scheduled_for <= timezone.now()
     logger.info(
         "finance.fee_scheduled_on_due",
         due_date=str(due),
-        scheduled_for=str(scheduled_for),
+        scheduled_for=None if overdue else str(scheduled_for),
         amount=str(value),
         from_qr_value=amount is None,
+        overdue=overdue,
     )
     return request_fee_payment(
         amount=value,
         qr_payload=qr_payload,
         supplier_name=supplier_name,
         description=description,
-        scheduled_for=scheduled_for,
+        scheduled_for=None if overdue else scheduled_for,
         external_reference=external_reference,
     )
