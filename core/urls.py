@@ -35,7 +35,7 @@ urlpatterns = [
     # views DMZ das integrações (internas — <servico>.prod)
     path("integrations/asaas/", include("integrations.finance.asaas.urls")),
     path("integrations/infinitepay/", include("integrations.finance.infinitepay.urls")),
-    # users — auth DMZ (register/check/recover/login) + JWKS público na raiz (RFC 7517)
+    # users — auth (register/check/recover/login). JWKS removido no swap p/ django-ninja-jwt (sem consumidor externo).
     path("users/auth/", include("users.auth.urls")),
     path("users/address/", include("users.address.urls")),
     path("users/documents/", include("users.documents.urls")),

@@ -122,13 +122,19 @@ def default_coordinator_external_id() -> str | None:
 
 
 def hub_of(user) -> Hub | None:
-    """O polo de um promotor (herança do plano §6-lead-funil): o hub que ele COORDENA; senão o padrão.
+    """O polo de um promotor (herança do plano §6-lead-funil): a responsabilidade passa pro HUB do
+    promotor que indicou quando o lead vira matrícula (Victor 2026-06-04).
 
-    Quando o lead vira matrícula a responsabilidade passa pro HUB, herdado do promotor que indicou
-    (palavra do Victor 2026-06-04). Na Fatia 1 o único promotor é a conta-mãe (coordena o hub padrão)
-    → resolve pro padrão. Fatia 2 (relacionamentos) dará polo a promotores comuns; a herança pro
-    `enrollment`/`student` já fica pronta aqui.
+    Preferência (corrigido 2026-06-05 — auditoria): o hub a que o promotor **PERTENCE** (`Promoter.hub`);
+    senão o hub que ele **coordena**; senão o **padrão**. Antes resolvia só por coordenação → promotor
+    comum (não-coordenador) caía no padrão e a comissão da matrícula/veteran ia pro polo ERRADO. Como a
+    conta-mãe tem `Promoter.hub` = hub padrão, o caso atual não muda; o promotor comum (Fatia 2) já fica certo.
     """
+    from users.roles.promoter import interface as promoter_iface
+
+    promoter = promoter_iface.get_for_user(user)
+    if promoter is not None:
+        return promoter.hub
     coordinated = (
         Hub.objects.select_related("coordinator")
         .filter(coordinator=user)

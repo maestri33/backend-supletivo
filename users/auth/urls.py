@@ -1,4 +1,5 @@
-"""Rotas DMZ do auth. Montadas em /users/auth/ pelo core/urls.py. O JWKS vai na raiz (well-known)."""
+"""Rotas do auth (register/check/recover/login). Montadas em /users/auth/ pelo core/urls.py.
+O JWKS foi removido no swap p/ django-ninja-jwt (sem consumidor externo de JWKS)."""
 
 from django.urls import path
 

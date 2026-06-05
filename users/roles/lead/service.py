@@ -15,7 +15,6 @@ from hub import interface as hub_iface
 from users.auth import interface as auth_iface
 from users.auth.models import User
 from users.profiles import interface as profiles
-from users.roles import interface as roles
 from users.roles import notifications as msgs
 from users.roles.lead import config
 from users.roles.lead.models import Checkout, Lead
@@ -181,10 +180,16 @@ def _notify_checkout(lead: Lead, checkout: Checkout) -> None:
 
 
 def _resolve_promoter(ref) -> User:
-    """`ref` (external_id) → promotor; ref inválido/ausente/não-promotor → promotor padrão (hub padrão)."""
+    """`ref` (external_id) → promotor ATIVO; ref inválido/ausente/suspenso → promotor padrão (hub padrão).
+
+    Usa `promoter.validate_ref` (exige `Promoter` com status ACTIVE) em vez de só checar a role: assim um
+    promotor SUSPENSO ("não capta nem recebe") não amarra leads nem ganha comissão (auditoria 2026-06-05).
+    """
     if ref:
-        u = User.objects.filter(external_id=ref).first()
-        if u is not None and "promoter" in roles.active_roles(u):
+        from users.roles.promoter import interface as promoter_iface
+
+        u = promoter_iface.validate_ref(ref)
+        if u is not None:
             return u
         logger.info("lead.ref_fallback_default", ref=str(ref))
     ext = hub_iface.default_coordinator_external_id()
