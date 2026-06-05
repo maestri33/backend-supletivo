@@ -64,11 +64,113 @@ def create_lead(
         method=method,
         promoter=str(promoter.external_id),
     )
+    # ── notifies da CRIAÇÃO do lead (Victor: rastrear; teor final ele edita depois) ──
+    _notify_captured(
+        lead
+    )  # evento LEAD CAPTURADO → vai pro LEAD (o aluno que acabou de entrar) — com TTS
+    _notify_promoter_new_lead(
+        lead
+    )  # evento NOVO LEAD NA REDE → vai pro PROMOTOR (o ref que indicou)
+    _notify_checkout(
+        lead, checkout
+    )  # evento LINK DE PAGAMENTO → vai pro LEAD (link curto, legado mandava)
     return {
         "external_id": str(lead.external_id),
         "status": lead.status,
         "checkout": _checkout_dict(checkout),
     }
+
+
+def _notify_captured(lead: Lead) -> None:
+    """Evento **LEAD CAPTURADO** → destinatário: o **LEAD** (aluno que acabou de entrar no sistema).
+
+    Canal: WhatsApp **+ TTS** (Victor: voz por gênero). Teor = boas-vindas/captação; o Victor edita o
+    texto final depois — aqui é o placeholder rastreável. Best-effort (§12)."""
+    from notify.interface.send import send
+
+    p = profiles.get(lead.user)
+    if p is None:
+        return
+    try:
+        send(
+            text=(
+                f"Olá, {p.name or 'tudo bem'}! Seu cadastro foi criado — você acaba de dar o primeiro "
+                "passo na sua matrícula. Em seguida enviamos o link para concluir o pagamento."
+            ),
+            caller="lead.captured",
+            phone=p.phone,
+            tts=True,  # voz (Victor: já implementando TTS no LEAD CAPTURADO)
+            gender=p.gender,
+            idempotency_key=f"lead_captured_{lead.external_id}",
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "lead.notify_captured_failed",
+            external_id=str(lead.external_id),
+            error=str(exc),
+        )
+
+
+def _notify_promoter_new_lead(lead: Lead) -> None:
+    """Evento **NOVO LEAD NA REDE** → destinatário: o **PROMOTOR** (o ref que indicou o lead).
+
+    Avisa que um lead entrou pela indicação dele. Teor final o Victor edita depois. Best-effort (§12)."""
+    from notify.interface.send import send
+
+    lead_p = profiles.get(lead.user)
+    prom_p = profiles.get(lead.promoter)
+    if prom_p is None:
+        return
+    nome = (lead_p.name if lead_p else None) or "Um novo lead"
+    try:
+        send(
+            text=f"{nome} acaba de entrar na sua rede pela sua indicação. Incentive a concluir o pagamento!",
+            caller="lead.captured.promoter",
+            phone=prom_p.phone,
+            idempotency_key=f"lead_new_promoter_{lead.external_id}",
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "lead.notify_promoter_new_failed",
+            external_id=str(lead.external_id),
+            error=str(exc),
+        )
+
+
+def _notify_checkout(lead: Lead, checkout: Checkout) -> None:
+    """Envia o LINK de pagamento (curto) ao lead por WhatsApp — o legado fazia, faltava aqui.
+
+    Best-effort (§12). Wording funcional por ora; enriquecer (tom/venda/TTS) é decisão do Victor — ver o
+    mapa de notifies do legado. PIX inclui o copia-e-cola além do link da página hospedada."""
+    from notify.interface.send import send
+
+    from users.roles.lead import checkout_links
+
+    profile = profiles.get(lead.user)
+    if profile is None:
+        return
+    link = checkout_links.short_url(checkout.short_token) or checkout.checkout_url
+    valor = f"R${checkout.amount}"
+    if checkout.payment_method == Checkout.Method.PIX:
+        text = (
+            f"Para concluir sua matrícula, pague o PIX de {valor}:\n{link}\n\n"
+            f"Ou use o PIX copia-e-cola:\n{checkout.qrcode_payload or '-'}"
+        )
+    else:
+        text = f"Para concluir sua matrícula, pague {valor} no cartão:\n{link}"
+    try:
+        send(
+            text=text,
+            caller="lead.checkout",
+            phone=profile.phone,
+            idempotency_key=f"lead_checkout_{lead.external_id}",
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "lead.notify_checkout_failed",
+            external_id=str(lead.external_id),
+            error=str(exc),
+        )
 
 
 def _resolve_promoter(ref) -> User:
@@ -98,6 +200,7 @@ def _build_pix(lead: Lead, profile) -> Checkout:
     from integrations.finance.asaas import charge as asaas_charge
     from integrations.finance.asaas.customers import PayerData
     from integrations.finance.asaas.qr import qr_url_for
+    from users.roles.lead import checkout_links
 
     amount = config.price_pix()
     pid = f"lead_{lead.external_id.hex[:16]}"  # = externalReference que o webhook do asaas casa
@@ -108,14 +211,23 @@ def _build_pix(lead: Lead, profile) -> Checkout:
         mobile_phone=profile.phone,
     )
     payment = asaas_charge.create_charge(
-        amount=amount, payer=payer, description=config.description(), payment_id=pid
+        amount=amount,
+        payer=payer,
+        description=config.description(),
+        payment_id=pid,
+        success_url=config.frontend_url(),  # asaas redireciona pra cá depois de pago
     )
+    # página hospedada do Asaas (invoiceUrl) — alvo do link curto; pode pagar PIX por lá ou pelo copia-e-cola.
+    invoice_url = getattr(payment, "invoice_url", None)
+    token = checkout_links.make(invoice_url) if invoice_url else None
     return Checkout.objects.create(
         lead=lead,
         payment_method=Checkout.Method.PIX,
         provider=Checkout.Provider.ASAAS,
         provider_payment_id=payment.payment_id,
         amount=amount,
+        checkout_url=invoice_url,
+        short_token=token,
         qrcode_payload=payment.qrcode_payload,
         qrcode_image=qr_url_for(payment.payment_id),
         due_date=payment.due_date,
@@ -124,12 +236,25 @@ def _build_pix(lead: Lead, profile) -> Checkout:
 
 def _build_card(lead: Lead, profile) -> Checkout:
     from integrations.finance.infinitepay import checkout as ip_checkout
+    from users.roles.lead import checkout_links
 
     amount = config.price_card()
-    # customer=None: o pagador preenche os dados na página hospedada da InfinitePay (não chuto o schema).
+    # pré-preenche o checkout com os dados que JÁ temos (nome do CPFHub + email + telefone). Schema
+    # {name, email, phone_number} = porte do legado (sancionado). Telefone BR sem o DDI 55.
+    phone = profile.phone or ""
+    customer = {
+        "name": profile.name or "",
+        "email": profile.email or "",
+        "phone_number": phone[2:] if phone.startswith("55") else phone,
+    }
+    # redirect_url: pra onde a InfinitePay manda o pagador DEPOIS de pagar (frontend_url).
     row = ip_checkout.create_checkout(
-        amount=amount, description=config.description(), customer=None
+        amount=amount,
+        description=config.description(),
+        customer=customer,
+        redirect_url=config.frontend_url(),
     )
+    token = checkout_links.make(row.checkout_url)
     return Checkout.objects.create(
         lead=lead,
         payment_method=Checkout.Method.CREDIT_CARD,
@@ -139,16 +264,22 @@ def _build_card(lead: Lead, profile) -> Checkout:
         ),  # = order_nsu que o webhook do infinitepay casa
         amount=amount,
         checkout_url=row.checkout_url,
+        short_token=token,
     )
 
 
 def _checkout_dict(c: Checkout) -> dict:
+    from users.roles.lead import checkout_links
+
     return {
         "payment_method": c.payment_method,
         "provider": c.provider,
         "amount": str(c.amount),
         "is_paid": c.is_paid,
         "checkout_url": c.checkout_url,
+        "short_url": checkout_links.short_url(
+            c.short_token
+        ),  # link curto p/ mandar por WhatsApp
         "qrcode_payload": c.qrcode_payload,
         "qrcode_image": c.qrcode_image,
         "due_date": c.due_date.isoformat() if c.due_date else None,
@@ -158,11 +289,12 @@ def _checkout_dict(c: Checkout) -> dict:
 # ── pagamento (chamado pelo hook do webhook, CONVENTION §7) ─────────────────
 
 
-def mark_paid(*, provider: str, provider_payment_id: str) -> bool:
+def mark_paid(*, provider: str, provider_payment_id: str, receipt_url=None) -> bool:
     """Casa o Checkout do lead por (provider, provider_payment_id). Se for nosso → marca pago + efeitos.
 
-    Idempotente (lead já PAID → no-op). Devolve True se consumiu (era checkout de lead), senão False (o
-    webhook cai no fallback rastreável — pode ser cobrança de `fees`, não nossa).
+    `receipt_url` (do webhook) é guardado no Checkout e vai pro aluno na notify de pago. Idempotente
+    (lead já PAID → no-op). True se consumiu (era checkout de lead), senão False (o webhook cai no
+    fallback rastreável — pode ser cobrança de `fees`, não nossa).
     """
     checkout = (
         Checkout.objects.select_related("lead", "lead__user", "lead__promoter")
@@ -177,15 +309,18 @@ def mark_paid(*, provider: str, provider_payment_id: str) -> bool:
         return True  # idempotente (webhook re-tentou)
 
     with transaction.atomic():
-        if not checkout.is_paid:
-            checkout.is_paid = True
-            checkout.save(update_fields=["is_paid", "updated_at"])
+        fields = ["is_paid", "updated_at"]
+        checkout.is_paid = True
+        if receipt_url:
+            checkout.receipt_url = receipt_url
+            fields.insert(1, "receipt_url")
+        checkout.save(update_fields=fields)
         lead.status = Lead.Status.PAID
         lead.save(update_fields=["status", "updated_at"])
         hub = _apply_effects(lead)
 
     _notify_paid(
-        lead, hub
+        lead, hub, checkout
     )  # fora da transação: best-effort, não desfaz comissão/enrollment
     logger.info("lead.paid", external_id=str(lead.external_id), provider=provider)
     return True
@@ -210,8 +345,10 @@ def _apply_effects(lead: Lead):
     return hub
 
 
-def _notify_paid(lead: Lead, hub) -> None:
-    """Avisa lead + coordenador do hub + promotor (best-effort; cada canal isolado, §12)."""
+def _notify_paid(lead: Lead, hub, checkout: Checkout | None = None) -> None:
+    """Avisa lead + coordenador do hub + promotor (best-effort; cada canal isolado, §12).
+
+    A notify do LEAD inclui o **comprovante** (`checkout.receipt_url`, que veio no webhook) — Victor."""
     from notify.interface.send import send
 
     profile = profiles.get(lead.user)
@@ -225,9 +362,16 @@ def _notify_paid(lead: Lead, hub) -> None:
                 f"lead.notify_{label}_failed", external_id=base, error=str(exc)
             )
 
+    # evento PAGAMENTO CONFIRMADO → vai pro LEAD (o aluno). Inclui o comprovante quando o webhook traz.
+    receipt = checkout.receipt_url if checkout else None
+    lead_text = (
+        "Pagamento confirmado! 🎉 Sua matrícula começou — acesse para continuar."
+    )
+    if receipt:
+        lead_text += f"\n\nComprovante: {receipt}"
     _safe(
         "lead",
-        text="Pagamento confirmado! 🎉 Sua matrícula começou — acesse para continuar.",
+        text=lead_text,
         caller="lead.paid",
         phone=profile.phone if profile else None,
         email=profile.email if profile else None,
@@ -260,3 +404,39 @@ def get_lead(external_id: str) -> Lead | None:
         .filter(external_id=external_id)
         .first()
     )
+
+
+def list_leads(*, hub=None, status=None) -> list[Lead]:
+    """Lista leads (mais novos primeiro), opcionalmente filtrados por HUB (do polo) e status.
+
+    HUB = o polo do lead: o promotor pertence ao hub (`Promoter.hub`) OU a matrícula já está no hub
+    (`Enrollment.hub`, pós-pagamento). Sem hub → todos (staff). Coordenador passa o seu hub."""
+    from django.db.models import Q
+
+    qs = Lead.objects.select_related("user", "promoter", "checkout").order_by(
+        "-created_at"
+    )
+    if status:
+        qs = qs.filter(status=status)
+    if hub is not None:
+        qs = qs.filter(
+            Q(promoter__promoter__hub=hub) | Q(user__enrollment__hub=hub)
+        ).distinct()
+    return list(qs)
+
+
+def lead_to_dict(lead: Lead) -> dict:
+    """Lead pra listagem do hub/staff: dados + LINK de pagamento + COMPROVANTE (Victor)."""
+    from users.roles.lead import checkout_links
+
+    c = getattr(lead, "checkout", None)
+    p = profiles.get(lead.user)
+    return {
+        "external_id": str(lead.external_id),
+        "status": lead.status,
+        "name": p.name if p else None,
+        "phone": p.phone if p else None,
+        "promoter_external_id": str(lead.promoter.external_id),
+        "payment_link": checkout_links.short_url(c.short_token) if c else None,
+        "receipt_url": c.receipt_url if c else None,
+    }

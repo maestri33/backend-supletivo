@@ -26,9 +26,12 @@ from api.clients import api as clients_api
 from api.collaborators import api as collaborators_api
 from api.leadership import api as leadership_api
 from api.staff import api as staff_api
+from users.roles.lead.checkout_links import checkout_redirect
 
 urlpatterns = [
     path("admin/", admin.site.urls),
+    # link curto do checkout: /lead/checkout/<token> → 302 pro checkout do gateway (manda por WhatsApp).
+    path("lead/checkout/<str:token>", checkout_redirect),
     # views DMZ das integrações (internas — <servico>.prod)
     path("integrations/asaas/", include("integrations.finance.asaas.urls")),
     path("integrations/infinitepay/", include("integrations.finance.infinitepay.urls")),

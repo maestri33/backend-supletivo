@@ -77,6 +77,8 @@ def handle_event(payload, source_ip=None, user_agent=None):
                 provider="asaas",
                 provider_payment_id=payment.payment_id,
                 amount_cents=int(payment.amount * 100),
+                # comprovante PIX (Asaas) → o lead manda pro aluno na notify de pago.
+                receipt_url=(payload.get("payment") or {}).get("transactionReceiptUrl"),
             )
         # ninguém consumiu (ou não é cobrança paga) -> fallback rastreável (§7.4), não perde o evento.
         if not consumed:

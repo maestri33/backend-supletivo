@@ -50,29 +50,40 @@ def _resolve_due_date(due_date: str | None) -> date:
     return parsed
 
 
-async def _create_payment_and_qr(customer_asaas_id, value, due, description, pid):
+async def _create_payment_and_qr(
+    customer_asaas_id, value, due, description, pid, success_url=None
+):
     async with get_client() as c:
-        created = await c.create_payment(
-            {
-                "customer": customer_asaas_id,
-                "billingType": "PIX",
-                "value": value,
-                "dueDate": due.isoformat(),
-                "description": description or f"charge {pid}",
-                "externalReference": pid,
-            }
-        )
+        payload = {
+            "customer": customer_asaas_id,
+            "billingType": "PIX",
+            "value": value,
+            "dueDate": due.isoformat(),
+            "description": description or f"charge {pid}",
+            "externalReference": pid,
+        }
+        if success_url:
+            # a página hospedada do Asaas redireciona pra cá depois de pago.
+            payload["callback"] = {"successUrl": success_url, "autoRedirect": True}
+        created = await c.create_payment(payload)
         qr = None
         try:
             qr = await c.get_payment_pix_qr_code(created["id"])
         except AsaasError as e:
             # não bloqueia a criação — persistimos sem QR e dá pra rebuscar
-            logger.warning("charge_qr_fetch_failed", asaas_id=created.get("id"), body=str(e.body))
+            logger.warning(
+                "charge_qr_fetch_failed", asaas_id=created.get("id"), body=str(e.body)
+            )
         return created, qr
 
 
-def create_charge(*, amount, payer, description=None, due_date=None, payment_id=None) -> Payment:
-    """Cria uma cobrança PIX (kind=charge). Retorna o Payment persistido (status PENDING)."""
+def create_charge(
+    *, amount, payer, description=None, due_date=None, payment_id=None, success_url=None
+) -> Payment:
+    """Cria uma cobrança PIX (kind=charge). Retorna o Payment persistido (status PENDING).
+
+    `success_url` (opcional): URL pra onde a página hospedada do Asaas redireciona após o pagamento.
+    O `invoiceUrl` (página hospedada) volta como atributo transiente `row.invoice_url`."""
     if amount is None:
         raise ChargeError("amount_required")
     try:
@@ -88,7 +99,9 @@ def create_charge(*, amount, payer, description=None, due_date=None, payment_id=
 
     try:
         created, qr = asyncio.run(
-            _create_payment_and_qr(cust.asaas_id, float(amt), due, description, pid)
+            _create_payment_and_qr(
+                cust.asaas_id, float(amt), due, description, pid, success_url
+            )
         )
     except AsaasError as e:
         raise ChargeError(f"asaas_charge_create_failed: {e.body}") from e
@@ -112,12 +125,18 @@ def create_charge(*, amount, payer, description=None, due_date=None, payment_id=
         status="PENDING",
         asaas_id=created["id"],
     )
-    logger.info("charge_created", payment_id=pid, asaas_id=created["id"], amount=str(amt))
+    # invoiceUrl = página hospedada do Asaas (alvo do link curto). Transiente: não persistimos no Payment.
+    row.invoice_url = created.get("invoiceUrl")
+    logger.info(
+        "charge_created", payment_id=pid, asaas_id=created["id"], amount=str(amt)
+    )
     return row
 
 
 def get_charge(payment_id: str) -> Payment:
-    row = Payment.objects.filter(payment_id=payment_id, kind=Payment.Kind.CHARGE).first()
+    row = Payment.objects.filter(
+        payment_id=payment_id, kind=Payment.Kind.CHARGE
+    ).first()
     if row is None:
         raise ChargeError("not_found")
     return row

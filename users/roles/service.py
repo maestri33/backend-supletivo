@@ -18,6 +18,14 @@ def _active_qs(user):
     return UserRole.objects.filter(user=user, revoked_at__isnull=True)
 
 
+def _bump_token_version(user) -> None:
+    """Incrementa a versão de token do User → invalida todo JWT antigo. Chamado em TODA troca de role
+    (assign/promote): a role mudou, o token velho cai e força re-login/refresh (Victor 2026-06-05)."""
+    from django.db.models import F
+
+    type(user).objects.filter(pk=user.pk).update(token_version=F("token_version") + 1)
+
+
 def active_roles(user) -> list[str]:
     """Roles ativas do usuário (ordenadas)."""
     return sorted(_active_qs(user).values_list("role", flat=True))
@@ -54,6 +62,7 @@ def assign(user, role: str) -> list[str]:
         raise Conflict(f"Usuário já possui a role '{role}'.", code="ROLE_ALREADY_HELD")
 
     UserRole.objects.create(user=user, role=role)
+    _bump_token_version(user)  # role mudou → invalida JWT antigo
     return active_roles(user)
 
 
@@ -86,6 +95,7 @@ def promote(user, to_role: str) -> list[str]:
     with transaction.atomic():
         _active_qs(user).filter(role=from_role).update(revoked_at=timezone.now())
         UserRole.objects.create(user=user, role=to_role)
+        _bump_token_version(user)  # role mudou → invalida JWT antigo
     return active_roles(user)
 
 

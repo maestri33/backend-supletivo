@@ -16,7 +16,9 @@ from ninja.errors import HttpError
 from api.auth import require_roles
 from api.base import build_group
 from users.auth.models import User
+from hub import interface as hub_iface
 from users.roles.enrollment import interface as enrollment_iface
+from users.roles.lead import interface as lead_iface
 from users.roles.student import interface as student_iface
 from users.roles.training import interface as training_iface
 
@@ -34,6 +36,16 @@ def _coordinator(request) -> User:
     if user is None:
         raise HttpError(403, "Coordenador não encontrado.")
     return user
+
+
+# ── leads do polo (coordenador vê os leads do SEU hub) ──────────────────────
+@api.get("/leads", tags=["lead"])
+def list_hub_leads(request, status: str | None = None):
+    """Lista os leads do polo do coordenador (link de pagamento + comprovante). Filtro opcional por status."""
+    coordinator = _coordinator(request)
+    hub = hub_iface.hub_of(coordinator)
+    leads = lead_iface.list_leads(hub=hub, status=status)
+    return [lead_iface.lead_to_dict(lead) for lead in leads]
 
 
 # ── funil do aluno: liberação da matrícula ──────────────────────────────────

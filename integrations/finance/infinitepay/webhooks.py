@@ -54,6 +54,10 @@ def handle_event(order_nsu, payload, *, source_ip=None, user_agent=None):
                 provider="infinitepay",
                 provider_payment_id=str(checkout.external_id),
                 amount_cents=checkout.paid_amount_cents,
+                # comprovante (InfinitePay) → o lead manda pro aluno na notify de pago.
+                receipt_url=payload.get("receipt_url")
+                if isinstance(payload, dict)
+                else None,
             )
         # ninguém consumiu -> fallback rastreável (§7.4), não perde o evento.
         if not consumed:

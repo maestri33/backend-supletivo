@@ -80,9 +80,11 @@ class Checkout(models.Model):
     provider = models.CharField(max_length=12, choices=Provider.choices)
     provider_payment_id = models.CharField(max_length=128, null=True, blank=True)
     amount = models.DecimalField(max_digits=12, decimal_places=2)
-    # cartão (InfinitePay): link de checkout + comprovante.
+    # cartão (InfinitePay) = link de checkout; PIX (Asaas) = página hospedada (invoiceUrl). + comprovante.
     checkout_url = models.URLField(max_length=500, null=True, blank=True)
     receipt_url = models.URLField(max_length=500, null=True, blank=True)
+    # token do link CURTO no nosso domínio (/lead/checkout/<token> → 302 pro checkout). Ver checkout_links.
+    short_token = models.CharField(max_length=32, null=True, blank=True, db_index=True)
     # PIX (Asaas): copia-e-cola + imagem do QR + vencimento.
     qrcode_payload = models.TextField(null=True, blank=True)
     qrcode_image = models.URLField(max_length=500, null=True, blank=True)

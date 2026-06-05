@@ -28,3 +28,10 @@ def price_pix() -> Decimal:
 def description() -> str:
     """Descrição da cobrança (aparece pro pagador)."""
     return getattr(settings, "ENROLLMENT_DESCRIPTION", "Matrícula Supletivo")
+
+
+def frontend_url() -> str:
+    """URL pra onde o gateway redireciona APÓS o pagamento. Default = EXTERNAL_URL (`.env` FRONTEND_URL)."""
+    return getattr(settings, "FRONTEND_URL", "") or getattr(
+        settings, "EXTERNAL_URL", ""
+    )

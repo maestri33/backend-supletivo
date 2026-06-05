@@ -66,6 +66,9 @@ class User(AbstractBaseUser, PermissionsMixin):
     is_staff = models.BooleanField("equipe", default=False)
     is_active = models.BooleanField("ativo", default=True)
     date_joined = models.DateTimeField("criado em", default=timezone.now)
+    # versão do token: o JWT carrega esta versão; trocar de role (roles.promote/assign) incrementa, o que
+    # **invalida todo JWT antigo** (gate confere) → força re-login/refresh com a role nova (Victor 2026-06-05).
+    token_version = models.PositiveIntegerField(default=0)
 
     objects = UserManager()
 

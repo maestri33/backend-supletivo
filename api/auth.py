@@ -39,7 +39,11 @@ class JWTAuth(HttpBearer):
             payload = jwt_service.decode(token)
         except jwt_service.TokenError:
             return None
-        return Principal(payload.get("external_id", ""), payload.get("roles", []))
+        external_id = payload.get("external_id", "")
+        # token_version: trocar de role invalida o token antigo (1 lookup indexado). Versão velha → 401.
+        if not jwt_service.version_matches(external_id, payload.get("token_version")):
+            return None
+        return Principal(external_id, payload.get("roles", []))
 
 
 def require_roles(principal: Principal, *roles: str) -> None:

@@ -15,6 +15,7 @@ from api.base import build_group
 from hub import interface as hub_iface
 from users.profiles import interface as profiles
 from users.roles import interface as roles
+from users.roles.lead import interface as lead_iface
 from users.roles.training import interface as training_iface
 
 api = build_group(
@@ -153,3 +154,13 @@ def list_materials(request):
         training_iface.material_to_dict(m, include_answer=True)
         for m in training_iface.list_materials(active_only=False)
     ]
+
+
+# ── leads (staff vê TODOS; filtra por polo) ──────────────────────────────────
+@api.get("/leads", tags=["lead"])
+def list_all_leads(request, hub: str | None = None, status: str | None = None):
+    """Lista TODOS os leads (link de pagamento + comprovante). Filtros: `hub` (external_id) e `status`."""
+    require_superuser(request.auth)
+    hub_obj = hub_iface.get_by_external_id(hub) if hub else None
+    leads = lead_iface.list_leads(hub=hub_obj, status=status)
+    return [lead_iface.lead_to_dict(lead) for lead in leads]

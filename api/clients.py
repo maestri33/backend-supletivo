@@ -43,6 +43,7 @@ class CheckoutOut(Schema):
     amount: str
     is_paid: bool
     checkout_url: str | None = None
+    short_url: str | None = None  # link curto no nosso domínio (manda por WhatsApp)
     qrcode_payload: str | None = None
     qrcode_image: str | None = None
     due_date: str | None = None
