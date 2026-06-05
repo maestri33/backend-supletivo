@@ -83,6 +83,38 @@ def _due_to_scheduled(due_date: str) -> datetime:
     return dt
 
 
+def plan_qr_payment(*, qr_payload, amount=None) -> dict:
+    """READ-ONLY: decodifica o QR no Asaas e devolve o PLANO de pagamento — **sem enfileirar nem mover
+    dinheiro**. Use antes de uma transação pra validar o QR fora do banco (rede fora do `atomic`).
+
+    Roteia pelo próprio QR (não chuta): COM vencimento → agendado pro dia do vencimento (09:00 SP; se já
+    vencido → imediato, não agenda no passado); SEM vencimento (estático/imediato) → imediato. O valor vem do
+    caller se informado; senão do `value` da cobrança decodificada (§8: ler o valor cobrado não é inventar
+    dinheiro). Levanta `ValueError` com motivo claro se o QR não puder ser pago ou não tiver valor.
+
+    Devolve `{"amount": <reais>, "scheduled_for": datetime|None, "due_date": str|None}`
+    (`scheduled_for=None` ⇒ imediato).
+    """
+    info = qrpay.decode_qr(qr_payload)
+    if not info.get("canBePaid", False):
+        reason = info.get("cannotBePaidReason") or "motivo não informado pelo Asaas"
+        raise ValueError(f"QR não pode ser pago: {reason}")
+    value = amount if amount is not None else info.get("value")
+    if value is None:
+        raise ValueError(
+            "sem valor: o caller não informou e o QR decodificado não traz `value`."
+        )
+    due = info.get("dueDate")
+    scheduled_for = None
+    if due:
+        scheduled_for = _due_to_scheduled(str(due))
+        if (
+            scheduled_for <= timezone.now()
+        ):  # vencida → imediato (não agenda no passado)
+            scheduled_for = None
+    return {"amount": value, "scheduled_for": scheduled_for, "due_date": due}
+
+
 def schedule_fee_on_due_date(
     *,
     qr_payload,
@@ -93,42 +125,29 @@ def schedule_fee_on_due_date(
 ) -> PaymentRequest:
     """Agenda o pagamento de uma despesa pra DATA DE VENCIMENTO lida do próprio QR (cobrança com vencimento).
 
-    Decodifica o QR no Asaas (resolve o payload dinâmico), exige `dueDate`, e enfileira agendado pra esse
-    dia (09:00 SP). O valor vem do CALLER se informado; senão usa o `value` da cobrança decodificada (§8:
-    ler o valor cobrado não é inventar dinheiro). Levanta `ValueError` com motivo claro se não der pra agendar.
+    Exige `dueDate` no QR (estático/imediato → erro claro). Reusa `plan_qr_payment` (decode + roteamento) pra
+    não duplicar a leitura. O valor vem do CALLER se informado; senão do `value` decodificado (§8: ler o valor
+    cobrado não é inventar dinheiro). Levanta `ValueError` com motivo claro se não der pra agendar.
     """
-    info = qrpay.decode_qr(qr_payload)
-    if not info.get("canBePaid", False):
-        reason = info.get("cannotBePaidReason") or "motivo não informado pelo Asaas"
-        raise ValueError(f"QR não pode ser pago: {reason}")
-    due = info.get("dueDate")
-    if not due:
+    plan = plan_qr_payment(qr_payload=qr_payload, amount=amount)
+    if plan["due_date"] is None:
         raise ValueError(
             "QR sem data de vencimento (estático/imediato) — use pagamento imediato ou --at <data>."
         )
-    scheduled_for = _due_to_scheduled(str(due))
-    value = amount if amount is not None else info.get("value")
-    if value is None:
-        raise ValueError(
-            "sem valor: o caller não informou e o QR decodificado não traz `value`."
-        )
-    # VENCIDA (dueDate no passado): não dá pra agendar no passado — paga IMEDIATO, explícito e logado
-    # (não silencioso). Quem cola uma cobv vencida quer quitá-la; o worker pegaria na próxima passada de
-    # qualquer forma, mas aqui deixamos claro que é pagamento imediato, não "agendado".
-    overdue = scheduled_for <= timezone.now()
+    # VENCIDA (dueDate no passado) ⇒ plan["scheduled_for"] vem None ⇒ paga IMEDIATO, explícito e logado.
     logger.info(
         "finance.fee_scheduled_on_due",
-        due_date=str(due),
-        scheduled_for=None if overdue else str(scheduled_for),
-        amount=str(value),
+        due_date=str(plan["due_date"]),
+        scheduled_for=str(plan["scheduled_for"]) if plan["scheduled_for"] else None,
+        amount=str(plan["amount"]),
         from_qr_value=amount is None,
-        overdue=overdue,
+        overdue=plan["scheduled_for"] is None,
     )
     return request_fee_payment(
-        amount=value,
+        amount=plan["amount"],
         qr_payload=qr_payload,
         supplier_name=supplier_name,
         description=description,
-        scheduled_for=None if overdue else scheduled_for,
+        scheduled_for=plan["scheduled_for"],
         external_reference=external_reference,
     )

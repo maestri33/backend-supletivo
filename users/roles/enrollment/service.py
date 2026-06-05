@@ -373,9 +373,18 @@ def release(
     platform_login=None,
     platform_password=None,
     platform_notes=None,
+    fee_qr_codes=None,
 ) -> Enrollment:
     """Coordenador do hub libera a matrícula: promove `enrollment→student`, marca COMPLETED e CRIA o
-    `Student` (§4 item 9) já com os dados estruturados da plataforma de estudo + o hub herdado."""
+    `Student` (§4 item 9) já com os dados estruturados da plataforma de estudo + o hub herdado.
+
+    `fee_qr_codes` (opcional): QR(s) PIX da taxa do parceiro credenciador que o coordenador cola na hora da
+    liberação. Cada QR é roteado pelo PRÓPRIO QR — COM vencimento → agendado, SEM → imediato — e a taxa sai
+    pela MESMA fila Asaas das comissões (`finance.fees`). A promoção é SÍNCRONA e **não espera o pagamento**
+    (o aluno já sai estudando — palavra do Victor); o PIX real ocorre depois, no worker. O ALUNO NÃO SABE da
+    taxa (sem notify de fee). Os QR são validados (decodificados) ANTES de promover: QR inválido aborta a
+    liberação sem criar o aluno (o coordenador corrige e tenta de novo)."""
+    from finance.interface import fees
     from users.roles.student import interface as student_iface
 
     enr = get_by_external_id(enrollment_external_id)
@@ -386,6 +395,18 @@ def release(
     if enr.status != _S.AWAITING_RELEASE:
         raise EnrollmentError(f"wrong_status:{enr.status}")
 
+    # 1) Valida/decodifica os QR FORA da transação (chamada de rede ao Asaas, READ-ONLY): um QR ruim aborta
+    #    a liberação ANTES de promover — não cria aluno meia-boca. Não move dinheiro aqui.
+    fee_plans = []
+    for qr in fee_qr_codes or []:
+        if not (qr or "").strip():
+            continue
+        try:
+            fee_plans.append((qr, fees.plan_qr_payment(qr_payload=qr)))
+        except ValueError as exc:
+            raise EnrollmentError(f"fee_qr_invalid:{exc}") from exc
+
+    # 2) Promoção + criação do Student + enfileiramento das fees: tudo ATÔMICO (só escrita local, sem rede).
     with transaction.atomic():
         if "student" not in roles.active_roles(enr.user):
             roles.promote(enr.user, "student")
@@ -399,9 +420,19 @@ def release(
             platform_password=platform_password,
             platform_notes=platform_notes,
         )
+        for i, (qr, plan) in enumerate(fee_plans):
+            fees.request_fee_payment(
+                amount=plan["amount"],
+                qr_payload=qr,
+                supplier_name=f"credenciador (matrícula {enr.external_id})",
+                scheduled_for=plan["scheduled_for"],
+                external_reference=f"fee_enr_{enr.external_id}_{i}",
+            )
 
     _notify_released(enr)
-    logger.info("enrollment.released", external_id=str(enr.external_id))
+    logger.info(
+        "enrollment.released", external_id=str(enr.external_id), fees=len(fee_plans)
+    )
     return enr
 
 

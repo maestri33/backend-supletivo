@@ -56,6 +56,9 @@ class ReleaseIn(Schema):
     platform_login: str | None = None
     platform_password: str | None = None
     platform_notes: str | None = None
+    # QR(s) PIX da taxa do parceiro credenciador (imediato e/ou com vencimento). O backend roteia cada QR
+    # pelo próprio QR e a taxa sai pela fila Asaas; a promoção NÃO espera o pagamento (Victor 2026-06-05).
+    fee_qr_codes: list[str] | None = None
 
 
 class ReleaseOut(Schema):
@@ -77,6 +80,7 @@ def release_enrollment(request, external_id: str, payload: ReleaseIn):
             platform_login=payload.platform_login,
             platform_password=payload.platform_password,
             platform_notes=payload.platform_notes,
+            fee_qr_codes=payload.fee_qr_codes,
         )
     except enrollment_iface.EnrollmentError as exc:
         raise HttpError(422, str(exc)) from exc
