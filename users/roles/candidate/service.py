@@ -83,6 +83,7 @@ def to_dict(cand: Candidate) -> dict:
         "hub_external_id": str(cand.hub.external_id),
         "pix_validated": cand.pix_validated,
         "selfie_verified": cand.selfie_verified,
+        "selfie_status": cand.selfie_status,
     }
 
 
@@ -179,23 +180,20 @@ def set_pix(*, user_external_id, key: str, key_type: str) -> Candidate:
 def set_selfie(
     *, user_external_id, image_bytes: bytes, content_type="image/jpeg"
 ) -> Candidate:
-    """Selfie ("assinar"): valida (IA best-effort) → COMPLETED + promove candidate→training + cria Trainee."""
+    """Selfie ("assinar"): valida por IA (3 estados). APROVADA → COMPLETED + promove candidate→training.
+    REPROVADA → refazer (avisa o candidato). REVISÃO (IA fora/dúvida) → o coordenador decide o sim/não."""
+    from users.roles import _selfie
+
     cand = _require(user_external_id, _S.PIX, _S.SELFIE)
     cand.selfie_image = _save_selfie(cand, image_bytes, content_type)
-    cand.selfie_verified, cand.selfie_description = _verify_selfie(
-        image_bytes, content_type
-    )
-    cand.save()
-
+    status, desc = _selfie.verify(image_bytes, content_type, caller="candidate.selfie")
+    cand.selfie_status = status
+    cand.selfie_verified = status == _selfie.APPROVED
+    cand.selfie_description = desc
     if cand.status == _S.PIX:
-        from users.roles.training import interface as training_iface
-
-        with transaction.atomic():
-            _set_status(cand, _S.COMPLETED)
-            if "training" not in roles.active_roles(cand.user):
-                roles.promote(cand.user, "training")
-            training_iface.create_trainee(user=cand.user)
-        _notify_training_started(cand)
+        cand.status = _S.SELFIE  # avança pra etapa selfie (aguarda veredito)
+    cand.save()
+    _resolve_selfie(cand)
     return cand
 
 
@@ -210,10 +208,106 @@ def _save_selfie(cand: Candidate, image_bytes: bytes, content_type: str) -> str:
     return rel
 
 
-def _verify_selfie(image_bytes: bytes, content_type: str):
+def _resolve_selfie(cand: Candidate) -> None:
+    """Reage ao veredito da selfie: aprovada→promove; reprovada→avisa candidato; revisão→avisa coordenador."""
     from users.roles import _selfie
 
-    return _selfie.verify(image_bytes, content_type, caller="candidate.selfie")
+    if cand.selfie_status == _selfie.APPROVED:
+        _promote_to_training(cand)
+    elif cand.selfie_status == _selfie.REJECTED:
+        _notify_selfie_rejected(cand)
+    elif cand.selfie_status == _selfie.REVIEW:
+        _notify_selfie_review(cand)
+
+
+def _promote_to_training(cand: Candidate) -> None:
+    """Selfie aprovada → COMPLETED + promove candidate→training + cria Trainee. Idempotente (só em SELFIE)."""
+    if cand.status != _S.SELFIE:
+        return
+    from users.roles.training import interface as training_iface
+
+    with transaction.atomic():
+        _set_status(cand, _S.COMPLETED)
+        if "training" not in roles.active_roles(cand.user):
+            roles.promote(cand.user, "training")
+        training_iface.create_trainee(user=cand.user)
+    _notify_training_started(cand)
+
+
+def decide_selfie(
+    *, candidate_external_id: str, coordinator, approve: bool, reason: str | None = None
+) -> Candidate:
+    """Coordenador do hub decide a selfie em REVISÃO (sim/não). aprova→promove; reprova→avisa refazer."""
+    from users.roles import _selfie
+
+    cand = (
+        Candidate.objects.filter(external_id=candidate_external_id)
+        .select_related("hub", "user")
+        .first()
+    )
+    if cand is None:
+        raise CandidateError("candidate_not_found")
+    if cand.hub.coordinator_id != coordinator.id:
+        raise CandidateError("not_hub_coordinator")
+    if cand.selfie_status != _selfie.REVIEW:
+        raise CandidateError(f"selfie_not_in_review:{cand.selfie_status}")
+    note = (reason or "").strip() or (
+        "aprovada pelo coordenador" if approve else "reprovada pelo coordenador"
+    )
+    cand.selfie_status = _selfie.APPROVED if approve else _selfie.REJECTED
+    cand.selfie_verified = approve
+    cand.selfie_description = note
+    cand.save(
+        update_fields=[
+            "selfie_status",
+            "selfie_verified",
+            "selfie_description",
+            "updated_at",
+        ]
+    )
+    if approve:
+        _promote_to_training(cand)
+    else:
+        _notify_selfie_rejected(cand)
+    return cand
+
+
+def _notify_selfie_rejected(cand: Candidate) -> None:
+    from notify.interface.send import send
+    from users.roles import notifications as msgs
+
+    p = profiles.get(cand.user)
+    try:
+        send(
+            text=msgs.text(
+                "candidate.selfie_rejected", name=msgs.first_name(p.name if p else None)
+            ),
+            caller="candidate.selfie_rejected",
+            phone=p.phone if p else None,
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("candidate.notify_selfie_rejected_failed", error=str(exc))
+
+
+def _notify_selfie_review(cand: Candidate) -> None:
+    from notify.interface.send import send
+    from users.roles import notifications as msgs
+
+    coord = cand.hub.coordinator
+    if coord is None:
+        return
+    cp = profiles.get(coord)
+    try:
+        send(
+            text=msgs.text(
+                "candidate.selfie_in_review",
+                name=msgs.first_name(cp.name if cp else None),
+            ),
+            caller="candidate.selfie_in_review",
+            phone=cp.phone if cp else None,
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("candidate.notify_selfie_review_failed", error=str(exc))
 
 
 def _notify_training_started(cand: Candidate) -> None:

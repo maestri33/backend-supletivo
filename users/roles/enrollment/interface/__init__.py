@@ -5,6 +5,7 @@ grupos `clients`/`leadership` chamam. Fina — reexporta a lógica do `service`.
 from users.roles.enrollment.service import (
     EnrollmentError,
     create_from_lead,
+    decide_selfie,
     get_by_external_id,
     get_by_user,
     get_for_user_external_id,
@@ -31,5 +32,6 @@ __all__ = [
     "upload_rg_photo",
     "set_education",
     "set_selfie",
+    "decide_selfie",
     "release",
 ]

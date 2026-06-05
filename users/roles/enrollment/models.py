@@ -16,6 +16,8 @@ import uuid
 from django.conf import settings
 from django.db import models
 
+from users.roles._selfie import SelfieStatus
+
 
 class Enrollment(models.Model):
     """A matrícula de um aluno (1-1 com o User). Carrega o hub herdado do promotor que indicou."""
@@ -64,10 +66,20 @@ class Enrollment(models.Model):
     marital_status = models.CharField(max_length=32, null=True, blank=True)
     birthplace = models.CharField(max_length=128, null=True, blank=True)
     nationality = models.CharField(max_length=64, null=True, blank=True)
-    # selfie (etapa `selfie`, 6b) — foto em media/enrollment/<ext>/ + validação IA best-effort (visão).
+    # selfie (etapa `selfie`, 6b) — foto em media/enrollment/<ext>/ + validação IA 3 estados + revisão.
     selfie_image = models.CharField(max_length=255, null=True, blank=True)
-    selfie_verified = models.BooleanField(default=False)
-    selfie_description = models.TextField(null=True, blank=True)
+    selfie_verified = models.BooleanField(
+        default=False
+    )  # = selfie_status aprovado (compat)
+    selfie_status = models.CharField(
+        max_length=20,
+        choices=SelfieStatus.choices,
+        default=SelfieStatus.PENDING,
+        db_index=True,
+    )
+    selfie_description = models.TextField(
+        null=True, blank=True
+    )  # justificativa da IA/coordenador
     created_at = models.DateTimeField("criado em", auto_now_add=True)
     updated_at = models.DateTimeField("atualizado em", auto_now=True)
 

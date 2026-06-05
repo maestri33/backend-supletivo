@@ -12,6 +12,8 @@ import uuid
 from django.conf import settings
 from django.db import models
 
+from users.roles._selfie import SelfieStatus
+
 
 class Candidate(models.Model):
     """Um candidato a promotor (1-1 com o User), ligado ao hub onde se cadastrou."""
@@ -52,10 +54,20 @@ class Candidate(models.Model):
     pix_key = models.CharField(max_length=255, null=True, blank=True)
     pix_key_type = models.CharField(max_length=10, null=True, blank=True)
     pix_validated = models.BooleanField(default=False)
-    # selfie (etapa selfie) — "assinar o contrato"; validação IA best-effort.
+    # selfie (etapa selfie) — "assinar o contrato"; validação IA em 3 estados + revisão do coordenador.
     selfie_image = models.CharField(max_length=255, null=True, blank=True)
-    selfie_verified = models.BooleanField(default=False)
-    selfie_description = models.TextField(null=True, blank=True)
+    selfie_verified = models.BooleanField(
+        default=False
+    )  # = selfie_status aprovado (compat)
+    selfie_status = models.CharField(
+        max_length=20,
+        choices=SelfieStatus.choices,
+        default=SelfieStatus.PENDING,
+        db_index=True,
+    )
+    selfie_description = models.TextField(
+        null=True, blank=True
+    )  # justificativa da IA/coordenador
     created_at = models.DateTimeField("criado em", auto_now_add=True)
     updated_at = models.DateTimeField("atualizado em", auto_now=True)
 

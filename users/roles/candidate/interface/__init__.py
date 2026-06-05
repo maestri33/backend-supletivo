@@ -5,6 +5,7 @@ Fina — reexporta a lógica do `service`.
 from users.roles.candidate.service import (
     CandidateError,
     create_candidate,
+    decide_selfie,
     get_for_user_external_id,
     set_address,
     set_documents,
@@ -26,4 +27,5 @@ __all__ = [
     "upload_document_photo",
     "set_pix",
     "set_selfie",
+    "decide_selfie",
 ]

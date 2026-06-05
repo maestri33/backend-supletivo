@@ -17,6 +17,7 @@ from api.auth import require_roles
 from api.base import build_group
 from users.auth.models import User
 from hub import interface as hub_iface
+from users.roles.candidate import interface as candidate_iface
 from users.roles.enrollment import interface as enrollment_iface
 from users.roles.lead import interface as lead_iface
 from users.roles.student import interface as student_iface
@@ -80,6 +81,52 @@ def release_enrollment(request, external_id: str, payload: ReleaseIn):
     except enrollment_iface.EnrollmentError as exc:
         raise HttpError(422, str(exc)) from exc
     return {"external_id": str(enr.external_id), "status": enr.status}
+
+
+# ── selfie em revisão (IA em dúvida) → coordenador decide o sim/não ──────────
+class SelfieDecideIn(Schema):
+    approve: bool
+    reason: str | None = None
+
+
+@api.post("/enrollments/{external_id}/selfie/decide", tags=["enrollment"])
+def decide_enrollment_selfie(request, external_id: str, payload: SelfieDecideIn):
+    """Coordenador decide a selfie de uma matrícula que a IA mandou pra REVISÃO."""
+    coordinator = _coordinator(request)
+    try:
+        enr = enrollment_iface.decide_selfie(
+            enrollment_external_id=external_id,
+            coordinator=coordinator,
+            approve=payload.approve,
+            reason=payload.reason,
+        )
+    except enrollment_iface.EnrollmentError as exc:
+        raise HttpError(422, str(exc)) from exc
+    return {
+        "external_id": str(enr.external_id),
+        "selfie_status": enr.selfie_status,
+        "status": enr.status,
+    }
+
+
+@api.post("/candidates/{external_id}/selfie/decide", tags=["candidate"])
+def decide_candidate_selfie(request, external_id: str, payload: SelfieDecideIn):
+    """Coordenador decide a selfie de um candidato que a IA mandou pra REVISÃO."""
+    coordinator = _coordinator(request)
+    try:
+        cand = candidate_iface.decide_selfie(
+            candidate_external_id=external_id,
+            coordinator=coordinator,
+            approve=payload.approve,
+            reason=payload.reason,
+        )
+    except candidate_iface.CandidateError as exc:
+        raise HttpError(422, str(exc)) from exc
+    return {
+        "external_id": str(cand.external_id),
+        "selfie_status": cand.selfie_status,
+        "status": cand.status,
+    }
 
 
 # ── funil do aluno: coordenador conduz student→veteran (§4 item 9) ───────────

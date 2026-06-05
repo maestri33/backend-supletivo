@@ -108,6 +108,7 @@ def to_dict(enr: Enrollment) -> dict:
         "status": enr.status,
         "hub_external_id": str(enr.hub.external_id),
         "selfie_verified": enr.selfie_verified,
+        "selfie_status": enr.selfie_status,
     }
 
 
@@ -201,17 +202,118 @@ def set_education(
 def set_selfie(
     *, user_external_id: str, image_bytes: bytes, content_type: str = "image/jpeg"
 ) -> Enrollment:
-    """Selfie ("assinar a matrícula"): salva a foto + valida por IA (best-effort) → AWAITING_RELEASE."""
-    enr = _require(user_external_id, _S.EDUCATION, _S.AWAITING_RELEASE)
+    """Selfie ("assinar a matrícula"): valida por IA (3 estados). APROVADA → AWAITING_RELEASE (avisa o
+    coordenador). REPROVADA → refazer (avisa o aluno). REVISÃO (IA fora/dúvida) → o coordenador decide."""
+    from users.roles import _selfie
+
+    enr = _require(user_external_id, _S.EDUCATION, _S.SELFIE, _S.AWAITING_RELEASE)
     enr.selfie_image = _save_selfie(enr, image_bytes, content_type)
-    enr.selfie_verified, enr.selfie_description = _verify_selfie(
-        image_bytes, content_type
-    )
-    enr.save()
+    status, desc = _selfie.verify(image_bytes, content_type, caller="enrollment.selfie")
+    enr.selfie_status = status
+    enr.selfie_verified = status == _selfie.APPROVED
+    enr.selfie_description = desc
     if enr.status == _S.EDUCATION:
-        _set_status(enr, _S.AWAITING_RELEASE)
-        _notify_coordinator_awaiting(enr)
+        enr.status = _S.SELFIE  # avança pra etapa selfie (aguarda veredito)
+    enr.save()
+    _resolve_selfie(enr)
     return enr
+
+
+def _resolve_selfie(enr: Enrollment) -> None:
+    """Reage ao veredito: aprovada→aguarda liberação; reprovada→avisa o aluno; revisão→avisa o coordenador."""
+    from users.roles import _selfie
+
+    if enr.selfie_status == _selfie.APPROVED:
+        _advance_to_release(enr)
+    elif enr.selfie_status == _selfie.REJECTED:
+        _notify_selfie_rejected(enr)
+    elif enr.selfie_status == _selfie.REVIEW:
+        _notify_selfie_review(enr)
+
+
+def _advance_to_release(enr: Enrollment) -> None:
+    """Selfie aprovada → AWAITING_RELEASE + avisa o coordenador. Idempotente (só sai de SELFIE)."""
+    if enr.status != _S.SELFIE:
+        return
+    _set_status(enr, _S.AWAITING_RELEASE)
+    _notify_coordinator_awaiting(enr)
+
+
+def decide_selfie(
+    *,
+    enrollment_external_id: str,
+    coordinator,
+    approve: bool,
+    reason: str | None = None,
+) -> Enrollment:
+    """Coordenador do hub decide a selfie em REVISÃO (sim/não). aprova→aguarda liberação; reprova→refazer."""
+    from users.roles import _selfie
+
+    enr = get_by_external_id(enrollment_external_id)
+    if enr is None:
+        raise EnrollmentError("enrollment_not_found")
+    if enr.hub.coordinator_id != coordinator.id:
+        raise EnrollmentError("not_hub_coordinator")
+    if enr.selfie_status != _selfie.REVIEW:
+        raise EnrollmentError(f"selfie_not_in_review:{enr.selfie_status}")
+    note = (reason or "").strip() or (
+        "aprovada pelo coordenador" if approve else "reprovada pelo coordenador"
+    )
+    enr.selfie_status = _selfie.APPROVED if approve else _selfie.REJECTED
+    enr.selfie_verified = approve
+    enr.selfie_description = note
+    enr.save(
+        update_fields=[
+            "selfie_status",
+            "selfie_verified",
+            "selfie_description",
+            "updated_at",
+        ]
+    )
+    if approve:
+        _advance_to_release(enr)
+    else:
+        _notify_selfie_rejected(enr)
+    return enr
+
+
+def _notify_selfie_rejected(enr: Enrollment) -> None:
+    from notify.interface.send import send
+    from users.roles import notifications as msgs
+
+    p = profiles.get(enr.user)
+    try:
+        send(
+            text=msgs.text(
+                "enrollment.selfie_rejected",
+                name=msgs.first_name(p.name if p else None),
+            ),
+            caller="enrollment.selfie_rejected",
+            phone=p.phone if p else None,
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("enrollment.notify_selfie_rejected_failed", error=str(exc))
+
+
+def _notify_selfie_review(enr: Enrollment) -> None:
+    from notify.interface.send import send
+    from users.roles import notifications as msgs
+
+    coord = enr.hub.coordinator
+    if coord is None:
+        return
+    cp = profiles.get(coord)
+    try:
+        send(
+            text=msgs.text(
+                "enrollment.selfie_in_review",
+                name=msgs.first_name(cp.name if cp else None),
+            ),
+            caller="enrollment.selfie_in_review",
+            phone=cp.phone if cp else None,
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("enrollment.notify_selfie_review_failed", error=str(exc))
 
 
 def _save_selfie(enr: Enrollment, image_bytes: bytes, content_type: str) -> str:
@@ -223,12 +325,6 @@ def _save_selfie(enr: Enrollment, image_bytes: bytes, content_type: str) -> str:
     fp.parent.mkdir(parents=True, exist_ok=True)
     fp.write_bytes(image_bytes)
     return rel
-
-
-def _verify_selfie(image_bytes: bytes, content_type: str):
-    from users.roles import _selfie
-
-    return _selfie.verify(image_bytes, content_type, caller="enrollment.selfie")
 
 
 def _notify_coordinator_awaiting(enr: Enrollment) -> None:

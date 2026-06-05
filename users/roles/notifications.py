@@ -79,10 +79,24 @@ _MESSAGES: dict[str, str] = {
         "Parabéns, {name}! 🎓 Sua matrícula foi liberada e você já é nosso aluno. "
         "Seja muito bem-vindo(a), {name}!"
     ),
+    "enrollment.selfie_rejected": (
+        "{name}, sua selfie não pôde ser confirmada. Envie uma nova foto, nítida e mostrando o rosto, {name}."
+    ),
+    "enrollment.selfie_in_review": (
+        "{name}, a selfie de uma matrícula precisa da sua análise — a IA ficou em dúvida. "
+        "Aprove ou reprove no painel, {name}."
+    ),
     # ── CANDIDATE → TRAINING → PROMOTER (funil do colaborador) ────────────────
     "candidate.training_started": (
         "Cadastro concluído, {name}! 🎓 Seu treinamento começou — acesse para estudar e responder "
         "as atividades, {name}."
+    ),
+    "candidate.selfie_rejected": (
+        "{name}, sua selfie não pôde ser confirmada. Envie uma nova foto, nítida e mostrando o rosto, {name}."
+    ),
+    "candidate.selfie_in_review": (
+        "{name}, a selfie de um candidato precisa da sua análise — a IA ficou em dúvida. "
+        "Aprove ou reprove no painel, {name}."
     ),
     "training.awaiting_interview": (
         "{name}, um candidato concluiu o treino e aguarda a sua entrevista de aprovação. "
