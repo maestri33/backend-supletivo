@@ -252,20 +252,29 @@ def upload_document(
 
 
 def _ai_validate(doc: StudentDocument) -> tuple[str, str | None]:
-    """Roda a IA na foto. Retorna (validation_status, texto_bruto). Best-effort → ('pending', None)."""
+    """Roda a IA na foto. Retorna (validation_status, texto_bruto). Best-effort → ('pending', None).
+
+    Confere a IDENTIDADE: passa o nome/nascimento que o CPFHub deu no cadastro (gravados no Profile) →
+    se o documento for de outra pessoa, a IA reprova de imediato (Victor 2026-06-05)."""
     from integrations.ai import service as ai
+    from users.profiles import interface as profiles
 
     fp = Path(settings.MEDIA_ROOT) / (doc.photo or "")
     if not doc.photo or not fp.exists():
         return StudentDocument.Validation.PENDING, None
     ext = fp.suffix.lstrip(".").lower()
     mime = "image/png" if ext == "png" else "image/jpeg"
+    p = profiles.get(doc.student.user)
+    holder_name = p.name if p else None
+    holder_birth = p.birth_date.strftime("%d/%m/%Y") if (p and p.birth_date) else None
     try:
         desc = ai.describe_image(
             fp.read_bytes(),
             caller="student.document",
             mime_type=mime,
-            prompt=validation_prompt(doc.doc_type),
+            prompt=validation_prompt(
+                doc.doc_type, holder_name=holder_name, holder_birth=holder_birth
+            ),
         )
     except Exception as exc:  # noqa: BLE001 — validação best-effort; IA fora do ar → fica PENDING
         logger.warning(

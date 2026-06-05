@@ -23,18 +23,6 @@ from users.roles.candidate.models import Candidate
 logger = structlog.get_logger()
 
 _S = Candidate.Status
-_PERSON_TERMS = (
-    "pessoa",
-    "rosto",
-    "homem",
-    "mulher",
-    "face",
-    "selfie",
-    "retrato",
-    "cabelo",
-    "cabeça",
-    "olhos",
-)
 _SELFIE_EXT = {"image/jpeg": "jpg", "image/png": "png", "image/webp": "webp"}
 
 
@@ -223,20 +211,9 @@ def _save_selfie(cand: Candidate, image_bytes: bytes, content_type: str) -> str:
 
 
 def _verify_selfie(image_bytes: bytes, content_type: str):
-    from integrations.ai import service as ai
+    from users.roles import _selfie
 
-    try:
-        desc = ai.describe_image(
-            image_bytes,
-            caller="candidate.selfie",
-            mime_type=content_type,
-            prompt="Descreva a imagem em português. Há uma pessoa/rosto humano nela?",
-        )
-    except Exception as exc:  # noqa: BLE001 — best-effort (porte do legado)
-        logger.warning("candidate.selfie_ai_failed", error=str(exc))
-        return False, None
-    low = (desc or "").lower()
-    return (any(term in low for term in _PERSON_TERMS), desc)
+    return _selfie.verify(image_bytes, content_type, caller="candidate.selfie")
 
 
 def _notify_training_started(cand: Candidate) -> None:

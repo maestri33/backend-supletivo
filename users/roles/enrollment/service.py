@@ -23,19 +23,6 @@ from users.roles.enrollment.models import EducationalData, Enrollment
 logger = structlog.get_logger()
 
 _S = Enrollment.Status
-# termos pt-br que indicam pessoa na descrição da selfie (heurística best-effort, porte do legado).
-_PERSON_TERMS = (
-    "pessoa",
-    "rosto",
-    "homem",
-    "mulher",
-    "face",
-    "selfie",
-    "retrato",
-    "cabelo",
-    "cabeça",
-    "olhos",
-)
 _SELFIE_EXT = {"image/jpeg": "jpg", "image/png": "png", "image/webp": "webp"}
 
 
@@ -239,21 +226,9 @@ def _save_selfie(enr: Enrollment, image_bytes: bytes, content_type: str) -> str:
 
 
 def _verify_selfie(image_bytes: bytes, content_type: str):
-    """IA descreve a imagem e checa se há pessoa. Best-effort: IA fora do ar → (False, None), não trava."""
-    from integrations.ai import service as ai
+    from users.roles import _selfie
 
-    try:
-        desc = ai.describe_image(
-            image_bytes,
-            caller="enrollment.selfie",
-            mime_type=content_type,
-            prompt="Descreva a imagem em português. Há uma pessoa/rosto humano nela?",
-        )
-    except Exception as exc:  # noqa: BLE001 — validação é best-effort (porte do legado)
-        logger.warning("enrollment.selfie_ai_failed", error=str(exc))
-        return False, None
-    low = (desc or "").lower()
-    return (any(term in low for term in _PERSON_TERMS), desc)
+    return _selfie.verify(image_bytes, content_type, caller="enrollment.selfie")
 
 
 def _notify_coordinator_awaiting(enr: Enrollment) -> None:

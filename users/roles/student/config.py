@@ -45,6 +45,21 @@ _DOC_DESC = {
 }
 
 
-def validation_prompt(doc_type: str) -> str:
+def validation_prompt(
+    doc_type: str, *, holder_name: str | None = None, holder_birth: str | None = None
+) -> str:
+    """Prompt de validação. Se vier o titular esperado (nome/nascimento que o CPFHub deu no cadastro),
+    a IA confere se o documento é DAQUELA pessoa e REPROVA se o nome for de outra (Victor 2026-06-05:
+    'comparar com os dados do CPFHub; se não bater, reprova de imediato')."""
     desc = _DOC_DESC.get(doc_type, "o documento solicitado")
-    return _BASE_PROMPT.format(desc=desc)
+    prompt = _BASE_PROMPT.format(desc=desc)
+    if holder_name:
+        ident = f" Este documento deve pertencer a {holder_name}"
+        if holder_birth:
+            ident += f" (nascido(a) em {holder_birth})"
+        ident += (
+            ". Leia o NOME DO TITULAR impresso na imagem: se for de OUTRA pessoa "
+            "(diferente do nome informado), responda REPROVADO."
+        )
+        prompt += ident
+    return prompt
