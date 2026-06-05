@@ -69,3 +69,44 @@ Evidência: `.claude/tests/1-communication-mail.md` (login real + 2 envios reais
 - App `notify` (§4-item-2): contatos, logs em DB, orquestração multicanal (WhatsApp+email), flags
   ai/tts/img, webhook de status, e templates por contexto/CRUD/edição-por-IA.
 - Anexo binário real (CID inline) — hoje a mídia vai por URL pública (`<img src>`).
+
+## ⚠️ Troubleshooting de rede — LEIA se o email PARAR de sair (recorrente)
+
+**Sintoma:** `mail_health`/`mail_send` falham com **timeout** conectando em `mail.v7m.org:587`
+(ou o app loga erro de conexão SMTP). Auth e senha estão certas — o problema é **rede**, não credencial.
+
+**Causa raiz (já mordeu 3x — diagnosticado e resolvido em 2026-06-05):**
+`mail.v7m.org` resolve pro **IP público** da VM de email (`135.181.216.147`, e AAAA `::147`). De dentro
+do parque (LXC/VM em vmbr1/vmbr2, ex.: este workspace `10.1.20.30`), o host Proxmox **não faz o hairpin**
+pra esse IP público: a `vmbr_wan` tem `pointopoint 135.181.216.129`, então o `/32` do mail é mandado pro
+gateway da Hetzner em vez de entregue on-link, e (com NIC `firewall=1`) a conntrack zone não casa → a
+conexão fica `[UNREPLIED]` → timeout. Do *host* funciona; de *dentro* não.
+
+**O que conserta (no HOST pve-prod, não no app):** uma rota on-link pro IP do mail —
+```bash
+ip route add 135.181.216.147/32 dev vmbr_wan      # entrega direta na bridge, sem desvio pelo .129
+```
+✅ **Tornada PERSISTENTE em 2026-06-05** como `post-up` no stanza `vmbr_wan` do
+`/etc/network/interfaces` do host. ANTES disso ela era adicionada na mão e **sumia todo reboot do host**
+— por isso o email "quebrava sozinho" de tempos em tempos (cada reboot = quebra).
+
+**Diagnóstico rápido (de dentro do workspace):**
+```bash
+getent hosts mail.v7m.org                          # deve mostrar o IP público 135.181.216.147 (e ::147)
+timeout 6 bash -c '</dev/tcp/135.181.216.147/587' && echo OK || echo TIMEOUT   # se TIMEOUT => rota caiu
+timeout 6 bash -c '</dev/tcp/10.1.30.150/587'   && echo OK || echo TIMEOUT     # interno: deve ser OK
+```
+- Público TIMEOUT **e** interno OK → a rota on-link no host caiu. **Fix:** no host pve-prod, conferir
+  `ip route get 135.181.216.147` (se aparecer `via 135.181.216.129`, a rota sumiu) e rodar o
+  `ip route add ...` acima. Se sumiu mesmo após reboot, conferir se o `post-up` ainda está no
+  `/etc/network/interfaces` (stanza `vmbr_wan`).
+- Ambos TIMEOUT → problema na VM de email / Mailcow, não na rota (checar a VM 150).
+
+**Plano B (não depende da rota):** apontar internamente pro mail pela perna interna `10.1.30.150`
+(bridge vmbr2) ou pelo tailnet `mail` — ambos alcançáveis de dentro sem hairpin. ⚠️ NÃO trocar
+`MAIL_SMTP_HOST` pro IP cru (quebra a verificação de hostname do TLS no STARTTLS); o certo é manter
+`mail.v7m.org` (o SNI casa o cert) e resolver o nome pro IP interno (ex.: linha em `/etc/hosts` do
+guest: `10.1.30.150 mail.v7m.org`).
+
+> Infra/host: este é um gotcha do servidor pve-prod, documentado também na memória de ops do Claude
+> (`gotchas` / `vm-150-mail` / `ct-3050-typebot`). Última quebra+fix: 2026-06-05.
