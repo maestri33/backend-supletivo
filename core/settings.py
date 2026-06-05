@@ -289,6 +289,30 @@ GOOGLE_VISION_SERVICE_ACCOUNT_JSON = env(
     "GOOGLE_VISION_SERVICE_ACCOUNT_JSON", default=""
 )
 
+# MiniMax — mídia: TTS (t2a_v2) e visão (descrever imagem com MiniMax-M3). Hoje é o PRIMÁRIO de TTS
+# (ElevenLabs vira fallback) e de visão (Gemini vira fallback) — Victor 2026-06-05. Reusa a key do
+# provider LLM (IA_MINIMAX_API_KEY) — uma só key MiniMax no .env. Vozes por gênero (mapeamento direto).
+MINIMAX_API_KEY = env("MINIMAX_API_KEY", default=env("IA_MINIMAX_API_KEY", default=""))
+MINIMAX_BASE_URL = env("MINIMAX_BASE_URL", default="https://api.minimax.io")
+MINIMAX_TTS_MODEL = env("MINIMAX_TTS_MODEL", default="speech-2.8-hd")
+MINIMAX_VISION_MODEL = env("MINIMAX_VISION_MODEL", default="MiniMax-M3")
+MINIMAX_VOICE_FEMALE = env("MINIMAX_VOICE_FEMALE", default="Portuguese_SereneWoman")
+MINIMAX_VOICE_MALE = env("MINIMAX_VOICE_MALE", default="Portuguese_GentleTeacher")
+
+# Gemini também serve a cadeia LLM (fallback) via endpoint OpenAI-compatible do Google — REUSA a
+# GEMINI_API_KEY (sem duplicar key no .env). Entra como provider "gemini" quando está na cadeia.
+if GEMINI_API_KEY and any(_p == "gemini" for _p, _m in IA_FALLBACK_CHAIN):
+    IA_PROVIDERS.setdefault(
+        "gemini",
+        {
+            "base_url": env(
+                "IA_GEMINI_LLM_BASE_URL",
+                default="https://generativelanguage.googleapis.com/v1beta/openai",
+            ),
+            "api_key": GEMINI_API_KEY,
+        },
+    )
+
 
 # WhatsApp (integrations.communication.whatsapp) — cliente da Evolution API. Config via .env
 # (CONVENTION §8/§10). A api-key global é alfanumérica (sem "$"), então env() normal serve. Sem

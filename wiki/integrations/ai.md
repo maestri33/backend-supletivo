@@ -6,9 +6,12 @@
 
 ## O que é
 
-Um único ponto que fala com IA. Todos os providers (DeepSeek, DashScope/Alibaba, Groq, OpenAI,
-OpenRouter, NVIDIA, …) usam o **mesmo protocolo OpenAI-compatible** (`POST /chat/completions`), então
-um provider é só `{base_url, api_key}` no `.env` — **somar um novo não exige código**.
+Um único ponto que fala com IA. Os providers (hoje **MiniMax**, **DeepSeek** e **Gemini** — Victor
+2026-06-05; os demais ficaram dormentes) usam o **mesmo protocolo OpenAI-compatible**
+(`POST /chat/completions`), então um provider é só `{base_url, api_key}` no `.env` — **somar um novo
+não exige código**. (Gemini é injetado pelo `settings.py` reusando a `GEMINI_API_KEY`, via o endpoint
+OpenAI-compatible do Google.) Respostas com bloco de raciocínio `<think>...</think>` (ex.: MiniMax-M3)
+são limpas pelo `service` antes de usar/parsear.
 
 ## Peças
 
@@ -31,8 +34,8 @@ um provider é só `{base_url, api_key}` no `.env` — **somar um novo não exig
 ## Config (`.env`)
 
 ```
-IA_PROVIDERS=deepseek,dashscope,groq,openai,openrouter,nvidia
-IA_FALLBACK_CHAIN=deepseek:deepseek-v4-pro,dashscope:qwen3.7-max,groq:llama-3.3-70b-versatile,...
+IA_PROVIDERS=deepseek,minimax        # gemini é injetado pelo settings (reusa GEMINI_API_KEY)
+IA_FALLBACK_CHAIN=minimax:MiniMax-M3,deepseek:deepseek-v4-pro,gemini:gemini-3-flash-preview
 IA_<NAME>_BASE_URL=...      # por provider
 IA_<NAME>_API_KEY=...       # por provider (gitignored)
 IA_DEFAULT_TEMPERATURE / IA_MAX_TOKENS / IA_TIMEOUT
@@ -62,10 +65,15 @@ Cada uma grava `AiCall` (provider/operation, tokens=0). Imagem/áudio gerados v�
 
 | função (`service.py`) | provider | client |
 |---|---|---|
-| `describe_image(bytes, caller=...)` → texto | Gemini (visão) | `gemini.py` |
+| `describe_image(bytes, caller=...)` → texto | **MiniMax-M3** (visão) → Gemini (fallback) | `minimax.py` / `gemini.py` |
 | `generate_image(prompt, caller=...)` → caminho media | Gemini (imagem) | `gemini.py` |
-| `tts(text, caller=...)` → caminho media (mp3) | ElevenLabs | `elevenlabs.py` |
+| `tts(text, caller=...)` → caminho media (mp3) | **MiniMax** (t2a_v2) → ElevenLabs (fallback) | `minimax.py` / `elevenlabs.py` |
 | `ocr(bytes, caller=..., document=False)` → texto | Google Vision | `vision_ocr.py` |
+
+> **TTS e visão têm fallback** (MiniMax primário; ElevenLabs/Gemini cobrem queda). O TTS escolhe a voz
+> **cruzada** por gênero (homem→voz feminina `Portuguese_SereneWoman`, mulher→voz masculina
+> `Portuguese_GentleTeacher`). O MiniMax-M3 roda com `thinking` desligado (sem `<think>`).
+> **OCR fica só no Google Vision** (não entrou no MiniMax).
 
 Config no `.env`: `GEMINI_API_KEY`, `ELEVENLABS_API_KEY`, `GOOGLE_VISION_API_KEY` (+ defaults de
 modelo/voz no settings). São **opcionais**: sem a key, o check só **avisa** (`ai.W001/W002/W003`),

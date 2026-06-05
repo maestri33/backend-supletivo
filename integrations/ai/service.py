@@ -13,6 +13,7 @@ Os outros apps do monólito chamam ESTAS funções (nunca o client direto). Cada
 from __future__ import annotations
 
 import json
+import re
 import time
 from dataclasses import dataclass
 
@@ -25,6 +26,16 @@ from .client import ChatResult, LLMError
 from .models import AiCall
 
 logger = structlog.get_logger()
+
+# Modelos de raciocínio (MiniMax-M3 etc.) prefixam um bloco <think>...</think> no texto; o conteúdo
+# útil vem depois. Removemos o bloco antes de usar/parsear — robusto p/ qualquer modelo da cadeia.
+_THINK_RE = re.compile(r"<think>.*?</think>", re.DOTALL | re.IGNORECASE)
+
+
+def _strip_think(text: str) -> str:
+    """Remove blocos <think>...</think> (raciocínio) do texto e apara espaços nas pontas."""
+    return _THINK_RE.sub("", text or "").strip()
+
 
 # ---------------------------------------------------------------------------
 # Contrato de correção do training (porte do legado training/integrations/ai.py).
@@ -161,7 +172,7 @@ def generate_text(
     result, _p, _m = _run(
         AiCall.Operation.TEXT, caller, attempt, providers.fallback_chain(model)
     )
-    return result.content.strip().strip('"')
+    return _strip_think(result.content).strip('"')
 
 
 def generate_json(
@@ -190,7 +201,7 @@ def generate_json(
         AiCall.Operation.JSON, caller, attempt, providers.fallback_chain(model)
     )
     try:
-        return json.loads(result.content)
+        return json.loads(_strip_think(result.content))
     except json.JSONDecodeError as exc:
         raise LLMError(f"resposta não é JSON válido: {exc}", retryable=False) from exc
 
@@ -218,7 +229,7 @@ def chat(
     result, _p, _m = _run(
         AiCall.Operation.CHAT, caller, attempt, providers.fallback_chain(model)
     )
-    return result.content
+    return _strip_think(result.content)
 
 
 def summarize(
@@ -240,7 +251,7 @@ def summarize(
     result, _p, _m = _run(
         AiCall.Operation.SUMMARIZE, caller, attempt, providers.fallback_chain(model)
     )
-    return result.content.strip()
+    return _strip_think(result.content)
 
 
 def extract(
@@ -267,7 +278,7 @@ def extract(
         AiCall.Operation.EXTRACT, caller, attempt, providers.fallback_chain(model)
     )
     try:
-        return json.loads(result.content)
+        return json.loads(_strip_think(result.content))
     except json.JSONDecodeError as exc:
         raise LLMError(
             f"resposta não é JSON válido na extração: {exc}", retryable=False
@@ -310,7 +321,7 @@ def grade(
         AiCall.Operation.GRADE, caller, attempt, providers.fallback_chain(model)
     )
     try:
-        data = json.loads(result.content)
+        data = json.loads(_strip_think(result.content))
         grade_value = max(0.0, min(10.0, float(data["nota"])))
         justification = str(data["justificativa"]).strip()
     except (json.JSONDecodeError, KeyError, TypeError, ValueError) as exc:
@@ -376,21 +387,44 @@ def describe_image(
     mime_type: str = "image/jpeg",
     prompt: str | None = None,
 ) -> str:
-    """Gemini visão: descreve/analisa uma imagem (selfie/documento/recibo). Devolve o texto."""
-    from .gemini import GeminiClient
+    """Visão: descreve/analisa uma imagem (selfie/documento/recibo). Devolve o texto.
 
-    client = GeminiClient()
+    MiniMax-M3 é o PRIMÁRIO (multimodal, com o raciocínio <think> desligado); em falha cai pro Gemini
+    (fallback). Grava 1 AiCall por tentativa.
+    """
+    from .minimax import MiniMaxClient
 
-    async def coro():
-        return await client.describe(image_bytes, mime_type=mime_type, prompt=prompt)
+    mm = MiniMaxClient()
 
-    return _media_call(
-        operation=AiCall.Operation.VISION,
-        provider="gemini",
-        model=settings.GEMINI_VISION_MODEL,
-        caller=caller,
-        coro=coro,
-    )
+    async def mm_coro():
+        return await mm.describe(image_bytes, mime_type=mime_type, prompt=prompt)
+
+    try:
+        return _media_call(
+            operation=AiCall.Operation.VISION,
+            provider="minimax",
+            model=settings.MINIMAX_VISION_MODEL,
+            caller=caller,
+            coro=mm_coro,
+        )
+    except Exception as exc:  # noqa: BLE001 — MiniMax falhou → tenta o Gemini (fallback)
+        logger.warning("ai.vision_fallback_gemini", error=str(exc)[:160])
+        from .gemini import GeminiClient
+
+        gemini = GeminiClient()
+
+        async def gemini_coro():
+            return await gemini.describe(
+                image_bytes, mime_type=mime_type, prompt=prompt
+            )
+
+        return _media_call(
+            operation=AiCall.Operation.VISION,
+            provider="gemini",
+            model=settings.GEMINI_VISION_MODEL,
+            caller=caller,
+            coro=gemini_coro,
+        )
 
 
 def generate_image(prompt: str, *, caller: str) -> str:
@@ -433,30 +467,60 @@ def _voice_for_gender(gender: str | None) -> str | None:
     return None
 
 
+def _minimax_voice_for_gender(gender: str | None) -> str:
+    """Voz MiniMax pelo gênero do destinatário — CRUZADA (igual ElevenLabs, regra do Victor): o
+    destinatário HOMEM recebe voz FEMININA (MINIMAX_VOICE_FEMALE=Portuguese_SereneWoman) e a MULHER
+    recebe voz MASCULINA (MINIMAX_VOICE_MALE=Portuguese_GentleTeacher). Sem gênero → feminina (padrão)."""
+    g = (gender or "").strip().upper()
+    if g == "M":
+        return settings.MINIMAX_VOICE_FEMALE
+    if g == "F":
+        return settings.MINIMAX_VOICE_MALE
+    return settings.MINIMAX_VOICE_FEMALE
+
+
 def tts(
     text: str, *, caller: str, voice_id: str | None = None, gender: str | None = None
 ) -> str:
-    """ElevenLabs TTS: gera áudio a partir do texto. Salva em media/ai/audio/ e devolve o caminho.
+    """TTS: gera áudio a partir do texto. Salva em media/ai/audio/ e devolve o caminho.
 
-    A voz segue a ordem: `voice_id` explícito > voz por `gender` (M/F → ELEVENLABS_VOICE_MALE/
-    FEMALE do .env) > voz default do cliente (ELEVENLABS_VOICE_ID). Os defaults das vozes nominais
-    apontam pra voz padrão, então sem config M/F o TTS segue funcionando (não-quebra).
+    MiniMax (t2a_v2) é o PRIMÁRIO; em falha cai pro ElevenLabs (fallback). A voz segue: `voice_id`
+    explícito > voz por `gender` (M/F → MINIMAX_VOICE_MALE/FEMALE no MiniMax; ELEVENLABS_VOICE_* no
+    fallback) > voz default do provider. `voice_id` explícito deve casar com o provider ativo.
     """
-    from .elevenlabs import ElevenLabsClient
+    from .minimax import MiniMaxClient
 
-    client = ElevenLabsClient()
-    voice = voice_id or _voice_for_gender(gender)
+    mm = MiniMaxClient()
+    mm_voice = voice_id or _minimax_voice_for_gender(gender)
 
-    async def coro():
-        return await client.tts(text, voice_id=voice)
+    async def mm_coro():
+        return await mm.tts(text, voice_id=mm_voice)
 
-    audio = _media_call(
-        operation=AiCall.Operation.TTS,
-        provider="elevenlabs",
-        model=settings.ELEVENLABS_MODEL_ID,
-        caller=caller,
-        coro=coro,
-    )
+    try:
+        audio = _media_call(
+            operation=AiCall.Operation.TTS,
+            provider="minimax",
+            model=settings.MINIMAX_TTS_MODEL,
+            caller=caller,
+            coro=mm_coro,
+        )
+    except Exception as exc:  # noqa: BLE001 — MiniMax falhou → tenta o ElevenLabs (fallback)
+        logger.warning("ai.tts_fallback_elevenlabs", error=str(exc)[:160])
+        from .elevenlabs import ElevenLabsClient
+
+        el = ElevenLabsClient()
+        el_voice = voice_id or _voice_for_gender(gender)
+
+        async def el_coro():
+            return await el.tts(text, voice_id=el_voice)
+
+        audio = _media_call(
+            operation=AiCall.Operation.TTS,
+            provider="elevenlabs",
+            model=settings.ELEVENLABS_MODEL_ID,
+            caller=caller,
+            coro=el_coro,
+        )
     return _save_media("audio", "mp3", audio)
 
 
