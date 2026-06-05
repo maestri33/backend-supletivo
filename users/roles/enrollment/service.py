@@ -60,12 +60,6 @@ def create_from_lead(*, user, promoter, hub) -> Enrollment:
     return enrollment
 
 
-def get_by_user(user) -> Enrollment | None:
-    return (
-        Enrollment.objects.filter(user=user).select_related("hub", "promoter").first()
-    )
-
-
 def get_by_external_id(external_id: str) -> Enrollment | None:
     return (
         Enrollment.objects.filter(external_id=external_id)

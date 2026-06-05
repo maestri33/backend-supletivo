@@ -7,7 +7,6 @@ from users.roles.enrollment.service import (
     create_from_lead,
     decide_selfie,
     get_by_external_id,
-    get_by_user,
     get_address,
     get_for_user_external_id,
     release,
@@ -24,7 +23,6 @@ from users.roles.enrollment.service import (
 __all__ = [
     "EnrollmentError",
     "create_from_lead",
-    "get_by_user",
     "get_by_external_id",
     "get_for_user_external_id",
     "to_dict",

@@ -14,10 +14,6 @@ from users.roles.promoter.models import Promoter
 logger = structlog.get_logger()
 
 
-class PromoterError(Exception):
-    """Erro de borda do promoter."""
-
-
 def create_promoter(*, user, hub) -> Promoter:
     """Cria o Promoter(ACTIVE) ligado ao hub herdado do candidato. Idempotente."""
     existing = Promoter.objects.filter(user=user).first()

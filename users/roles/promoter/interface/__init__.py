@@ -3,7 +3,6 @@
 """
 
 from users.roles.promoter.service import (
-    PromoterError,
     create_promoter,
     get_by_user_external_id,
     get_for_user,
@@ -15,7 +14,6 @@ from users.roles.promoter.service import (
 )
 
 __all__ = [
-    "PromoterError",
     "create_promoter",
     "get_for_user",
     "get_by_user_external_id",
