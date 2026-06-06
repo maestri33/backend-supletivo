@@ -63,6 +63,11 @@ Config em `backend/.env` (não versionado). Dev usa SQLite.
 - **hub (§4 item 5, Fatia 1):** o **polo** — entidade `Hub` (Address FK + marca do catálogo `.env` +
   coordenador) + `seed_defaults` (conta-mãe = staff superuser + promoter + coordinator; hub padrão =
   fallback de captação). Criação simples agora (a complexa é futuro). Testado in-process. → [[wiki/hub/hub]]
+- **users/roles/student (§4 item 9):** o funil final do aluno — a matrícula liberada vira `student`,
+  percorre documentos (IA assíncrona + `review`→coordenador decide) → prova (coordenador corrige) →
+  pendências (doc/taxa) → diploma → **retirada (foto) → `veteran`** + **comissão do coordenador do polo**.
+  **Testado REAL (Portão 3, 2026-06-06):** fluxo completo por HTTP, IA real, uploads e **PIX real** da
+  comissão (−R$3). → [[wiki/users/student]]
 - **api/ (§4 item 13):** API pública Django Ninja in-process — 4 grupos versionados
   (`/api/v1/{clients,collaborators,leadership,staff}/`) + auth JWT compartilhada (reusa o
   `users/auth/jwt`). Esqueleto (`health`/`whoami`) + **grupo `staff` com as rotas de hub/coordenador**

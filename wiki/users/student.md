@@ -4,8 +4,9 @@ A última fase do funil do ALUNO: o `enrollment` liberado vira **`student`**, pe
 diploma e, na **retirada do diploma**, vira **`veteran`** e gera a **comissão do coordenador do polo**.
 Sub-pacote de `users` (`users/roles/student`, app_label `users` — 1 migration set, igual enrollment/candidate).
 
-> ⚠️ **NÃO TESTADO com IA/dinheiro/aluno real** — só smoke in-process (cadeia completa, IA/comissão simuladas).
-> Fonte: `specs/student.md` + VISÃO + legado `~/coders/backend/student`. Decisões do Victor (2026-06-04):
+> ✅ **TESTADO REAL (Portão 3, 2026-06-06)** — fluxo provado fim-a-fim por HTTP, com **IA real**, uploads reais e
+> **DINHEIRO REAL** (PIX da comissão do coordenador, saldo Asaas −R$3). Detalhe: `.claude/tests/8-student-veteran.md`.
+> Fonte: `specs/student_OK.md` + VISÃO + legado `~/coders/backend/student`. Decisões do Victor (2026-06-04):
 > escopo = spec completo · «conferir» = ambos (doc OU taxa) · study_platform = campos estruturados.
 
 ## Máquina de status (`Student.Status`)
@@ -16,9 +17,10 @@ Sub-pacote de `users` (`users/roles/student`, app_label `users` — 1 migration 
 - **`Student`** — 1-1 User. FK real pro **hub herdado** do enrollment (origem da comissão). `status`,
   os dados estruturados da plataforma (`platform_url/login/password/notes` — credencial de plataforma EXTERNA),
   e `blood_type` (valor; a foto é um documento). `external_id` na borda.
-- **`StudentDocument`** — foto + estado da validação por IA (`pending/approved/rejected`), 1 por (aluno, tipo).
+- **`StudentDocument`** — foto + estado da validação por IA (`pending/approved/rejected/review`), 1 por (aluno, tipo).
   Tipos: `certificate`, `transcript`, `blood_type`, `address_proof`, `id_card`, `birth_certificate`,
-  `military_service` (**só homem** — gate de gênero).
+  `military_service` (**só homem** — gate de gênero). IA **em dúvida/fora do ar → `review`**: o coordenador
+  decide o sim/não (`decide_document`); a IA preserva a justificativa.
 - **`StudentExam`** — `subject` + `scheduled_at` + `attempt_number` + `result` (passed/failed) + quem corrigiu.
 - **`StudentDiploma`** — 1 por aluno: emissão (coordenador) + retirada (foto do aluno) + `commission_triggered_at`
   (idempotência da comissão).
@@ -30,8 +32,8 @@ Sub-pacote de `users` (`users/roles/student`, app_label `users` — 1 migration 
    COMPLETED e **cria o `Student`** (AWAITING_DOCUMENTS) com os dados de plataforma + o hub herdado.
 2. **Documentos** (aluno): `set_blood_type` + `upload_document(tipo, foto)` → cada um fica PENDING e dispara a
    **validação por IA assíncrona** (Django-Q `tasks.validate_document` → `ai.describe_image`). Best-effort: IA
-   fora do ar/indecisa → fica PENDING (nunca auto-aprova). Todos os exigidos aprovados + tipo sanguíneo →
-   `EXAM_RELEASED`.
+   fora do ar/indecisa → vai pra `review` e o **coordenador decide** (`decide_document`; nunca auto-aprova).
+   Todos os exigidos aprovados + tipo sanguíneo → `EXAM_RELEASED`.
 3. **Prova** (aluno agenda → coordenador corrige): `schedule_exam` → `grade_exam(passed)`. Reprovou → `EXAM_FAILED`
    → reagenda (nova tentativa). Passou → `AWAITING_DOCUMENTATION_DISPATCH`.
 4. **Pendências** (coordenador): `open_pendency(doc|fee)` → `PENDING`; `resolve_pendency` → sem pendência aberta
@@ -49,7 +51,8 @@ Sub-pacote de `users` (`users/roles/student`, app_label `users` — 1 migration 
 - **`clients`** (role `student`): `GET /student/me`, `POST /student/blood-type`, `POST /student/documents/{tipo}`,
   `POST /student/exam/schedule`, `GET /student/pendencies`, `POST /student/diploma/pickup`.
 - **`leadership`** (role `coordinator`, sempre **coordenador DO HUB do aluno**): `release` (com campos de
-  plataforma), `POST /students/{ext}/exam/grade`, `POST /students/{ext}/pendencies`, `POST /pendencies/{ext}/resolve`,
+  plataforma), `POST /students/{ext}/documents/{doc}/decide` (sim/não do doc em `review`),
+  `POST /students/{ext}/exam/grade`, `POST /students/{ext}/pendencies`, `POST /pendencies/{ext}/resolve`,
   `POST /students/{ext}/documentation/clear`, `POST /students/{ext}/diploma/issue`.
 
 ## Pendências
