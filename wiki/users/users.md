@@ -31,8 +31,11 @@
   + **WhatsApp `check_numbers`** (número real) → transação atômica `User`+`Profile`(com `name`/
   `birth_date` do CPFHub)+**`Address` vazio**+**`Document`+sub-docs null**+role inicial → dispara OTP
   → `{external_id}`.
-- `POST check/` `{cpf|phone|external_id}` → acha + dispara OTP. Resposta com `found`/`external_id`;
-  não-encontrado = jitter + shape de sucesso (anti-enumeração). Rate-limit forte de IP fica no edge (§5).
+- `POST check/` `{cpf|phone|external_id}` → acha + dispara OTP. Resposta com `found`/`external_id`,
+  mais **`roles`** (roles ativas do usuário existente → o front escolhe o fluxo de login) e
+  **`whatsapp`** (só quando veio `phone` e o usuário NÃO existe: o número tem WhatsApp ativo? — o front
+  avisa antes do cadastro; `null` = WhatsApp fora do ar, **não bloqueia o check**). Não-encontrado =
+  jitter + shape de sucesso (anti-enumeração). Rate-limit forte de IP fica no edge (§5).
 - `POST recover/` `{cpf|phone}` → OTP no canal conhecido; **nunca** devolve `external_id`.
 - `POST login/` `{external_id, role, otp}` → confere role ativa → valida OTP → **JWT** com as roles ativas.
 
@@ -44,6 +47,8 @@ RS256. Par de chaves PEM gerado no 1º boot em `keys/` (**gitignored**, privada 
 ## otp (`auth/otp/`)
 Código 6 díg, hash SHA256, TTL 300s, máx 3 tentativas, rate-limit 30s + 5/h (DB). Enviado por
 **WhatsApp via `notify`** (despachante puro; o `phone` vem do Profile). Template em `otp.md` (pt-br).
+**Comando:** `manage.py otp_reset_ratelimit --phone|--cpf|--external-id <valor>` zera o rate-limit de
+OTP de um usuário (apoio a teste/atendimento; remove as linhas `OtpRateLimit` dele).
 
 ## roles (`roles/`)
 Catálogo de transições no **`.env`** (`ROLE_RULES`, §9), validado no boot (`catalog.py`). Cadeias:

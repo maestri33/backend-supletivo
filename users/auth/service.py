@@ -222,10 +222,29 @@ def check(
     user = _find_user(cpf=cpf, phone=phone, external_id=external_id)
     if user is None:
         _jitter()
-        return {"otp_sent": True, "otp_wait": None, "found": False, "external_id": None}
+        whatsapp: bool | None = None
+        if phone:
+            try:
+                exists, _ = _check_phone_whatsapp(phone)
+                whatsapp = exists
+            except IntegrationError:
+                whatsapp = None  # WhatsApp fora do ar → não bloqueia o check
+        return {
+            "otp_sent": True,
+            "otp_wait": None,
+            "found": False,
+            "external_id": None,
+            "whatsapp": whatsapp,
+        }
 
     result = _send_or_wait(user)
-    return {**result, "found": True, "external_id": str(user.external_id)}
+    return {
+        **result,
+        "found": True,
+        "external_id": str(user.external_id),
+        "whatsapp": None,
+        "roles": roles.active_roles(user),
+    }
 
 
 def recover(*, cpf: str | None = None, phone: str | None = None) -> dict:

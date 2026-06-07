@@ -65,6 +65,8 @@ class CheckOut(Schema):
     external_id: str | None = None
     otp_sent: bool
     otp_wait: int | None = None
+    whatsapp: bool | None = None
+    roles: list[str] | None = None
 
 
 class LoginIn(Schema):
