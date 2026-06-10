@@ -6,6 +6,8 @@ consome pra amarrar o lead ao promotor. Listagens (leads/comissões) são read-o
 
 from __future__ import annotations
 
+import uuid
+
 import structlog
 from django.conf import settings
 
@@ -43,9 +45,19 @@ def get_by_user_external_id(external_id: str) -> Promoter | None:
 
 
 def validate_ref(ref: str):
-    """`ref` = external_id do User-promotor ATIVO → devolve o User (o lead amarra nele); senão None."""
+    """`ref` = external_id do User-promotor ATIVO → devolve o User (o lead amarra nele); senão None.
+
+    O `ref` chega CRU da landing (`?ref=`) — malformado (não-UUID) conta como inválido → None,
+    NUNCA exceção solta (o caller cai no promotor padrão). Antes estourava 500 e quebrava o
+    cadastro de quem clicou num link com ref estragado (bug reportado pelo Victor 2026-06-10)."""
+    try:
+        ref_uuid = uuid.UUID(str(ref))
+    except (TypeError, ValueError):
+        return None
     promoter = (
-        Promoter.objects.filter(user__external_id=ref, status=Promoter.Status.ACTIVE)
+        Promoter.objects.filter(
+            user__external_id=ref_uuid, status=Promoter.Status.ACTIVE
+        )
         .select_related("user")
         .first()
     )
