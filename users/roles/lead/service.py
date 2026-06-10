@@ -298,6 +298,77 @@ def _checkout_dict(c: Checkout) -> dict:
     }
 
 
+# ── self (o próprio cliente vê seu lead: GET /clients/lead/me) ───────────────
+
+
+def get_for_user_external_id(user_external_id: str) -> Lead | None:
+    """O lead do usuário logado (1-1 com o User)."""
+    return (
+        Lead.objects.filter(user__external_id=user_external_id)
+        .select_related("user", "promoter", "checkout")
+        .first()
+    )
+
+
+def checkout_url_for(lead: Lead) -> str | None:
+    """A URL ÚNICA do lead (link curto): `checkout_links.resolve` redireciona pro gateway se NÃO pago,
+    pro recibo se pago. `None` se ainda não há checkout."""
+    from users.roles.lead import checkout_links
+
+    c = getattr(lead, "checkout", None)
+    return checkout_links.short_url(c.short_token) if c else None
+
+
+def lead_self_dict(lead: Lead) -> dict:
+    """TODOS os dados do lead pro próprio cliente (Victor 2026-06-07): pagamento + cliente + promotor.
+
+    Inclui a URL única (✦) que redireciona checkout↔recibo. NÃO é a `lead_to_dict` (visão de hub/staff)."""
+    c = getattr(lead, "checkout", None)
+    customer = profiles.get(lead.user)
+    promoter = profiles.get(lead.promoter)
+    checkout = None
+    if c is not None:
+        checkout = _checkout_dict(c)
+        checkout["url"] = checkout.pop("short_url")  # ✦ a URL única (checkout↔recibo)
+        checkout["receipt_url"] = c.receipt_url
+    return {
+        "external_id": str(lead.external_id),
+        "status": lead.status,
+        "failed_reason": lead.failed_reason,
+        "created_at": lead.created_at.isoformat(),
+        "customer": {
+            "name": customer.name if customer else None,
+            "phone": customer.phone if customer else None,
+            "email": customer.email if customer else None,
+            "cpf": customer.cpf if customer else None,
+        },
+        "promoter": {
+            "external_id": str(lead.promoter.external_id),
+            "name": promoter.name if promoter else None,
+        },
+        "checkout": checkout,
+    }
+
+
+def pricing() -> dict:
+    """Preço público de vitrine — É O MESMO que é cobrado (Victor 2026-06-07): PIX (valor cheio) + cartão 12x.
+
+    Lê a MESMA fonte da cobrança (`price_pix`/`price_card`): PIX em reais; cartão do `.env` em centavos → reais."""
+    from decimal import Decimal
+
+    pix = config.price_pix()
+    total = config.price_card()
+    installment = (total / config.CARD_INSTALLMENTS).quantize(Decimal("0.01"))
+    return {
+        "pix": f"{pix:.2f}",
+        "card": {
+            "installments": config.CARD_INSTALLMENTS,
+            "installment": f"{installment:.2f}",
+            "total": f"{total:.2f}",
+        },
+    }
+
+
 # ── pagamento (chamado pelo hook do webhook, CONVENTION §7) ─────────────────
 
 

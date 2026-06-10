@@ -447,10 +447,10 @@ COMMISSION_BONUS_THRESHOLD = env.int("COMMISSION_BONUS_THRESHOLD", default=5)
 COMMISSION_CLOSING_WEEKDAY = env.int("COMMISSION_CLOSING_WEEKDAY", default=4)
 COMMISSION_CLOSING_HOUR = env.int("COMMISSION_CLOSING_HOUR", default=18)
 
-# matrícula (funil do aluno, §4 itens 11/13) — preço por gateway (Victor 2026-06-04): cartão R$1 /
-# PIX R$5 (mínimo do Asaas). Reais (Decimal no lead/config; infinitepay converte p/ centavos). PROD =
-# pedir ao Victor (§8). Descrição da cobrança = config (não fixa no código).
-ENROLLMENT_PRICE_CARD = env("ENROLLMENT_PRICE_CARD", default="1")
+# matrícula (funil do aluno, §4 itens 11/13) — preço por gateway. Victor 2026-06-07: o COBRADO é o MESMO
+# EXIBIDO na vitrine (GET /clients/pricing), uma fonte só. PIX em REAIS (valor cheio); CARTÃO em CENTAVOS
+# (total; o front mostra 12x). DEV: PIX R$5 / cartão R$1 (=100 centavos). PROD = pedir ao Victor (§8).
+ENROLLMENT_PRICE_CARD_CENTS = env.int("ENROLLMENT_PRICE_CARD_CENTS", default=100)
 ENROLLMENT_PRICE_PIX = env("ENROLLMENT_PRICE_PIX", default="5")
 ENROLLMENT_DESCRIPTION = env("ENROLLMENT_DESCRIPTION", default="Matrícula Supletivo")
 

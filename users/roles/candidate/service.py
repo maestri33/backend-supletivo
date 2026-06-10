@@ -118,7 +118,9 @@ def set_profile(
 def get_address(*, user_external_id) -> dict:
     """GET do endereço (o front vê o que está vazio p/ saber o que ainda pode preencher)."""
     _require(user_external_id)
-    return address_iface.as_dict(address_iface.get_by_external_id(user_external_id))
+    return address_iface.as_public_dict(
+        address_iface.get_by_external_id(user_external_id)
+    )
 
 
 def set_address_cep(*, user_external_id, cep) -> dict:
@@ -126,7 +128,9 @@ def set_address_cep(*, user_external_id, cep) -> dict:
     cand = _require(user_external_id, _S.PROFILE, _S.ADDRESS)
     address_iface.set_by_cep(external_id=user_external_id, cep=cep)
     _advance_address(cand, user_external_id)
-    return address_iface.as_dict(address_iface.get_by_external_id(user_external_id))
+    return address_iface.as_public_dict(
+        address_iface.get_by_external_id(user_external_id)
+    )
 
 
 def set_address_data(*, user_external_id, **fields) -> dict:
@@ -134,7 +138,9 @@ def set_address_data(*, user_external_id, **fields) -> dict:
     cand = _require(user_external_id, _S.PROFILE, _S.ADDRESS)
     address_iface.fill_empty(external_id=user_external_id, **fields)
     _advance_address(cand, user_external_id)
-    return address_iface.as_dict(address_iface.get_by_external_id(user_external_id))
+    return address_iface.as_public_dict(
+        address_iface.get_by_external_id(user_external_id)
+    )
 
 
 def _advance_address(cand: Candidate, user_external_id) -> None:

@@ -1,7 +1,10 @@
 # api/ — API pública Django Ninja (in-process)
 
-> **Estado: ESQUELETO.** Só `health` + `whoami` existem hoje. Nenhuma rota de negócio
-> foi escrita ainda. Ver [[#O que FALTA terminar]] no fim. Régua: [[CONVENTION]] §1/§3/§5.
+> **Estado: rotas de negócio JÁ escritas** nos 4 grupos (lead/enrollment/student ·
+> candidate/training/promoter · coordenador · staff). O que cada grupo expõe está na **sua
+> própria página**: [[wiki/api/clients]] · [[wiki/api/staff]] · (collaborators e leadership: a
+> documentar). **O estado de TESTE varia por rota** (provado real vs casca não-exercida) — ver a
+> página de cada grupo. Régua: [[CONVENTION]] §1/§3/§5.
 
 A API pública do MVP **vive dentro do monólito Django**, via **Django Ninja** (in-process —
 sem serviço separado, sem hop HTTP). Decisão do Victor 2026-06-01 (FastAPI/edges descartados).
@@ -38,11 +41,12 @@ Cada grupo é um `NinjaAPI` próprio, montado em [core/urls.py](../../core/urls.
   - `require_roles(principal, *roles)` — gate de papel por rota: **403** se o principal não
     tem nenhum dos papéis exigidos.
 - `api/clients.py` · `api/collaborators.py` · `api/leadership.py` · `api/staff.py` — cada um
-  só chama `build_group(...)`. É onde as **rotas de negócio entram** (ainda vazios).
+  chama `build_group(...)` e declara as **rotas de negócio** do seu público.
 
-## Rotas que existem HOJE
+## Rotas comuns a todo grupo (esqueleto compartilhado)
 
-Para **cada** grupo (`<grupo>` ∈ clients, collaborators, leadership, staff):
+Toda página de grupo herda estas 2 da fábrica `build_group` (as rotas de **negócio** estão na
+página de cada grupo). `<grupo>` ∈ clients, collaborators, leadership, staff:
 
 | Método | Caminho | Auth | O que faz |
 |---|---|---|---|
@@ -60,20 +64,21 @@ versão**; a anterior segue no ar até migrar os consumidores.
 
 ## O que FALTA terminar
 
-Isto aqui é esqueleto. Falta (em ordem de quem destrava o quê):
+As rotas de negócio JÁ existem nos 4 grupos. O que ainda falta:
 
-1. **Rotas de NEGÓCIO** — hoje **nenhuma** existe. Entram **junto com cada módulo** (§4):
-   `hub` (item 5) → promoter/training/candidate/student/enrollment/lead (itens 6–11) →
-   `staff` (item 12). Cada rota chama o `interface/` do módulo, in-process.
-2. **Nome dos 4 grupos** — placeholder; decisão do Victor.
-3. **Reexpor os `/status/` das integrações dentro do Ninja** — hoje `asaas`/`infinitepay`
+1. **Documentar `collaborators` e `leadership`** — só `clients` e `staff` têm página de wiki
+   (`wiki/api/`). Cada uma deve passar pela análise + doc pro front ([[WORKFLOW]] Portão 3).
+2. **Provar de verdade o que é casca** — várias rotas existem mas **nunca rodaram** (ex.: todo o
+   `/enrollment/*` no `clients`). O estado real está na página de cada grupo.
+3. **Nome dos 4 grupos** — placeholder; decisão do Victor.
+4. **Reexpor os `/status/` das integrações dentro do Ninja** — hoje `asaas`/`infinitepay`
    expõem status em `/integrations/.../status/` (views DMZ legadas). Migrar pro grupo `staff`
    (saúde dos serviços). **Deferido.**
-4. **Gate de role + status por rota** — `require_roles` já existe (papel); a **máquina de
-   status por role** ainda não (decidir status de cada role COM o Victor — §6 «PENDÊNCIA»).
-5. **E2E completo `register → OTP → login → Bearer`** — só falta rodar com o celular do
-   Victor. O `whoami` já foi provado in-process com token mintado; o `issue`/`decode` do JWT
-   é o mesmo do login (contrato não mudou no swap pro ninja-jwt).
+
+> Já feito (não confundir com pendência): o gate de role (`require_roles`), a máquina de status
+> por role, o E2E `register → OTP → login → Bearer` **provado real** (lead cartão/PIX +
+> colaborador), e o **PK do `Address` fora da borda Ninja** (`as_public_dict`, Victor 2026-06-07 —
+> ver [[wiki/api/clients]]). O JWT é `django-ninja-jwt` (swap concluído).
 
 ## Ver também
 

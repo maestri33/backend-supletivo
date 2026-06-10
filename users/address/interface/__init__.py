@@ -20,7 +20,7 @@ from users.address.service import (
 
 
 def as_dict(address: Address) -> dict:
-    """Serializa o Address pro JSON da view DMZ."""
+    """Serializa o Address pro JSON da view DMZ (legada) — inclui o PK (`id`)."""
     return {
         "id": address.pk,
         "zipcode": address.zipcode,
@@ -34,6 +34,14 @@ def as_dict(address: Address) -> dict:
     }
 
 
+def as_public_dict(address: Address) -> dict:
+    """Serializa o Address pra borda pública (API Ninja) — SEM o PK (CONVENTION §4: só `external_id`
+    na borda; nunca expor PK). O endereço é acessado pelo contexto do user logado, não tem id próprio."""
+    data = as_dict(address)
+    data.pop("id", None)
+    return data
+
+
 __all__ = [
     "create_empty",
     "get_by_external_id",
@@ -44,4 +52,5 @@ __all__ = [
     "is_complete",
     "set_by_cep",
     "as_dict",
+    "as_public_dict",
 ]

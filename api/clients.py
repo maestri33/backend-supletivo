@@ -8,7 +8,7 @@ O funil autenticado da matrícula (enrollment) entra na 6b.
 
 from __future__ import annotations
 
-from ninja import File, Schema
+from ninja import File, Router, Schema
 from ninja.errors import HttpError
 from ninja.files import UploadedFile
 
@@ -80,14 +80,38 @@ class TokenOut(Schema):
     token_type: str
 
 
+class CardPriceOut(Schema):
+    installments: int
+    installment: str  # valor da parcela em reais (string), ex.: "99.00"
+    total: str  # valor cheio em reais (string), ex.: "1188.00"
+
+
+class PricingOut(Schema):
+    pix: str  # valor cheio do PIX em reais (string), ex.: "999.00"
+    card: CardPriceOut
+
+
 def _domain_http(exc: DomainError) -> HttpError:
     return HttpError(getattr(exc, "status", 400), exc.detail)
 
 
-# ── público (captação + login) ─────────────────────────────────────────────
-@api.post("/leads", response={201: LeadOut}, auth=None, tags=["lead"])
-def create_lead(request, payload: LeadCreateIn):
-    """Cria o lead: cadastro mínimo (cpf/phone/email + método) + checkout. Devolve o pagamento na hora."""
+# ── preço de vitrine (público) — o front exibe na landing ────────────────────
+@api.get("/pricing", response=PricingOut, auth=None, tags=["pricing"])
+def pricing(request):
+    """Preço de VITRINE público (sem login): PIX (valor cheio) + cartão em 12x. ≠ a cobrança real."""
+    return lead_iface.pricing()
+
+
+# ── clients/auth — entrada do cliente (pública): cadastro + login por OTP ─────
+# Victor 2026-06-07: captação/login são ENTRADA → vivem em /auth. TODO cliente entra como `lead`.
+auth_router = Router(tags=["auth"])
+lead_router = Router(tags=["lead"])
+
+
+@auth_router.post("/register", response={201: LeadOut}, auth=None)
+def register(request, payload: LeadCreateIn):
+    """Cadastro do cliente: **TODO cliente entra OBRIGATORIAMENTE como `lead`.** Cria o lead (cpf/phone/
+    email + método) + o checkout e devolve o pagamento na hora."""
     try:
         result = lead_iface.create_lead(
             cpf=payload.cpf,
@@ -103,18 +127,20 @@ def create_lead(request, payload: LeadCreateIn):
     return 201, result
 
 
-@api.post("/leads/check", response=CheckOut, auth=None, tags=["lead"])
-def check_lead(request, payload: CheckIn):
-    """Dispara OTP por cpf/phone (mecanismo de login do funil)."""
+@auth_router.post("/check", response=CheckOut, auth=None)
+def check(request, payload: CheckIn):
+    """Dispara OTP por cpf/phone e **VAZA existência** (CONVENTION §5): devolve `found`+`roles` honestos —
+    o front decide cadastro novo × login e pra qual fase do funil mandar."""
     try:
         return auth_iface.check(cpf=payload.cpf, phone=payload.phone)
     except DomainError as exc:
         raise _domain_http(exc) from exc
 
 
-@api.post("/leads/login", response=TokenOut, auth=None, tags=["lead"])
-def login_lead(request, payload: LoginIn):
-    """Login passwordless (OTP) — emite JWT com as roles ativas do funil do aluno."""
+@auth_router.post("/login", response=TokenOut, auth=None)
+def login(request, payload: LoginIn):
+    """Login passwordless (OTP) — resolve o papel mais avançado do funil do cliente (lead→enrollment→
+    student; veteran exige student) e emite JWT com TODAS as roles ativas."""
     user = User.objects.filter(external_id=payload.external_id).first()
     if user is None:
         raise HttpError(404, "Usuário não encontrado.")
@@ -128,6 +154,35 @@ def login_lead(request, payload: LoginIn):
         )
     except DomainError as exc:
         raise _domain_http(exc) from exc
+
+
+# ── clients/lead — a fase LEAD (autenticada, role `lead`): estado + a URL ─────
+def _lead_guard(request):
+    """Gate role lead + devolve o lead do usuário logado (404 se não houver)."""
+    require_roles(request.auth, "lead")
+    lead = lead_iface.get_for_user_external_id(request.auth.external_id)
+    if lead is None:
+        raise HttpError(404, "Lead não encontrado.")
+    return lead
+
+
+@lead_router.get("/me")
+def lead_me(request):
+    """TODOS os dados do lead do cliente logado, incl. a URL (✦ checkout se não pagou / recibo se pagou)."""
+    return lead_iface.lead_self_dict(_lead_guard(request))
+
+
+@lead_router.get("/checkout-url")
+def lead_checkout_url(request):
+    """Só a URL de pagamento/recibo do lead (link único ✦ que redireciona checkout↔recibo)."""
+    url = lead_iface.checkout_url_for(_lead_guard(request))
+    if url is None:
+        raise HttpError(404, "Checkout não encontrado.")
+    return {"url": url}
+
+
+api.add_router("/auth", auth_router)
+api.add_router("/lead", lead_router)
 
 
 # ── matrícula: funil de coleta (autenticado, role enrollment) — 6b ──────────
@@ -171,6 +226,7 @@ class EnrollmentOut(Schema):
     status: str
     hub_external_id: str
     selfie_verified: bool
+    selfie_status: str  # pending/approved/rejected/review — front sabe quando caiu p/ revisão do coord
 
 
 def _enr_guard(request) -> str:

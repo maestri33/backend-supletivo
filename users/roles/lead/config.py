@@ -15,14 +15,23 @@ def _money(name: str, default: str) -> Decimal:
     return Decimal(str(getattr(settings, name, default)))
 
 
+def card_cents() -> int:
+    """Preço do cartão em CENTAVOS (total), do `.env`. **Fonte única**: cobrança + vitrine. DEV=100 (R$1)."""
+    return int(getattr(settings, "ENROLLMENT_PRICE_CARD_CENTS", 100))
+
+
 def price_card() -> Decimal:
-    """Preço da matrícula no cartão (InfinitePay). DEV=1."""
-    return _money("ENROLLMENT_PRICE_CARD", "1")
+    """Preço da matrícula no cartão, em REAIS = `card_cents()` ÷ 100. Cobrado E exibido (Victor 2026-06-07)."""
+    return (Decimal(card_cents()) / 100).quantize(Decimal("0.01"))
 
 
 def price_pix() -> Decimal:
-    """Preço da matrícula no PIX (Asaas). DEV=5 (mínimo do gateway)."""
+    """Preço da matrícula no PIX (Asaas), valor CHEIO em reais, do `.env`. DEV=5 (mínimo do gateway)."""
     return _money("ENROLLMENT_PRICE_PIX", "5")
+
+
+# parcelas do cartão exibidas na vitrine (o front mostra "12x de ..."). É só EXIBIÇÃO — não muda a cobrança.
+CARD_INSTALLMENTS = 12
 
 
 def description() -> str:

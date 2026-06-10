@@ -200,9 +200,9 @@ def check(
 ) -> dict:
     """Acha o usuário por cpf/phone/external_id e dispara OTP se existir.
 
-    Resposta com `found`+`external_id` (o front decide OTP de usuário existente vs cadastro novo).
-    Não-encontrado: jitter de timing + resposta com shape de sucesso (anti-enumeração). Rate-limit
-    forte por IP fica no edge público (§5). Validação só de FORMATO aqui (não vaza existência).
+    **VAZA existência DE PROPÓSITO (CONVENTION §5):** devolve `found` honesto — se existe, manda OTP e
+    retorna `external_id`+`roles`; se NÃO existe, `found:false`+`otp_sent:false`. O front decide cadastro
+    novo × login. **NÃO anti-enumeração.** Rate-limit por IP fica no reverse proxy. Validação só de FORMATO aqui.
     """
     if cpf:
         try:
@@ -221,7 +221,7 @@ def check(
 
     user = _find_user(cpf=cpf, phone=phone, external_id=external_id)
     if user is None:
-        _jitter()
+        # VAZA existência (CONVENTION §5): não existe → found:false + otp_sent:false (honesto).
         whatsapp: bool | None = None
         if phone:
             try:
@@ -230,7 +230,7 @@ def check(
             except IntegrationError:
                 whatsapp = None  # WhatsApp fora do ar → não bloqueia o check
         return {
-            "otp_sent": True,
+            "otp_sent": False,
             "otp_wait": None,
             "found": False,
             "external_id": None,
