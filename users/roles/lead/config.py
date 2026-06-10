@@ -30,7 +30,8 @@ def price_pix() -> Decimal:
     return _money("ENROLLMENT_PRICE_PIX", "5")
 
 
-# parcelas do cartão exibidas na vitrine (o front mostra "12x de ..."). É só EXIBIÇÃO — não muda a cobrança.
+# parcelas do cartão exibidas na vitrine (o front mostra "12x de ..."). É só EXIBIÇÃO — não muda a
+# cobrança: o parcelamento REAL o cliente escolhe na página de checkout do gateway (Victor 2026-06-10).
 CARD_INSTALLMENTS = 12
 
 
