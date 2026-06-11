@@ -65,7 +65,10 @@ class WhatsAppError(Exception):
 class WhatsAppClient:
     """Cliente de alto nível para a Evolution API v2 (WhatsApp)."""
 
-    def __init__(self, *, instance: str | None = None, timeout: float = 30.0) -> None:
+    # default 10s: check_numbers roda DENTRO do request do register/check — timeout alto = stall do
+    # serviço inteiro (auditoria do front 2026-06-10). Chamada de worker que precisa de mais passa
+    # timeout explícito (ex.: áudio 60s).
+    def __init__(self, *, instance: str | None = None, timeout: float = 10.0) -> None:
         self._client = httpx.AsyncClient(
             base_url=settings.WHATSAPP_API_BASE_URL,
             headers={"apikey": settings.WHATSAPP_GLOBAL_API_KEY},

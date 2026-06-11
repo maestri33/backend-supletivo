@@ -16,6 +16,7 @@ from django.db import transaction
 
 from users.address import interface as address_iface
 from users.documents import interface as documents_iface
+from users.exceptions import Conflict, DomainError, NotFound
 from users.profiles import interface as profiles
 from users.roles import interface as roles
 from users.roles.enrollment.models import EducationalData, Enrollment
@@ -26,8 +27,12 @@ _S = Enrollment.Status
 _SELFIE_EXT = {"image/jpeg": "jpg", "image/png": "png", "image/webp": "webp"}
 
 
-class EnrollmentError(Exception):
-    """Erro de borda do enrollment (não encontrada, etapa fora de ordem, gate de status/coordenador)."""
+class EnrollmentError(DomainError):
+    """Erro de borda do enrollment (não encontrada, etapa fora de ordem, gate de status/coordenador).
+
+    É `DomainError` (422): o handler central da API converte em JSON `{detail, code, …extra}`."""
+
+    status = 422
 
 
 # ── 6a: nascimento (chamado pelo hook do lead) ──────────────────────────────
@@ -85,9 +90,14 @@ def _require(user_external_id: str, *allowed_status) -> Enrollment:
         .first()
     )
     if enr is None:
-        raise EnrollmentError("enrollment_not_found")
+        raise NotFound("Matrícula não encontrada.", code="ENROLLMENT_NOT_FOUND")
     if allowed_status and enr.status not in allowed_status:
-        raise EnrollmentError(f"wrong_status:{enr.status}")
+        # 409 + expected_status = a etapa ATUAL no servidor — o front roteia o wizard com isso.
+        raise Conflict(
+            "Sua matrícula está em outra etapa.",
+            code="WRONG_STATUS",
+            extra={"expected_status": enr.status},
+        )
     return enr
 
 
@@ -103,6 +113,62 @@ def to_dict(enr: Enrollment) -> dict:
         "hub_external_id": str(enr.hub.external_id),
         "selfie_verified": enr.selfie_verified,
         "selfie_status": enr.selfie_status,
+    }
+
+
+def me_dict(enr: Enrollment) -> dict:
+    """GET /me RICO (auditoria do front 2026-06-10): o resume do wizard pré-preenche TODAS as seções
+    numa chamada só. Bloco `None` = seção ainda não preenchida; `address_complete` = endereço pronto."""
+    user_ext = str(enr.user.external_id)
+
+    profile = None
+    if any(
+        (
+            enr.mother_name,
+            enr.father_name,
+            enr.marital_status,
+            enr.birthplace,
+            enr.nationality,
+        )
+    ):
+        profile = {
+            "mother_name": enr.mother_name,
+            "father_name": enr.father_name,
+            "marital_status": enr.marital_status,
+            "birthplace": enr.birthplace,
+            "nationality": enr.nationality,
+        }
+
+    rg_data = (documents_iface.get_by_external_id(user_ext) or {}).get("rg") or {}
+    rg = None
+    if rg_data.get("number") or rg_data.get("front_photo"):
+        rg = {
+            "number": rg_data.get("number"),
+            "issuing_agency": rg_data.get("issuing_agency"),
+            "issue_date": rg_data.get("issue_date"),
+            "front_photo": rg_data.get("front_photo"),
+            "back_photo": rg_data.get("back_photo"),
+        }
+
+    try:
+        edu = enr.educational_data
+    except EducationalData.DoesNotExist:
+        edu = None
+    education = None
+    if edu is not None:
+        education = {
+            "last_year_studied": edu.last_year_studied,
+            "last_school": edu.last_school,
+            "last_year_when": edu.last_year_when,
+        }
+
+    address = address_iface.get_by_external_id(user_ext)
+    return {
+        **to_dict(enr),
+        "profile": profile,
+        "address_complete": address_iface.is_complete(address),
+        "rg": rg,
+        "education": education,
     }
 
 
@@ -413,11 +479,15 @@ def release(
 
     enr = get_by_external_id(enrollment_external_id)
     if enr is None:
-        raise EnrollmentError("enrollment_not_found")
+        raise NotFound("Matrícula não encontrada.", code="ENROLLMENT_NOT_FOUND")
     if enr.hub.coordinator_id != coordinator.id:
         raise EnrollmentError("not_hub_coordinator")
     if enr.status != _S.AWAITING_RELEASE:
-        raise EnrollmentError(f"wrong_status:{enr.status}")
+        raise Conflict(
+            "A matrícula está em outra etapa.",
+            code="WRONG_STATUS",
+            extra={"expected_status": enr.status},
+        )
 
     # 1) Valida/decodifica os QR FORA da transação (chamada de rede ao Asaas, READ-ONLY): um QR ruim aborta
     #    a liberação ANTES de promover — não cria aluno meia-boca. Não move dinheiro aqui.

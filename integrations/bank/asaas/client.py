@@ -24,8 +24,11 @@ class AsaasError(Exception):
 
 
 class AsaasClient:
+    # default 10s: a charge PIX roda DENTRO do request do register — timeout alto = stall do serviço
+    # inteiro (auditoria do front 2026-06-10). A API do Asaas responde em ~1-2s; o money-path (payout)
+    # já trata falha incerta sem re-submeter.
     def __init__(
-        self, api_key: str, *, base_url: str | None = None, timeout: float = 30.0
+        self, api_key: str, *, base_url: str | None = None, timeout: float = 10.0
     ):
         if not api_key:
             raise ValueError("api_key is required")

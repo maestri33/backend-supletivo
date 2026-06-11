@@ -16,6 +16,7 @@ from users.address import interface as address_iface
 from users.auth import interface as auth_iface
 from users.auth.models import User
 from users.documents import interface as documents_iface
+from users.exceptions import Conflict, DomainError, NotFound
 from users.profiles import interface as profiles
 from users.roles import interface as roles
 from users.roles.candidate.models import Candidate
@@ -26,8 +27,12 @@ _S = Candidate.Status
 _SELFIE_EXT = {"image/jpeg": "jpg", "image/png": "png", "image/webp": "webp"}
 
 
-class CandidateError(Exception):
-    """Erro de borda do candidate (não encontrado, etapa fora de ordem, Pix inválida)."""
+class CandidateError(DomainError):
+    """Erro de borda do candidate (não encontrado, etapa fora de ordem, Pix inválida).
+
+    É `DomainError` (422): o handler central da API converte em JSON `{detail, code, …extra}`."""
+
+    status = 422
 
 
 # ── nascimento (público) ────────────────────────────────────────────────────
@@ -65,9 +70,14 @@ def get_for_user_external_id(user_external_id: str) -> Candidate | None:
 def _require(user_external_id: str, *allowed_status) -> Candidate:
     cand = get_for_user_external_id(user_external_id)
     if cand is None:
-        raise CandidateError("candidate_not_found")
+        raise NotFound("Candidato não encontrado.", code="CANDIDATE_NOT_FOUND")
     if allowed_status and cand.status not in allowed_status:
-        raise CandidateError(f"wrong_status:{cand.status}")
+        # 409 + expected_status = a etapa ATUAL no servidor — o front roteia o wizard com isso.
+        raise Conflict(
+            "Seu cadastro está em outra etapa.",
+            code="WRONG_STATUS",
+            extra={"expected_status": cand.status},
+        )
     return cand
 
 

@@ -14,6 +14,7 @@ from django.db import transaction
 from hub import interface as hub_iface
 from users.auth import interface as auth_iface
 from users.auth.models import User
+from users.exceptions import DomainError
 from users.profiles import interface as profiles
 from users.roles import notifications as msgs
 from users.roles.lead import config
@@ -25,8 +26,12 @@ logger = structlog.get_logger()
 _API_METHODS = {"card": "card", "credit_card": "card", "pix": "pix"}
 
 
-class LeadError(Exception):
-    """Erro de borda do lead (método inválido, sem promotor padrão, falha ao gerar checkout)."""
+class LeadError(DomainError):
+    """Erro de borda do lead (método inválido, sem promotor padrão, falha ao gerar checkout).
+
+    É `DomainError` (422): o handler central da API converte em JSON `{detail, code, …extra}`."""
+
+    status = 422
 
 
 def create_lead(

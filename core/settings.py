@@ -230,7 +230,7 @@ URL_VERIFY_NONCE_TTL = env.int("URL_VERIFY_NONCE_TTL", default=600)
 # os.environ por simetria com a key do asaas (read_env() já populou os.environ acima).
 INFINITEPAY_HANDLE = os.environ.get("INFINITEPAY_HANDLE", "").lstrip("$")
 INFINITEPAY_BASE_URL = env("INFINITEPAY_BASE_URL", default="https://api.infinitepay.io")
-INFINITEPAY_HTTP_TIMEOUT = env.float("INFINITEPAY_HTTP_TIMEOUT", default=15.0)
+INFINITEPAY_HTTP_TIMEOUT = env.float("INFINITEPAY_HTTP_TIMEOUT", default=10.0)
 # URL de sucesso pós-pagamento (opcional; default = EXTERNAL_URL no serviço de checkout).
 INFINITEPAY_REDIRECT_URL = env("INFINITEPAY_REDIRECT_URL", default="")
 
@@ -403,7 +403,9 @@ NINJA_JWT = {
 OTP_TTL_S = env.int("OTP_TTL_S", default=300)
 OTP_NUM_DIGITS = env.int("OTP_NUM_DIGITS", default=6)
 OTP_MAX_ATTEMPTS = env.int("OTP_MAX_ATTEMPTS", default=3)
-OTP_RATELIMIT_WINDOW_S = env.int("OTP_RATELIMIT_WINDOW_S", default=30)
+# 60s (auditoria front 2026-06-10): no máx 1 OTP/min por user — custo WhatsApp + anti-abuso.
+# Rate-limit por IP fica no reverse proxy (CONVENTION §5), não no app.
+OTP_RATELIMIT_WINDOW_S = env.int("OTP_RATELIMIT_WINDOW_S", default=60)
 OTP_RATELIMIT_HOURLY_MAX = env.int("OTP_RATELIMIT_HOURLY_MAX", default=5)
 OTP_FOOTER = env("OTP_FOOTER", default="")
 OTP_ACTIVE = env.bool("OTP_ACTIVE", default=True)

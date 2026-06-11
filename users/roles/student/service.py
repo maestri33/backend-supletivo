@@ -22,6 +22,7 @@ from django.conf import settings
 from django.db import transaction
 from django.utils import timezone
 
+from users.exceptions import Conflict, DomainError, NotFound
 from users.roles.student.config import (
     MALE_ONLY_DOC_TYPES,
     REQUIRED_DOC_TYPES,
@@ -45,8 +46,12 @@ _EXT = {
 }
 
 
-class StudentError(Exception):
-    """Erro de borda do student (aluno não encontrado, etapa fora de ordem, gate de coordenador)."""
+class StudentError(DomainError):
+    """Erro de borda do student (aluno não encontrado, etapa fora de ordem, gate de coordenador).
+
+    É `DomainError` (422): o handler central da API converte em JSON `{detail, code, …extra}`."""
+
+    status = 422
 
 
 # ── criação (chamada por enrollment.release) ─────────────────────────────────
@@ -88,14 +93,18 @@ def _by_user(user_external_id: str) -> Student:
         .first()
     )
     if student is None:
-        raise StudentError("student_not_found")
+        raise NotFound("Aluno não encontrado.", code="STUDENT_NOT_FOUND")
     return student
 
 
 def _require(user_external_id: str, *allowed_status) -> Student:
     student = _by_user(user_external_id)
     if allowed_status and student.status not in allowed_status:
-        raise StudentError(f"wrong_status:{student.status}")
+        raise Conflict(
+            "Seu processo está em outra fase.",
+            code="WRONG_STATUS",
+            extra={"expected_status": student.status},
+        )
     return student
 
 
@@ -106,7 +115,7 @@ def _by_external_id(external_id: str) -> Student:
         .first()
     )
     if student is None:
-        raise StudentError("student_not_found")
+        raise NotFound("Aluno não encontrado.", code="STUDENT_NOT_FOUND")
     return student
 
 
@@ -476,7 +485,11 @@ def grade_exam(
     """Coordenador do hub corrige a prova agendada. Passou → conferência; reprovou → refazer."""
     student = _coordinated(student_external_id, coordinator)
     if student.status != Student.Status.EXAM_SCHEDULED:
-        raise StudentError(f"wrong_status:{student.status}")
+        raise Conflict(
+            "Seu processo está em outra fase.",
+            code="WRONG_STATUS",
+            extra={"expected_status": student.status},
+        )
     exam = student.exams.filter(result__isnull=True).order_by("-attempt_number").first()
     if exam is None:
         raise StudentError("no_pending_exam")
@@ -522,7 +535,11 @@ def open_pendency(
         Student.Status.AWAITING_DOCUMENTATION_DISPATCH,
         Student.Status.PENDING,
     ):
-        raise StudentError(f"wrong_status:{student.status}")
+        raise Conflict(
+            "Seu processo está em outra fase.",
+            code="WRONG_STATUS",
+            extra={"expected_status": student.status},
+        )
     valid_kinds = {c for c, _ in StudentPendency.Kind.choices}
     if kind not in valid_kinds:
         raise StudentError("invalid_kind")
@@ -592,7 +609,11 @@ def clear_documentation(*, student_external_id: str, coordinator) -> Student:
         Student.Status.AWAITING_DOCUMENTATION_DISPATCH,
         Student.Status.PENDING,
     ):
-        raise StudentError(f"wrong_status:{student.status}")
+        raise Conflict(
+            "Seu processo está em outra fase.",
+            code="WRONG_STATUS",
+            extra={"expected_status": student.status},
+        )
     if student.pendencies.filter(resolved_at__isnull=True).exists():
         raise StudentError("open_pendencies")
     _set_status(student, Student.Status.AWAITING_DIPLOMA_ISSUANCE)
@@ -604,7 +625,11 @@ def issue_diploma(*, student_external_id: str, coordinator) -> StudentDiploma:
     """Coordenador emite o diploma (certificado + histórico) → aluno fica AGUARDANDO RETIRADA."""
     student = _coordinated(student_external_id, coordinator)
     if student.status != Student.Status.AWAITING_DIPLOMA_ISSUANCE:
-        raise StudentError(f"wrong_status:{student.status}")
+        raise Conflict(
+            "Seu processo está em outra fase.",
+            code="WRONG_STATUS",
+            extra={"expected_status": student.status},
+        )
     diploma, _ = StudentDiploma.objects.get_or_create(student=student)
     diploma.issued_by = coordinator
     diploma.issued_at = timezone.now()

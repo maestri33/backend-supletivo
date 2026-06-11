@@ -58,7 +58,7 @@ def self_ping() -> tuple[bool, str]:
         return False, "external_url_not_set"
     nonce, echo_url = issue_nonce(base)
     try:
-        r = httpx.get(echo_url, timeout=20.0, follow_redirects=True)
+        r = httpx.get(echo_url, timeout=10.0, follow_redirects=True)
     except httpx.HTTPError as exc:
         return False, f"ping_failed: {exc}"
     if r.status_code != 200:

@@ -14,6 +14,7 @@ import structlog
 from django.db import transaction
 from django.utils import timezone
 
+from users.exceptions import Conflict, DomainError
 from users.roles import interface as roles
 from users.roles.training.config import pass_score
 from users.roles.training.models import Material, Submission, Trainee
@@ -21,8 +22,12 @@ from users.roles.training.models import Material, Submission, Trainee
 logger = structlog.get_logger()
 
 
-class TrainingError(Exception):
-    """Erro de borda do training (matéria/trainee não encontrado, etapa fora de ordem, gate)."""
+class TrainingError(DomainError):
+    """Erro de borda do training (matéria/trainee não encontrado, etapa fora de ordem, gate).
+
+    É `DomainError` (422): o handler central da API converte em JSON `{detail, code, …extra}`."""
+
+    status = 422
 
 
 # ── autoria de matéria (staff + coordenador) ────────────────────────────────
@@ -292,7 +297,11 @@ def approve_interview(*, trainee_external_id: str, coordinator) -> Trainee:
     if hub.coordinator_id != coordinator.id:
         raise TrainingError("not_hub_coordinator")
     if trainee.status != Trainee.Status.AWAITING_INTERVIEW:
-        raise TrainingError(f"wrong_status:{trainee.status}")
+        raise Conflict(
+            "O treinamento está em outra fase.",
+            code="WRONG_STATUS",
+            extra={"expected_status": trainee.status},
+        )
 
     with transaction.atomic():
         if "promoter" not in roles.active_roles(trainee.user):
@@ -322,7 +331,11 @@ def reject_interview(*, trainee_external_id: str, coordinator, reason: str) -> T
     if hub is None or hub.coordinator_id != coordinator.id:
         raise TrainingError("not_hub_coordinator")
     if trainee.status != Trainee.Status.AWAITING_INTERVIEW:
-        raise TrainingError(f"wrong_status:{trainee.status}")
+        raise Conflict(
+            "O treinamento está em outra fase.",
+            code="WRONG_STATUS",
+            extra={"expected_status": trainee.status},
+        )
     trainee.status = Trainee.Status.REJECTED
     trainee.coordinator = coordinator
     trainee.decision_at = timezone.now()
