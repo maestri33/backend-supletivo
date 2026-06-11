@@ -354,6 +354,16 @@ class RgOut(Schema):
     issue_date: str | None = None
     front_photo: str | None = None
     back_photo: str | None = None
+    full_photo: str | None = (
+        None  # RG inteiro (frente+verso numa imagem) — alternativa ao par
+    )
+    validation_status: str | None = Field(
+        None,
+        description="Validação por IA (plan/12): pending (analisando) | approved | rejected "
+        "(refazer — motivo em validation_reason) | review (coordenador vai decidir)",
+    )
+    validation_reason: str | None = None  # o PORQUÊ do status (a IA sempre justifica)
+    missing_fields: list[str] = []  # campos que o OCR não leu — o aluno digita só esses
 
 
 class EducationOut(Schema):
@@ -429,21 +439,23 @@ def enrollment_rg(request, payload: RgIn):
     return enrollment_iface.to_dict(enrollment_iface.get_for_user_external_id(ext))
 
 
-# slot da borda (`front`/`back` — o path já diz que é RG) → slot interno do documents.
-_RG_SLOTS = {"front": "rg_front", "back": "rg_back"}
+# slot da borda (`front`/`back`/`full` — o path já diz que é RG) → slot interno do documents.
+_RG_SLOTS = {"front": "rg_front", "back": "rg_back", "full": "rg_full"}
 
 
 @api.post("/enrollment/documents/rg/photo/{slot}", tags=["enrollment"])
 def enrollment_rg_photo(request, slot: str, file: UploadedFile = File(...)):
-    """Foto do RG — `slot` aceita **`front`** ou **`back`**."""
+    """Foto do RG — `slot` aceita **`front`**, **`back`** ou **`full`** (documento inteiro numa
+    imagem). Arquivo: JPEG/PNG/WEBP ou **PDF** (convertido internamente). A análise por IA roda
+    em 2º plano (plan/12): acompanhe `rg.validation_status` (+ motivo) no `GET /enrollment/me`."""
     ext = _enr_guard(request)
     real_slot = _RG_SLOTS.get(slot)
     if real_slot is None:
-        raise HttpError(422, "Slot inválido. Aceitos: front, back.")
+        raise HttpError(422, "Slot inválido. Aceitos: front, back, full.")
     path = enrollment_iface.upload_rg_photo(
         user_external_id=ext, slot=real_slot, upload=file
     )
-    return {"slot": slot, "stored": path}
+    return {"slot": slot, "stored": path, "analysis": "pending"}
 
 
 @api.post("/enrollment/education", response=EnrollmentOut, tags=["enrollment"])

@@ -8,6 +8,7 @@ from users.documents.service import (
     create_empty,
     delete_photo,
     get_by_external_id,
+    get_rg,
     update,
     upload_photo,
 )
@@ -15,6 +16,7 @@ from users.documents.service import (
 __all__ = [
     "create_empty",
     "get_by_external_id",
+    "get_rg",
     "update",
     "upload_photo",
     "delete_photo",

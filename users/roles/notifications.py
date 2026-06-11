@@ -86,6 +86,19 @@ _MESSAGES: dict[str, str] = {
         "{name}, a selfie de uma matrícula precisa da sua análise — a IA ficou em dúvida. "
         "Aprove ou reprove no painel, {name}."
     ),
+    # RG da matrícula — validação por IA (plan/12). {detail} = motivo dado pela IA/coordenador.
+    "enrollment.rg_rejected": (
+        "{name}, precisamos de uma nova foto do seu RG: {detail} "
+        "Reenvie pelo aplicativo, {name} — é rapidinho. 📄"
+    ),
+    "enrollment.rg_in_review": (
+        "{name}, o RG de uma matrícula precisa da sua análise: {detail} "
+        "Aprove ou reprove no painel, {name}."
+    ),
+    "enrollment.rg_approved": (
+        "Boa notícia, {name}! ✅ Seu RG foi aprovado e sua matrícula segue em frente. "
+        "Continue o preenchimento, {name}."
+    ),
     # ── CANDIDATE → TRAINING → PROMOTER (funil do colaborador) ────────────────
     "candidate.training_started": (
         "Cadastro concluído, {name}! 🎓 Seu treinamento começou — acesse para estudar e responder "

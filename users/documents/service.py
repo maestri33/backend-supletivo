@@ -37,6 +37,7 @@ _DATE_FIELDS = {
 _PHOTO_SLOTS = {
     "rg_front": ("rg", "front_photo"),
     "rg_back": ("rg", "back_photo"),
+    "rg_full": ("rg", "full_photo"),  # RG inteiro (frente+verso numa imagem) — plan/12
     "cnh_front": ("cnh", "front_photo"),
     "cnh_back": ("cnh", "back_photo"),
     "certificate_photo": ("certificate", "photo"),
@@ -45,6 +46,12 @@ _PHOTO_SLOTS = {
 
 # MIME aceito → extensão do arquivo salvo.
 _ALLOWED_IMAGE = {"image/jpeg": "jpg", "image/png": "png", "image/webp": "webp"}
+_PDF_MIME = (
+    "application/pdf"  # aceito em qualquer slot: convertido pra JPEG antes de salvar
+)
+_PDF_MAX_PAGES = (
+    2  # scan comum: pág 1 = frente, pág 2 = verso; >2 páginas → usa as 2 primeiras
+)
 
 
 def create_empty(user) -> Document:
@@ -99,7 +106,9 @@ def as_dict(document: Document) -> dict:
             "number": rg.number,
             "issuing_agency": rg.issuing_agency,
             "issue_date": rg.issue_date.isoformat() if rg.issue_date else None,
-            **_photo(rg, "front_photo", "back_photo"),
+            **_photo(rg, "front_photo", "back_photo", "full_photo"),
+            "validation_status": rg.validation_status,
+            "validation_reason": (rg.validation_result or {}).get("reason"),
         },
         "cnh": {
             "number": cnh.number,
@@ -135,6 +144,11 @@ def get_by_external_id(external_id: str) -> dict:
     return as_dict(_get_document(external_id))
 
 
+def get_rg(external_id: str) -> RG | None:
+    """A instância RG do usuário (pro orquestrador da validação IA — enrollment, plan/12)."""
+    return RG.objects.filter(document__user__external_id=external_id).first()
+
+
 def update(external_id: str, payload: dict) -> dict:
     """Atualiza os campos enviados de cada sub-doc. Militar só pra `gender='M'` (Q4)."""
     document = _get_document(external_id)
@@ -166,15 +180,70 @@ def update(external_id: str, payload: dict) -> dict:
     return as_dict(document)
 
 
+def _decode_image(data: bytes) -> None:
+    """Confere que os bytes são uma IMAGEM de verdade (decode real, não só extensão) — plan/12."""
+    from io import BytesIO
+
+    from PIL import Image
+
+    try:
+        with Image.open(BytesIO(data)) as img:
+            img.verify()
+    except Exception as exc:  # noqa: BLE001 — Pillow lança tipos variados em arquivo corrompido
+        raise ValidationError(
+            "Arquivo não é uma imagem válida (corrompido ou renomeado).",
+            code="IMAGE_DECODE_FAILED",
+        ) from exc
+
+
+def _pdf_to_jpeg(data: bytes) -> bytes:
+    """Renderiza o PDF (até 2 páginas, empilhadas) numa imagem JPEG única — plan/12."""
+    from io import BytesIO
+
+    import pypdfium2 as pdfium
+    from PIL import Image
+
+    try:
+        pdf = pdfium.PdfDocument(data)
+        pages = [
+            pdf[i].render(scale=2.0).to_pil()
+            for i in range(min(len(pdf), _PDF_MAX_PAGES))
+        ]
+    except Exception as exc:  # noqa: BLE001 — PDF corrompido/protegido
+        raise ValidationError(
+            "Arquivo não é um PDF válido (corrompido ou protegido).",
+            code="PDF_DECODE_FAILED",
+        ) from exc
+    if not pages:
+        raise ValidationError("PDF sem páginas.", code="PDF_EMPTY")
+    if len(pages) == 1:
+        sheet = pages[0].convert("RGB")
+    else:
+        width = max(p.width for p in pages)
+        sheet = Image.new("RGB", (width, sum(p.height for p in pages)), "white")
+        y = 0
+        for p in pages:
+            sheet.paste(p.convert("RGB"), (0, y))
+            y += p.height
+    out = BytesIO()
+    sheet.save(out, format="JPEG", quality=90)
+    return out.getvalue()
+
+
 def upload_photo(external_id: str, slot: str, upload) -> str:
-    """Salva a imagem do slot em media/documents/<external_id>/<slot>.<ext> e grava o path no DB."""
+    """Salva a imagem do slot em media/documents/<external_id>/<slot>.<ext> e grava o path no DB.
+
+    Aceita JPEG/PNG/WEBP (decode real — arquivo renomeado não passa) e PDF (convertido pra JPEG
+    internamente; no disco fica sempre imagem) — plan/12."""
+    from django.core.files.base import ContentFile
+
     if slot not in _PHOTO_SLOTS:
         raise ValidationError(f"Slot de foto inválido: {slot}.", code="SLOT_INVALID")
 
     content_type = getattr(upload, "content_type", "")
-    if content_type not in _ALLOWED_IMAGE:
+    if content_type not in _ALLOWED_IMAGE and content_type != _PDF_MIME:
         raise ValidationError(
-            "Imagem deve ser JPEG, PNG ou WEBP.", code="IMAGE_TYPE_INVALID"
+            "Arquivo deve ser JPEG, PNG, WEBP ou PDF.", code="IMAGE_TYPE_INVALID"
         )
 
     max_bytes = settings.MAX_UPLOAD_MB * 1024 * 1024
@@ -194,11 +263,17 @@ def upload_photo(external_id: str, slot: str, upload) -> str:
                 code="MILITARY_NOT_APPLICABLE",
             )
 
-    ext = _ALLOWED_IMAGE[content_type]
+    data = upload.read()
+    if content_type == _PDF_MIME:
+        data = _pdf_to_jpeg(data)
+        ext = "jpg"
+    else:
+        _decode_image(data)
+        ext = _ALLOWED_IMAGE[content_type]
     path = f"documents/{external_id}/{slot}.{ext}"
     if default_storage.exists(path):
         default_storage.delete(path)
-    default_storage.save(path, upload)
+    default_storage.save(path, ContentFile(data))
 
     sub = getattr(document, sub_name)
     setattr(sub, field, path)

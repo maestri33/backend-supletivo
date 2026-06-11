@@ -141,13 +141,24 @@ def me_dict(enr: Enrollment) -> dict:
 
     rg_data = (documents_iface.get_by_external_id(user_ext) or {}).get("rg") or {}
     rg = None
-    if rg_data.get("number") or rg_data.get("front_photo"):
+    if any(
+        rg_data.get(k) for k in ("number", "front_photo", "back_photo", "full_photo")
+    ):
         rg = {
             "number": rg_data.get("number"),
             "issuing_agency": rg_data.get("issuing_agency"),
             "issue_date": rg_data.get("issue_date"),
             "front_photo": rg_data.get("front_photo"),
             "back_photo": rg_data.get("back_photo"),
+            "full_photo": rg_data.get("full_photo"),
+            # validação IA (plan/12): o front mostra "analisando…"/motivo e o que falta digitar
+            "validation_status": rg_data.get("validation_status"),
+            "validation_reason": rg_data.get("validation_reason"),
+            "missing_fields": [
+                f
+                for f in ("number", "issuing_agency", "issue_date")
+                if not rg_data.get(f)
+            ],
         }
 
     try:
@@ -254,33 +265,464 @@ def set_documents_rg(
 
 
 def upload_rg_photo(*, user_external_id: str, slot: str, upload) -> str:
-    """Foto do RG (slot `rg_front`/`rg_back`), dentro da seção `rg` (dados + 2 fotos, em qualquer ordem).
+    """Foto do RG (slot `rg_front`/`rg_back`/`rg_full`), dentro da seção `rg` — plan/12.
 
-    Na FRENTE (rg_front) o rosto vira biometria do documento, salva no perfil (best-effort — não quebra
-    o upload). Aluno: RG é obrigatório (Victor)."""
-    from pathlib import Path
-
-    from integrations.tools.biometric import service as biometric
-
+    Salva (PDF vira JPEG no `documents`), re-zera a validação e ENFILEIRA o pipeline de IA
+    (visão → OCR → extração → biometria). O upload responde na hora; o veredito (e o motivo,
+    se reprovar) sai pelo `/enrollment/me`. Aluno: RG é obrigatório (Victor)."""
     enr = _require(user_external_id, _S.RG)
     path = documents_iface.upload_photo(user_external_id, slot, upload)
-    biometric.try_enroll_document(
-        user=enr.user,
-        slot=slot,
-        image_path=str(Path(settings.MEDIA_ROOT) / path),
-        caller="enrollment.document",
-    )
-    _advance_rg(enr, user_external_id)
+    _reset_rg_validation(user_external_id, slot)
+    from django_q.tasks import async_task
+
+    async_task("users.roles.enrollment.tasks.validate_rg", enr.id, slot)
     return path
 
 
 def _advance_rg(enr: Enrollment, user_external_id: str) -> None:
-    """Avança RG→EDUCATION quando a seção RG fica completa: número + foto da FRENTE e do VERSO."""
+    """Avança RG→EDUCATION quando a seção fecha (plan/12): validação IA APROVADA (frente+verso
+    OU inteira) + `number` presente (extraído pelo OCR ou digitado no fallback)."""
+    from users.roles import _document_ai as doc_ai
+
     if enr.status != _S.RG:
         return
-    rg = (documents_iface.get_by_external_id(user_external_id) or {}).get("rg") or {}
-    if rg.get("number") and rg.get("front_photo") and rg.get("back_photo"):
+    rg = documents_iface.get_rg(user_external_id)
+    if rg is not None and rg.validation_status == doc_ai.APPROVED and rg.number:
         _set_status(enr, _S.EDUCATION)
+
+
+# ── validação do RG por IA (plan/12): visão → OCR → extração → biometria ────
+# Roda na task Django-Q (`tasks.validate_rg`); aqui é a orquestração (status no RG, notifies,
+# avanço do wizard). As chamadas de IA moram em `users/roles/_document_ai.py` (compartilhável).
+
+_RG_SLOT_FIELD = {
+    "rg_front": "front_photo",
+    "rg_back": "back_photo",
+    "rg_full": "full_photo",
+}
+_RG_SLOT_SIDE = {"rg_front": "front", "rg_back": "back", "rg_full": "full"}
+_MIME_BY_EXT = {
+    "jpg": "image/jpeg",
+    "jpeg": "image/jpeg",
+    "png": "image/png",
+    "webp": "image/webp",
+}
+
+
+def _reset_rg_validation(user_external_id: str, slot: str) -> None:
+    """Re-upload de um slot re-zera o veredito daquela foto + a extração (re-analisa tudo)."""
+    from users.roles import _document_ai as doc_ai
+
+    rg = documents_iface.get_rg(user_external_id)
+    if rg is None:
+        return
+    result = rg.validation_result or {}
+    photos = dict(result.get("photos") or {})
+    photos.pop(slot, None)
+    for key in ("extracted", "name_match", "reason", "human"):
+        result.pop(key, None)
+    result["photos"] = photos
+    rg.validation_status = doc_ai.PENDING
+    rg.validation_result = result
+    rg.validated_at = None
+    rg.save(update_fields=["validation_status", "validation_result", "validated_at"])
+
+
+def run_rg_validation(enrollment_id: int, slot: str) -> None:
+    """Pipeline da task (plan/12). Idempotente: só age com validação `pending`.
+
+    a) visão na foto do `slot` (é RG? lado certo? legível?) → reprovou/dúvida = para e notifica;
+    b) seção completa (inteira aprovada OU frente+verso aprovadas) → OCR + extração (1 LLM);
+    c) nome de outra pessoa → reprova; dúvida → review; ok → povoa campos VAZIOS →
+       biometria → avança o wizard."""
+    from pathlib import Path
+
+    from users.roles import _document_ai as doc_ai
+
+    enr = (
+        Enrollment.objects.select_related("user", "hub", "hub__coordinator")
+        .filter(id=enrollment_id)
+        .first()
+    )
+    if enr is None:
+        return
+    user_ext = str(enr.user.external_id)
+    rg = documents_iface.get_rg(user_ext)
+    if rg is None or rg.validation_status != doc_ai.PENDING:
+        return
+
+    result = rg.validation_result or {}
+    photos = dict(result.get("photos") or {})
+
+    field = _RG_SLOT_FIELD.get(slot)
+    path = getattr(rg, field, None) if field else None
+    if path and (photos.get(slot) or {}).get("status") != doc_ai.APPROVED:
+        fp = Path(settings.MEDIA_ROOT) / path
+        if not fp.exists():
+            return
+        status, reason = doc_ai.check_photo(
+            fp.read_bytes(),
+            side=_RG_SLOT_SIDE[slot],
+            mime_type=_MIME_BY_EXT.get(fp.suffix.lstrip(".").lower(), "image/jpeg"),
+            caller="enrollment.rg",
+        )
+        # merge FRESCO: a visão leva 10–60s e frente+verso viram 2 tasks em workers paralelos —
+        # re-lê antes de gravar pra não perder o veredito que o outro worker salvou no meio tempo.
+        rg.refresh_from_db()
+        if rg.validation_status != doc_ai.PENDING:
+            return  # outro worker (ou re-upload) já mudou o estado — não sobrescrever
+        result = rg.validation_result or {}
+        photos = dict(result.get("photos") or {})
+        photos[slot] = {"status": status, "reason": reason}
+        result["photos"] = photos
+        if status != doc_ai.APPROVED:
+            _finish_rg(enr, rg, status, reason, result)
+            return
+
+    images = _rg_approved_images(rg, photos)
+    if images is None:
+        # esta foto passou, mas falta a outra — guarda o veredito e espera o resto da seção
+        rg.validation_result = result
+        rg.save(update_fields=["validation_result"])
+        return
+    _rg_extract_and_finish(enr, rg, result, images)
+
+
+def _rg_approved_images(rg, photos: dict) -> list | None:
+    """Imagens da seção completa e aprovada (inteira OU frente+verso), ou None se ainda falta."""
+    from pathlib import Path
+
+    from users.roles import _document_ai as doc_ai
+
+    def ok(slot: str) -> bool:
+        return (photos.get(slot) or {}).get("status") == doc_ai.APPROVED
+
+    if rg.full_photo and ok("rg_full"):
+        return [Path(settings.MEDIA_ROOT) / rg.full_photo]
+    if rg.front_photo and rg.back_photo and ok("rg_front") and ok("rg_back"):
+        return [
+            Path(settings.MEDIA_ROOT) / rg.front_photo,
+            Path(settings.MEDIA_ROOT) / rg.back_photo,
+        ]
+    return None
+
+
+def _rg_extract_and_finish(enr: Enrollment, rg, result: dict, images: list) -> None:
+    """OCR + extração (1 LLM): confere o nome (tolerância de casamento) e povoa os campos."""
+    from users.roles import _document_ai as doc_ai
+
+    p = profiles.get(enr.user)
+    try:
+        ocr_text = doc_ai.ocr_images(
+            [fp.read_bytes() for fp in images], caller="enrollment.rg"
+        )
+        data = doc_ai.extract_rg(
+            ocr_text, holder_name=(p.name if p else None), caller="enrollment.rg"
+        )
+    except Exception as exc:  # noqa: BLE001 — IA fora do ar na extração → review (humano decide)
+        logger.warning(
+            "enrollment.rg_extract_failed",
+            enrollment=str(enr.external_id),
+            error=str(exc)[:200],
+        )
+        _finish_rg(
+            enr,
+            rg,
+            doc_ai.REVIEW,
+            "IA indisponível na extração dos dados — enviado para revisão manual do coordenador.",
+            result,
+        )
+        return
+    result["extracted"] = data
+    match = str(data.get("name_match") or "").strip().lower()
+    name_reason = (data.get("name_reason") or "").strip()
+    if match in ("nao", "não", "no"):
+        _finish_rg(
+            enr,
+            rg,
+            doc_ai.REJECTED,
+            f"O nome no documento não confere com o do cadastro. {name_reason}".strip(),
+            result,
+        )
+        return
+    if match not in ("sim", "yes"):
+        _finish_rg(
+            enr,
+            rg,
+            doc_ai.REVIEW,
+            f"Não deu pra confirmar o nome do titular. {name_reason}".strip(),
+            result,
+        )
+        return
+    _apply_rg_extracted(enr, rg, data)
+    _finish_rg(enr, rg, doc_ai.APPROVED, name_reason or "Documento validado.", result)
+    _rg_post_approval(enr, rg)
+
+
+def _apply_rg_extracted(enr: Enrollment, rg, data: dict) -> None:
+    """Povoa SÓ campos vazios (Victor: não sobrescrever): doc RG + perfil da matrícula + nascimento."""
+    from datetime import date
+
+    def _clean(value, limit: int):
+        s = str(value).strip()
+        return s[:limit] if s else None
+
+    def _date(value):
+        try:
+            return date.fromisoformat(str(value)) if value else None
+        except ValueError:
+            return None
+
+    changed = []
+    if not rg.number and data.get("number"):
+        rg.number = _clean(data["number"], 30)
+        changed.append("number")
+    if not rg.issuing_agency and data.get("issuing_agency"):
+        rg.issuing_agency = _clean(data["issuing_agency"], 50)
+        changed.append("issuing_agency")
+    if not rg.issue_date:
+        d = _date(data.get("issue_date"))
+        if d:
+            rg.issue_date = d
+            changed.append("issue_date")
+    if changed:
+        rg.save(update_fields=changed)
+
+    enr_changed = []
+    for field, limit in (
+        ("mother_name", 255),
+        ("father_name", 255),
+        ("birthplace", 128),
+    ):
+        if not getattr(enr, field) and data.get(field):
+            setattr(enr, field, _clean(data[field], limit))
+            enr_changed.append(field)
+    if enr_changed:
+        enr.save(update_fields=[*enr_changed, "updated_at"])
+
+    p = profiles.get(enr.user)
+    if p and not p.birth_date:
+        bd = _date(data.get("birth_date"))
+        if bd:
+            p.birth_date = bd
+            p.save(update_fields=["birth_date"])
+
+
+def _finish_rg(
+    enr: Enrollment, rg, status: str, reason: str | None, result: dict
+) -> None:
+    """Grava o veredito (justificativa SEMPRE — plan/9) + dispara o notify do estado."""
+    from django.utils import timezone
+
+    from users.roles import _document_ai as doc_ai
+
+    result["reason"] = reason
+    rg.validation_status = status
+    rg.validation_result = result
+    rg.validated_at = timezone.now()
+    rg.save(update_fields=["validation_status", "validation_result", "validated_at"])
+    logger.info(
+        "enrollment.rg_validated", enrollment=str(enr.external_id), status=status
+    )
+    if status == doc_ai.REJECTED:
+        _notify_rg_rejected(enr, reason)
+    elif status == doc_ai.REVIEW:
+        _notify_rg_review(enr, reason)
+
+
+def _rg_post_approval(enr: Enrollment, rg) -> None:
+    """Aprovado → rosto do documento vira biometria (best-effort) + tenta avançar o wizard."""
+    from pathlib import Path
+
+    from integrations.tools.biometric import service as biometric
+
+    face_path = rg.front_photo or rg.full_photo
+    face_slot = "rg_front" if rg.front_photo else "rg_full"
+    if face_path:
+        biometric.try_enroll_document(
+            user=enr.user,
+            slot=face_slot,
+            image_path=str(Path(settings.MEDIA_ROOT) / face_path),
+            caller="enrollment.document",
+        )
+    _advance_rg(enr, str(enr.user.external_id))
+
+
+def run_rg_fill(enrollment_id: int) -> None:
+    """Pós-aprovação do coordenador: OCR+extração best-effort SÓ pra preencher campos vazios.
+
+    A aprovação humana é FINAL — aqui não há veto (o `name_match` fica só registrado). Falhou
+    a IA → o aluno digita o que faltou (`missing_fields` no /me)."""
+    from pathlib import Path
+
+    from users.roles import _document_ai as doc_ai
+
+    enr = (
+        Enrollment.objects.select_related("user", "hub")
+        .filter(id=enrollment_id)
+        .first()
+    )
+    if enr is None:
+        return
+    user_ext = str(enr.user.external_id)
+    rg = documents_iface.get_rg(user_ext)
+    if rg is None or rg.validation_status != doc_ai.APPROVED:
+        return
+    result = rg.validation_result or {}
+    if result.get("extracted"):
+        return
+    images = [
+        Path(settings.MEDIA_ROOT) / p
+        for p in ([rg.full_photo] if rg.full_photo else [rg.front_photo, rg.back_photo])
+        if p
+    ]
+    images = [fp for fp in images if fp.exists()]
+    if not images:
+        return
+    p = profiles.get(enr.user)
+    try:
+        ocr_text = doc_ai.ocr_images(
+            [fp.read_bytes() for fp in images], caller="enrollment.rg_fill"
+        )
+        data = doc_ai.extract_rg(
+            ocr_text, holder_name=(p.name if p else None), caller="enrollment.rg_fill"
+        )
+    except Exception as exc:  # noqa: BLE001 — best-effort: falhou → o aluno digita
+        logger.warning(
+            "enrollment.rg_fill_failed",
+            enrollment=str(enr.external_id),
+            error=str(exc)[:200],
+        )
+        return
+    result["extracted"] = data
+    rg.validation_result = result
+    rg.save(update_fields=["validation_result"])
+    _apply_rg_extracted(enr, rg, data)
+    _advance_rg(enr, user_ext)
+
+
+def decide_rg(
+    *,
+    enrollment_external_id: str,
+    coordinator,
+    approve: bool,
+    reason: str | None = None,
+) -> dict:
+    """Coordenador do hub decide o RG em REVISÃO (sim/não). A decisão humana é FINAL sobre a
+    validade: aprovou → avisa o aluno + biometria + extração best-effort preenche os campos
+    (sem veto); reprovou → volta pro aluno refazer (com o motivo)."""
+    from users.roles import _document_ai as doc_ai
+
+    enr = get_by_external_id(enrollment_external_id)
+    if enr is None:
+        raise EnrollmentError("enrollment_not_found")
+    if enr.hub.coordinator_id != coordinator.id:
+        raise EnrollmentError("not_hub_coordinator")
+    rg = documents_iface.get_rg(str(enr.user.external_id))
+    if rg is None or rg.validation_status != doc_ai.REVIEW:
+        raise EnrollmentError(
+            f"rg_not_in_review:{rg.validation_status if rg else 'missing'}"
+        )
+    note = (reason or "").strip() or (
+        "aprovado pelo coordenador" if approve else "reprovado pelo coordenador"
+    )
+    result = rg.validation_result or {}
+    result["human"] = {
+        "approve": approve,
+        "reason": note,
+        "by": str(coordinator.external_id),
+    }
+    if not approve:
+        _finish_rg(enr, rg, doc_ai.REJECTED, note, result)
+        return {
+            "external_id": str(enr.external_id),
+            "status": enr.status,
+            "rg_validation_status": rg.validation_status,
+        }
+    # aprovação humana: as fotos presentes valem como aprovadas (fica registrado por foto)
+    photos = dict(result.get("photos") or {})
+    for slot, field in _RG_SLOT_FIELD.items():
+        if getattr(rg, field, None):
+            photos[slot] = {"status": doc_ai.APPROVED, "reason": note}
+    result["photos"] = photos
+    _finish_rg(enr, rg, doc_ai.APPROVED, note, result)
+    _notify_rg_approved(enr)
+    if result.get("extracted"):
+        # a revisão veio da dúvida de NOME — extração já existe, povoa agora
+        _apply_rg_extracted(enr, rg, result["extracted"])
+    else:
+        # a revisão veio da visão/IA fora do ar — extração roda best-effort em 2º plano
+        from django_q.tasks import async_task
+
+        async_task("users.roles.enrollment.tasks.fill_rg_data", enr.id)
+    _rg_post_approval(enr, rg)
+    return {
+        "external_id": str(enr.external_id),
+        "status": enr.status,
+        "rg_validation_status": rg.validation_status,
+    }
+
+
+def _notify_rg_rejected(enr: Enrollment, reason: str | None) -> None:
+    from notify.interface.send import send
+
+    from users.roles import notifications as msgs
+
+    p = profiles.get(enr.user)
+    try:
+        send(
+            text=msgs.text(
+                "enrollment.rg_rejected",
+                name=msgs.first_name(p.name if p else None),
+                detail=(reason or "").strip(),
+            ),
+            caller="enrollment.rg_rejected",
+            phone=p.phone if p else None,
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("enrollment.notify_rg_rejected_failed", error=str(exc))
+
+
+def _notify_rg_review(enr: Enrollment, reason: str | None) -> None:
+    from notify.interface.send import send
+
+    from users.roles import notifications as msgs
+
+    coord = enr.hub.coordinator
+    if coord is None:
+        return
+    cp = profiles.get(coord)
+    try:
+        send(
+            text=msgs.text(
+                "enrollment.rg_in_review",
+                name=msgs.first_name(cp.name if cp else None),
+                detail=(reason or "").strip(),
+            ),
+            caller="enrollment.rg_in_review",
+            phone=cp.phone if cp else None,
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("enrollment.notify_rg_review_failed", error=str(exc))
+
+
+def _notify_rg_approved(enr: Enrollment) -> None:
+    from notify.interface.send import send
+
+    from users.roles import notifications as msgs
+
+    p = profiles.get(enr.user)
+    try:
+        send(
+            text=msgs.text(
+                "enrollment.rg_approved",
+                name=msgs.first_name(p.name if p else None),
+            ),
+            caller="enrollment.rg_approved",
+            phone=p.phone if p else None,
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("enrollment.notify_rg_approved_failed", error=str(exc))
 
 
 def set_education(

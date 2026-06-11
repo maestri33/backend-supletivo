@@ -37,7 +37,18 @@ class Document(models.Model):
 
 
 class RG(models.Model):
-    """Carteira de identidade (RG). Todos os campos null (preenchidos depois)."""
+    """Carteira de identidade (RG). Todos os campos null (preenchidos depois).
+
+    Validação por IA (plan/12): cada foto passa pela visão (é RG? legível?) e, com a seção completa,
+    OCR + extração preenchem os campos sozinhos. 4 estados (espelha o student): pending/approved/
+    rejected/review. `validation_result` guarda os vereditos por foto, os dados extraídos e a
+    decisão humana (justificativa SEMPRE — plan/9)."""
+
+    class Validation(models.TextChoices):
+        PENDING = "pending", "aguardando IA"
+        APPROVED = "approved", "aprovado"
+        REJECTED = "rejected", "reprovado (refazer)"
+        REVIEW = "review", "em revisão (coordenador decide)"
 
     document = models.OneToOneField(
         Document, on_delete=models.CASCADE, related_name="rg"
@@ -49,6 +60,19 @@ class RG(models.Model):
     issue_date = models.DateField("data de emissão", null=True, blank=True)
     front_photo = models.CharField("foto frente", max_length=500, null=True, blank=True)
     back_photo = models.CharField("foto verso", max_length=500, null=True, blank=True)
+    # RG inteiro (frente+verso numa imagem só) — alternativa ao par front/back (plan/12).
+    full_photo = models.CharField("foto inteira", max_length=500, null=True, blank=True)
+    validation_status = models.CharField(
+        "validação IA",
+        max_length=20,
+        choices=Validation.choices,
+        default=Validation.PENDING,
+        db_index=True,
+    )
+    validation_result = models.JSONField(
+        "resultado da validação", null=True, blank=True
+    )
+    validated_at = models.DateTimeField("validado em", null=True, blank=True)
 
     class Meta:
         app_label = "users"

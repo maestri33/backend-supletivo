@@ -93,6 +93,25 @@ class SelfieDecideIn(Schema):
     reason: str | None = None
 
 
+# ── RG em revisão (IA em dúvida — plan/12) → coordenador decide o sim/não ────
+@api.post("/enrollments/{external_id}/rg/decide", tags=["enrollment"])
+def decide_enrollment_rg(request, external_id: str, payload: SelfieDecideIn):
+    """Coordenador decide o RG de uma matrícula que a IA mandou pra REVISÃO (sim/não dele é FINAL).
+
+    Aprovou → o aluno é avisado, a biometria roda e a extração best-effort preenche os campos;
+    reprovou → o aluno é avisado pra reenviar a foto (com o motivo)."""
+    coordinator = _coordinator(request)
+    try:
+        return enrollment_iface.decide_rg(
+            enrollment_external_id=external_id,
+            coordinator=coordinator,
+            approve=payload.approve,
+            reason=payload.reason,
+        )
+    except enrollment_iface.EnrollmentError as exc:
+        raise HttpError(422, str(exc)) from exc
+
+
 @api.post("/enrollments/{external_id}/selfie/decide", tags=["enrollment"])
 def decide_enrollment_selfie(request, external_id: str, payload: SelfieDecideIn):
     """Coordenador decide a selfie de uma matrícula que a IA mandou pra REVISÃO."""

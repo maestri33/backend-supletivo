@@ -98,7 +98,8 @@ def try_enroll_document(
 ) -> FaceBiometric | None:
     """BEST-EFFORT: se o slot for a FRENTE do RG/CNH, salva a biometria do documento. Falha NÃO quebra o
     upload (RG com rosto ruim cai em `review` na hora da selfie). Desligado se BIOMETRIC_ENABLED=False."""
-    if not str(slot).endswith("_front"):
+    # frente do RG/CNH (rosto visível) — `_full` = RG inteiro numa imagem (a frente está nela, plan/12)
+    if not str(slot).endswith(("_front", "_full")):
         return None
     if not getattr(settings, "BIOMETRIC_ENABLED", True):
         return None
