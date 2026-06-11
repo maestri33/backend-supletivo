@@ -22,10 +22,11 @@ class Enrollment(ExternalIdModel):
     """A matrícula de um aluno (1-1 com o User). Carrega o hub herdado do promotor que indicou."""
 
     class Status(models.TextChoices):
-        STARTED = "started", "iniciada"
-        PROFILE = "profile", "perfil"
+        # status = a seção que o aluno preenche AGORA (vocabulário do wizard do front, 2026-06-11).
+        # `started` = preencher o perfil; concluir uma seção avança pro NOME da próxima.
+        STARTED = "started", "iniciada (preencher perfil)"
         ADDRESS = "address", "endereço"
-        DOCUMENTS = "documents", "documentos"
+        RG = "rg", "RG (dados + fotos)"
         EDUCATION = "education", "dados escolares"
         SELFIE = "selfie", "selfie"
         AWAITING_RELEASE = "awaiting_release", "aguardando liberação"

@@ -36,11 +36,13 @@ def as_dict(address: Address) -> dict:
 
 def as_public_dict(address: Address) -> dict:
     """Serializa o Address pra borda pública (API Ninja) — SEM o PK (CONVENTION §4: só `external_id`
-    na borda; nunca expor PK) e com **`cep`** (não `zipcode`): mesmo nome no GET e no POST (auditoria
-    do front 2026-06-10). O endereço é acessado pelo contexto do user logado, não tem id próprio."""
+    na borda; nunca expor PK) e com **`cep`** (padrão do GET e do POST, auditoria do front 2026-06-10).
+    `zipcode` segue no payload como ALIAS DEPRECATED (auditoria 2026-06-11, item 8 — front migra e
+    a gente remove). O endereço é acessado pelo contexto do user logado, não tem id próprio."""
     data = as_dict(address)
     data.pop("id", None)
     data["cep"] = data.pop("zipcode", None)
+    data["zipcode"] = data["cep"]  # alias temporário
     return data
 
 

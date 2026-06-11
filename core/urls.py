@@ -16,9 +16,10 @@ Including another URLconf
 """
 
 from django.conf import settings
-from django.conf.urls.static import static
+from django.http import JsonResponse
+from django.urls import include, path, re_path
 from django.contrib import admin
-from django.urls import include, path
+from django.views.static import serve as media_serve
 
 # API pública (Django Ninja, in-process) — 4 grupos por público, versionados sob /api/v1/.
 # Nomes = PLACEHOLDER (CONVENTION §1; Victor decide depois). Ver plan/api-ninja-transicao.
@@ -44,8 +45,29 @@ urlpatterns = [
     path("api/v1/collaborators/", collaborators_api.urls),
     path("api/v1/leadership/", leadership_api.urls),
     path("api/v1/staff/", staff_api.urls),
+    # /media/ servido SEMPRE pelo Django neste host (independente de DEBUG): o notify/Evolution buscam
+    # mídia por URL (QR, voice-note) e DEBUG agora é False (auditoria front 2026-06-11). Em prod o
+    # reverse proxy pode assumir este caminho.
+    re_path(
+        r"^media/(?P<path>.*)$", media_serve, {"document_root": settings.MEDIA_ROOT}
+    ),
 ]
 
-# Em dev (DEBUG) o Django serve /media/ (ex.: PNG do QR das cobranças); em prod é a infra/proxy.
-if settings.DEBUG:
-    urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
+
+# Host API-first: erro fora das rotas Ninja (404 de URL, 500 de view Django, bad request) responde
+# JSON curto — nunca a página de debug/URLconf (auditoria front 2026-06-11). Django só usa estes
+# handlers com DEBUG=False; o traceback completo continua indo pro log do server.
+def _json_error(status: int, detail: str):
+    def handler(request, exception=None):
+        return JsonResponse({"detail": detail}, status=status)
+
+    return handler
+
+
+handler400 = _json_error(400, "Requisição inválida.")
+handler403 = _json_error(403, "Acesso negado.")
+handler404 = _json_error(404, "Não encontrado.")
+
+
+def handler500(request):  # assinatura do Django: sem `exception`
+    return JsonResponse({"detail": "Erro interno do servidor."}, status=500)

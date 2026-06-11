@@ -44,7 +44,7 @@ role lead:        GET /lead/me  (estado + a URL ✦ checkout/recibo)  ·  GET /l
   │   paga (fora) ──▶ webhook confirma ──▶ vira role `enrollment`  (re-login: papel mudou)
   ▼
 role enrollment:  GET /enrollment/me → profile → address/cep → address/data
-                  → documents/rg → documents/rg/photo → education → selfie
+                  → documents/rg + documents/rg/photo (front/back) → education → selfie
   │   (coordenador LIBERA no grupo `leadership`) ──▶ vira role `student`  (re-login)
   ▼
 role student:     GET /student/me → blood-type → documents → exam/schedule
@@ -64,7 +64,10 @@ role student:     GET /student/me → blood-type → documents → exam/schedule
 Liveness do grupo. Resposta `200`: `{ "group": "clients", "version": "1.0", "status": "ok" }`.
 
 ### `POST /auth/register` — cadastro (cria o lead + a cobrança)
-**TODO cliente entra OBRIGATORIAMENTE como `lead`.** Cria o cadastro mínimo e devolve **o pagamento na hora**.
+**TODO cliente entra OBRIGATORIAMENTE como `lead`.** Cria o cadastro mínimo e responde rápido (<2s):
+a cobrança no GATEWAY é criada em **task async com retry** (2026-06-11) — o `short_url` já nasce
+válido; se o cliente clicar antes do gateway responder, o redirect cria na hora (gateway fora → 503
+amigável, o link continua valendo).
 
 - **Body** (`LeadCreateIn`):
   | campo | obrigatório | formato |
@@ -77,7 +80,9 @@ Liveness do grupo. Resposta `200`: `{ "group": "clients", "version": "1.0", "sta
 - **Resposta `201`** (`LeadOut`): `{ external_id, status, checkout }` onde `checkout` (`CheckoutOut`):
   `{ payment_method, provider, amount, is_paid, checkout_url?, short_url?, qrcode_payload?,
   qrcode_image?, due_date? }`.
-  - cartão → usar `checkout_url`/`short_url`; PIX → `qrcode_payload` (copia-e-cola) + `qrcode_image`.
+  - **`checkout_url`/`qrcode_*`/`due_date` podem vir `null` no 201** (criação async): use o
+    `short_url` (sempre presente) ou re-leia depois em `GET /lead/me`.
+  - cartão → `checkout_url`/`short_url`; PIX → `qrcode_payload` (copia-e-cola) + `qrcode_image`.
   - `short_url` = link curto no nosso domínio (`/lead/checkout/<token>` → 302), bom pra WhatsApp.
 - **Erros:** `422` `invalid_payment_method`; `400/409/422` de domínio (cpf/phone/email inválido
   ou já existente — `{"detail": "..."}`).
@@ -159,8 +164,10 @@ checkout.
 
 ## Rotas da matrícula — role `enrollment` ⚠️ NÃO TESTADO
 
-Todas exigem Bearer com papel `enrollment` (`403` se não tiver). Cada `POST` avança 1 etapa
-(idempotente: reenviar na etapa atual é aceito).
+Todas exigem Bearer com papel `enrollment` (`403` se não tiver). O `status` é a seção a
+preencher AGORA; gates ESTRITOS (2026-06-11): postar seção já concluída → `409`
+`{detail, code:WRONG_STATUS, expected_status}` (o front salta pro lugar certo). A seção `rg`
+conclui com número + foto da frente + do verso (qualquer ordem).
 
 | Método | Caminho | Body | Resposta |
 |---|---|---|---|
@@ -170,14 +177,14 @@ Todas exigem Bearer com papel `enrollment` (`403` se não tiver). Cada `POST` av
 | POST | `/enrollment/address/cep` | `{cep}` | objeto endereço (preenchido via ViaCEP) |
 | POST | `/enrollment/address/data` | `{street?, number?, complement?, neighborhood?, city?, state?}` | objeto endereço (só preenche o que está vazio) |
 | POST | `/enrollment/documents/rg` | `{number, issuing_agency?, issue_date?}` | `EnrollmentOut` |
-| POST | `/enrollment/documents/rg/photo/{slot}` | **multipart** `file=` ; `slot` ∈ `rg_front`/`rg_back` | `{slot, stored}` |
+| POST | `/enrollment/documents/rg/photo/{slot}` | **multipart** `file=` ; `slot` ∈ `front`/`back` | `{slot, stored}` |
 | POST | `/enrollment/education` | `{last_year_studied, last_school, last_year_when?}` | `EnrollmentOut` |
 | POST | `/enrollment/selfie` | **multipart** `file=` | `EnrollmentOut` |
 
 - **`EnrollmentOut`**: `{ external_id, status, hub_external_id, selfie_verified, selfie_status }`.
   - `selfie_status` ∈ `pending`/`approved`/`rejected`/`review` — em `review` a IA ficou em dúvida
     e o **coordenador** decide (grupo `leadership`).
-- **objeto endereço**: `{ zipcode, street, number, complement, neighborhood, city, state, country }`.
+- **objeto endereço**: `{ cep, zipcode (alias DEPRECATED), street, number, complement, neighborhood, city, state, country }`.
 - **`status`** (enum) → ver [Estados da matrícula](#estados-da-matrícula).
 - A **selfie** é verificada por IA: aprovada → avança pra `awaiting_release`; reprovada → o aluno
   refaz; em dúvida → vai pra revisão do **coordenador** (grupo `leadership`).
@@ -215,8 +222,9 @@ Todas exigem Bearer com papel `student` (`403` se não tiver).
 ## Tabelas de valores (enums)
 
 ### Estados da matrícula
-`EnrollmentOut.status` ∈ `started` → `profile` → `address` → `documents` → `education` →
-`selfie` → `awaiting_release` (espera o coordenador) → `completed`.
+`EnrollmentOut.status` = a seção a preencher AGORA (2026-06-11): `started` (= perfil) →
+`address` → `rg` → `education` → `selfie` → `awaiting_release` (espera o coordenador) →
+`completed`. Selfie reprovada/em revisão NÃO avança (fica `selfie`; `selfie_status` diz o porquê).
 
 ### Estados do aluno
 `student.status` ∈ `awaiting_documents` → `documents_under_review` → `exam_released` →

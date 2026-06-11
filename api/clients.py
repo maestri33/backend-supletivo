@@ -139,6 +139,9 @@ class LeadMeOut(Schema):
 
 class AddressOut(Schema):
     cep: str | None = None
+    zipcode: str | None = Field(
+        None, description="DEPRECATED — use `cep` (alias temporário)"
+    )
     street: str | None = None
     number: str | None = None
     complement: str | None = None
@@ -329,8 +332,8 @@ class EducationIn(Schema):
 class EnrollmentOut(Schema):
     external_id: str
     status: str = Field(
-        description="Etapa do wizard: started | profile | address | documents | education | selfie "
-        "| awaiting_release | completed"
+        description="Seção do wizard a preencher AGORA: started (=perfil) | address | rg | education "
+        "| selfie | awaiting_release | completed"
     )
     hub_external_id: str
     selfie_verified: bool

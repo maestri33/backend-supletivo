@@ -88,6 +88,9 @@ AUTH_USER_MODEL = "users.User"
 
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
+    # WhiteNoise logo após o Security (doc): serve /static/ (admin) MESMO com DEBUG=False —
+    # o runserver puro só serve static com DEBUG=True (auditoria front 2026-06-11, item DEBUG).
+    "whitenoise.middleware.WhiteNoiseMiddleware",
     # CorsMiddleware o mais alto possível, antes do CommonMiddleware (doc django-cors-headers).
     "corsheaders.middleware.CorsMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
@@ -162,9 +165,12 @@ USE_TZ = True
 # https://docs.djangoproject.com/en/5.2/howto/static-files/
 
 STATIC_URL = "static/"
+# Destino do collectstatic; o WhiteNoise serve daqui (admin funciona com DEBUG=False).
+STATIC_ROOT = BASE_DIR / "staticfiles"
 
 # Media (arquivos servidos) — CONVENTION §6 (Django expõe /media/). Ex.: PNG do QR das cobranças.
-# Em dev o Django serve (core/urls.py, DEBUG); em prod é a infra/proxy.
+# Servido SEMPRE pelo Django neste host (core/urls.py, independente de DEBUG — o notify/Evolution
+# buscam mídia por URL); em prod o reverse proxy pode assumir.
 MEDIA_URL = "/media/"
 MEDIA_ROOT = BASE_DIR / "media"
 # Base LAN do /media/ pra serviços da MESMA sub-rede buscarem o arquivo pelo IP interno (sem TLS/
@@ -399,14 +405,17 @@ NINJA_JWT = {
 }
 
 # ── OTP (users.auth.otp): código numérico, hash SHA256 (plaintext nunca persiste), TTL/tentativas
-# e rate-limit em DB (sem Redis — Django-Q usa o banco). Defaults = porte do legado.
-OTP_TTL_S = env.int("OTP_TTL_S", default=300)
+# e rate-limit em DB (sem Redis — Django-Q usa o banco).
+# TTL ≠ cooldown (auditoria front 2026-06-11): TTL = validade do código pra DIGITAR (10 min);
+# cooldown de REENVIO = WINDOW_S (60s, o `otp_wait` do check); teto horário = anti-abuso de custo
+# WhatsApp, alto o bastante pra nunca trancar usuário legítimo (10/h; o caso real que trancou foi
+# 5/h com a fila parada). Cada reenvio ROTACIONA o código (verify usa só o último).
+OTP_TTL_S = env.int("OTP_TTL_S", default=600)
 OTP_NUM_DIGITS = env.int("OTP_NUM_DIGITS", default=6)
 OTP_MAX_ATTEMPTS = env.int("OTP_MAX_ATTEMPTS", default=3)
-# 60s (auditoria front 2026-06-10): no máx 1 OTP/min por user — custo WhatsApp + anti-abuso.
 # Rate-limit por IP fica no reverse proxy (CONVENTION §5), não no app.
 OTP_RATELIMIT_WINDOW_S = env.int("OTP_RATELIMIT_WINDOW_S", default=60)
-OTP_RATELIMIT_HOURLY_MAX = env.int("OTP_RATELIMIT_HOURLY_MAX", default=5)
+OTP_RATELIMIT_HOURLY_MAX = env.int("OTP_RATELIMIT_HOURLY_MAX", default=10)
 OTP_FOOTER = env("OTP_FOOTER", default="")
 OTP_ACTIVE = env.bool("OTP_ACTIVE", default=True)
 

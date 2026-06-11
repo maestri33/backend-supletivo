@@ -172,7 +172,11 @@ def me_dict(enr: Enrollment) -> dict:
     }
 
 
-# ── 6b: funil de coleta (cada POST avança 1 etapa; idempotente — aceita re-post na etapa atual) ──
+# ── 6b: funil de coleta ──────────────────────────────────────────────────────
+# `status` = a seção que o aluno preenche AGORA (vocabulário do wizard do front, 2026-06-11):
+# started(perfil) → address → rg → education → selfie → awaiting_release → completed.
+# Gates ESTRITOS: cada seção só aceita POST no próprio status; seção já avançada → 409
+# `{detail, code:WRONG_STATUS, expected_status}` (o front salta pro lugar certo com isso).
 
 
 def set_profile(
@@ -184,7 +188,7 @@ def set_profile(
     birthplace=None,
     nationality=None,
 ) -> Enrollment:
-    enr = _require(user_external_id, _S.STARTED, _S.PROFILE)
+    enr = _require(user_external_id, _S.STARTED)
     for field, value in (
         ("mother_name", mother_name),
         ("father_name", father_name),
@@ -195,8 +199,7 @@ def set_profile(
         if value is not None:
             setattr(enr, field, value)
     enr.save()
-    if enr.status == _S.STARTED:
-        _set_status(enr, _S.PROFILE)
+    _set_status(enr, _S.ADDRESS)  # perfil é um form só → concluiu, vai pro endereço
     return enr
 
 
@@ -210,7 +213,7 @@ def get_address(*, user_external_id: str) -> dict:
 
 def set_address_cep(*, user_external_id: str, cep: str) -> dict:
     """Busca o CEP (ViaCEP) e preenche o endereço. Em cidade de CEP único a rua fica vazia p/ digitar."""
-    enr = _require(user_external_id, _S.PROFILE, _S.ADDRESS)
+    enr = _require(user_external_id, _S.ADDRESS)
     address_iface.set_by_cep(external_id=user_external_id, cep=cep)
     _advance_address(enr, user_external_id)
     return address_iface.as_public_dict(
@@ -220,7 +223,7 @@ def set_address_cep(*, user_external_id: str, cep: str) -> dict:
 
 def set_address_data(*, user_external_id: str, **fields) -> dict:
     """Preenche os demais campos do endereço — SÓ os que estão VAZIOS (não sobrescreve o que o CEP trouxe)."""
-    enr = _require(user_external_id, _S.PROFILE, _S.ADDRESS)
+    enr = _require(user_external_id, _S.ADDRESS)
     address_iface.fill_empty(external_id=user_external_id, **fields)
     _advance_address(enr, user_external_id)
     return address_iface.as_public_dict(
@@ -229,30 +232,29 @@ def set_address_data(*, user_external_id: str, **fields) -> dict:
 
 
 def _advance_address(enr: Enrollment, user_external_id: str) -> None:
-    """Avança PROFILE→ADDRESS quando o endereço fica completo (campos essenciais preenchidos)."""
-    if enr.status == _S.PROFILE and address_iface.is_complete(
+    """Avança ADDRESS→RG quando o endereço fica completo (campos essenciais preenchidos)."""
+    if enr.status == _S.ADDRESS and address_iface.is_complete(
         address_iface.get_by_external_id(user_external_id)
     ):
-        _set_status(enr, _S.ADDRESS)
+        _set_status(enr, _S.RG)
 
 
 def set_documents_rg(
     *, user_external_id: str, number: str, issuing_agency=None, issue_date=None
 ) -> dict:
-    enr = _require(user_external_id, _S.ADDRESS, _S.DOCUMENTS)
+    enr = _require(user_external_id, _S.RG)
     rg = {"number": number}
     if issuing_agency is not None:
         rg["issuing_agency"] = issuing_agency
     if issue_date is not None:
         rg["issue_date"] = issue_date
     result = documents_iface.update(user_external_id, {"rg": rg})
-    if enr.status == _S.ADDRESS:
-        _set_status(enr, _S.DOCUMENTS)
+    _advance_rg(enr, user_external_id)
     return result
 
 
 def upload_rg_photo(*, user_external_id: str, slot: str, upload) -> str:
-    """Foto do RG (slot `rg_front`/`rg_back`). Permitido enquanto coleta documentos/educação.
+    """Foto do RG (slot `rg_front`/`rg_back`), dentro da seção `rg` (dados + 2 fotos, em qualquer ordem).
 
     Na FRENTE (rg_front) o rosto vira biometria do documento, salva no perfil (best-effort — não quebra
     o upload). Aluno: RG é obrigatório (Victor)."""
@@ -260,7 +262,7 @@ def upload_rg_photo(*, user_external_id: str, slot: str, upload) -> str:
 
     from integrations.tools.biometric import service as biometric
 
-    enr = _require(user_external_id, _S.DOCUMENTS, _S.EDUCATION)
+    enr = _require(user_external_id, _S.RG)
     path = documents_iface.upload_photo(user_external_id, slot, upload)
     biometric.try_enroll_document(
         user=enr.user,
@@ -268,7 +270,17 @@ def upload_rg_photo(*, user_external_id: str, slot: str, upload) -> str:
         image_path=str(Path(settings.MEDIA_ROOT) / path),
         caller="enrollment.document",
     )
+    _advance_rg(enr, user_external_id)
     return path
+
+
+def _advance_rg(enr: Enrollment, user_external_id: str) -> None:
+    """Avança RG→EDUCATION quando a seção RG fica completa: número + foto da FRENTE e do VERSO."""
+    if enr.status != _S.RG:
+        return
+    rg = (documents_iface.get_by_external_id(user_external_id) or {}).get("rg") or {}
+    if rg.get("number") and rg.get("front_photo") and rg.get("back_photo"):
+        _set_status(enr, _S.EDUCATION)
 
 
 def set_education(
@@ -278,7 +290,7 @@ def set_education(
     last_school: str,
     last_year_when=None,
 ) -> Enrollment:
-    enr = _require(user_external_id, _S.DOCUMENTS, _S.EDUCATION)
+    enr = _require(user_external_id, _S.EDUCATION)
     EducationalData.objects.update_or_create(
         enrollment=enr,
         defaults={
@@ -287,8 +299,7 @@ def set_education(
             "last_school": last_school,
         },
     )
-    if enr.status == _S.DOCUMENTS:
-        _set_status(enr, _S.EDUCATION)
+    _set_status(enr, _S.SELFIE)
     return enr
 
 
@@ -296,12 +307,12 @@ def set_selfie(
     *, user_external_id: str, image_bytes: bytes, content_type: str = "image/jpeg"
 ) -> Enrollment:
     """Selfie ("assinar a matrícula"): valida por IA (3 estados). APROVADA → AWAITING_RELEASE (avisa o
-    coordenador). REPROVADA → refazer (avisa o aluno). REVISÃO (IA fora/dúvida) → o coordenador decide."""
+    coordenador). REPROVADA → fica em `selfie` pra refazer (avisa o aluno). REVISÃO → o coordenador decide."""
     from users.roles import _selfie
 
     from pathlib import Path
 
-    enr = _require(user_external_id, _S.EDUCATION, _S.SELFIE, _S.AWAITING_RELEASE)
+    enr = _require(user_external_id, _S.SELFIE)
     enr.selfie_image = _save_selfie(enr, image_bytes, content_type)
     status, desc = _selfie.verify(image_bytes, content_type, caller="enrollment.selfie")
     # SOMAR (Victor 2026-06-05): face-match biométrico selfie × documento (RG). Avança só se os dois passarem.
@@ -315,8 +326,6 @@ def set_selfie(
     enr.selfie_status = status
     enr.selfie_verified = status == _selfie.APPROVED
     enr.selfie_description = desc
-    if enr.status == _S.EDUCATION:
-        enr.status = _S.SELFIE  # avança pra etapa selfie (aguarda veredito)
     enr.save()
     _resolve_selfie(enr)
     return enr

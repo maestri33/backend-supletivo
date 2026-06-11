@@ -1,7 +1,9 @@
 """Lógica do lead (funil do aluno, Fatia 6a): captação → checkout → pago.
 
 `create_lead`: reusa o `register` do `auth` (valida CPFHub+WhatsApp+unicidade, cria User+Profile+
-Address+Documents+role `lead`+OTP) + `Lead(PENDING)` + `Checkout` SÍNCRONO (PIX Asaas / Cartão InfinitePay).
+Address+Documents+role `lead`+OTP) + `Lead(PENDING)` + linha do `Checkout` com link curto; a cobrança
+no GATEWAY (PIX Asaas / Cartão InfinitePay) é criada em task ASYNC com retry (auditoria front
+2026-06-11) — ou lazy, no clique do link curto, se a task ainda não terminou.
 `mark_paid`: chamado pelo **hook** de pagamento (CONVENTION §7) — marca pago e dispara os efeitos
 (comissão do promotor + cria enrollment ligado ao hub HERDADO do promotor + notify). Idempotente.
 """
@@ -52,16 +54,11 @@ def create_lead(
     user = User.objects.get(external_id=reg["external_id"])
 
     lead = Lead.objects.create(user=user, promoter=promoter, status=Lead.Status.PENDING)
-    try:
-        checkout = _build_checkout(lead, method)
-    except Exception as exc:  # noqa: BLE001 — falha do gateway vira FAILED auditável (não orfã o user)
-        lead.status = Lead.Status.FAILED
-        lead.failed_reason = str(exc)[:64]
-        lead.save(update_fields=["status", "failed_reason", "updated_at"])
-        logger.warning(
-            "lead.checkout_failed", external_id=str(lead.external_id), error=str(exc)
-        )
-        raise LeadError(f"checkout_failed: {exc}") from exc
+    # Checkout LOCAL (sem rede): o link curto nasce JÁ; o gateway é resolvido em task async com retry
+    # (auditoria front 2026-06-11: register <2s e 201 mesmo com o gateway fora). Se o cliente clicar
+    # antes do gateway responder, o redirect tenta criar na hora (lazy — checkout_links).
+    checkout = _create_checkout_row(lead, method)
+    _enqueue_provider_build(checkout)
 
     logger.info(
         "lead.created",
@@ -76,9 +73,7 @@ def create_lead(
     _notify_promoter_new_lead(
         lead
     )  # evento NOVO LEAD NA REDE → vai pro PROMOTOR (o ref que indicou)
-    _notify_checkout(
-        lead, checkout
-    )  # evento LINK DE PAGAMENTO → vai pro LEAD (link curto, legado mandava)
+    # o LINK DE PAGAMENTO vai pro lead quando o gateway responder (fill_checkout_from_provider).
     return {
         "external_id": str(lead.external_id),
         "status": lead.status,
@@ -206,20 +201,82 @@ def _resolve_promoter(ref) -> User:
     return u
 
 
-def _build_checkout(lead: Lead, method: str) -> Checkout:
-    profile = profiles.get(lead.user)
-    if profile is None:
-        raise LeadError("profile_missing")
-    return _build_pix(lead, profile) if method == "pix" else _build_card(lead, profile)
+def _create_checkout_row(lead: Lead, method: str) -> Checkout:
+    """Cria a LINHA do checkout (local, sem rede) com o token do link curto já gerado.
+
+    Os campos do gateway (URL/QR/payment_id) ficam nulos até `fill_checkout_from_provider` —
+    chamado pela task async (com retry) ou pelo clique no link curto (lazy)."""
+    from users.roles.lead import checkout_links
+
+    if method == "pix":
+        provider, amount = Checkout.Provider.ASAAS, config.price_pix()
+        pay_method = Checkout.Method.PIX
+    else:
+        provider, amount = Checkout.Provider.INFINITEPAY, config.price_card()
+        pay_method = Checkout.Method.CREDIT_CARD
+    return Checkout.objects.create(
+        lead=lead,
+        payment_method=pay_method,
+        provider=provider,
+        amount=amount,
+        short_token=checkout_links.new_token(),
+    )
 
 
-def _build_pix(lead: Lead, profile) -> Checkout:
+def _enqueue_provider_build(checkout: Checkout) -> None:
+    """Agenda a criação no gateway via Django-Q (best-effort: broker é o ORM, mas não quebra o register)."""
+    try:
+        from django_q.tasks import async_task
+
+        async_task("users.roles.lead.tasks.build_checkout", checkout.pk)
+    except Exception as exc:  # noqa: BLE001 — o clique no link curto cobre (lazy build)
+        logger.warning(
+            "lead.checkout_enqueue_failed", checkout=checkout.pk, error=str(exc)
+        )
+
+
+def fill_checkout_from_provider(checkout: Checkout) -> None:
+    """Cria a cobrança no GATEWAY e preenche o Checkout (URL/QR/payment_id). FAZ REDE — nunca dentro
+    do request do register (task async ou lazy no clique do link curto).
+
+    Idempotente: já preenchido → no-op. Mutex curto no cache evita task × clique criarem DUAS
+    cobranças no provider ao mesmo tempo."""
+    from django.core.cache import cache
+
+    if checkout.checkout_url:
+        return
+    lock_key = f"checkout_build:{checkout.pk}"
+    if not cache.add(lock_key, 1, 30):  # outro builder em andamento
+        return
+    try:
+        checkout.refresh_from_db()
+        if checkout.checkout_url:
+            return
+        profile = profiles.get(checkout.lead.user)
+        if profile is None:
+            raise LeadError("profile_missing")
+        if checkout.payment_method == Checkout.Method.PIX:
+            _fill_pix(checkout, profile)
+        else:
+            _fill_card(checkout, profile)
+    finally:
+        cache.delete(lock_key)
+    logger.info(
+        "lead.checkout_filled",
+        external_id=str(checkout.lead.external_id),
+        provider=checkout.provider,
+    )
+    # agora existe link de verdade → manda o LINK DE PAGAMENTO pro lead (idempotente por key).
+    _notify_checkout(checkout.lead, checkout)
+
+
+def _fill_pix(checkout: Checkout, profile) -> None:
     from integrations.bank.asaas import charge as asaas_charge
     from integrations.bank.asaas.customers import PayerData
     from integrations.bank.asaas.qr import qr_url_for
     from users.roles.lead import checkout_links
 
-    amount = config.price_pix()
+    lead = checkout.lead
     pid = f"lead_{lead.external_id.hex[:16]}"  # = externalReference que o webhook do asaas casa
     payer = PayerData(
         name=profile.name or "Aluno",
@@ -228,34 +285,36 @@ def _build_pix(lead: Lead, profile) -> Checkout:
         mobile_phone=profile.phone,
     )
     payment = asaas_charge.create_charge(
-        amount=amount,
+        amount=checkout.amount,
         payer=payer,
         description=config.description(),
         payment_id=pid,
         success_url=config.frontend_url(),  # asaas redireciona pra cá depois de pago
     )
     # página hospedada do Asaas (invoiceUrl) — alvo do link curto; pode pagar PIX por lá ou pelo copia-e-cola.
-    invoice_url = getattr(payment, "invoice_url", None)
-    token = checkout_links.make(invoice_url) if invoice_url else None
-    return Checkout.objects.create(
-        lead=lead,
-        payment_method=Checkout.Method.PIX,
-        provider=Checkout.Provider.ASAAS,
-        provider_payment_id=payment.payment_id,
-        amount=amount,
-        checkout_url=invoice_url,
-        short_token=token,
-        qrcode_payload=payment.qrcode_payload,
-        qrcode_image=qr_url_for(payment.payment_id),
-        due_date=payment.due_date,
+    checkout.provider_payment_id = payment.payment_id
+    checkout.checkout_url = getattr(payment, "invoice_url", None)
+    checkout.qrcode_payload = payment.qrcode_payload
+    checkout.qrcode_image = qr_url_for(payment.payment_id)
+    checkout.due_date = payment.due_date
+    checkout.save(
+        update_fields=[
+            "provider_payment_id",
+            "checkout_url",
+            "qrcode_payload",
+            "qrcode_image",
+            "due_date",
+            "updated_at",
+        ]
     )
+    if checkout.checkout_url:
+        checkout_links.bind(checkout.short_token, checkout.checkout_url)
 
 
-def _build_card(lead: Lead, profile) -> Checkout:
+def _fill_card(checkout: Checkout, profile) -> None:
     from integrations.bank.infinitepay import checkout as ip_checkout
     from users.roles.lead import checkout_links
 
-    amount = config.price_card()
     # pré-preenche o checkout com os dados que JÁ temos (nome do CPFHub + email + telefone). Schema
     # {name, email, phone_number} = porte do legado (sancionado). Telefone BR sem o DDI 55.
     phone = profile.phone or ""
@@ -266,23 +325,17 @@ def _build_card(lead: Lead, profile) -> Checkout:
     }
     # redirect_url: pra onde a InfinitePay manda o pagador DEPOIS de pagar (frontend_url).
     row = ip_checkout.create_checkout(
-        amount=amount,
+        amount=checkout.amount,
         description=config.description(),
         customer=customer,
         redirect_url=config.frontend_url(),
     )
-    token = checkout_links.make(row.checkout_url)
-    return Checkout.objects.create(
-        lead=lead,
-        payment_method=Checkout.Method.CREDIT_CARD,
-        provider=Checkout.Provider.INFINITEPAY,
-        provider_payment_id=str(
-            row.external_id
-        ),  # = order_nsu que o webhook do infinitepay casa
-        amount=amount,
-        checkout_url=row.checkout_url,
-        short_token=token,
-    )
+    checkout.provider_payment_id = str(
+        row.external_id
+    )  # = order_nsu que o webhook do infinitepay casa
+    checkout.checkout_url = row.checkout_url
+    checkout.save(update_fields=["provider_payment_id", "checkout_url", "updated_at"])
+    checkout_links.bind(checkout.short_token, checkout.checkout_url)
 
 
 def _checkout_dict(c: Checkout) -> dict:

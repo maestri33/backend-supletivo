@@ -18,4 +18,5 @@ dependencies = [
     "pillow>=12.2.0",
     "pyjwt[crypto]>=2.10",
     "structlog>=25.5.0",
+    "whitenoise>=6.12.0",
 ]
