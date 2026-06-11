@@ -39,7 +39,8 @@ class EnrollmentError(DomainError):
 
 
 def create_from_lead(*, user, promoter, hub) -> Enrollment:
-    """Cria o Enrollment(STARTED) ligado ao HUB herdado + promove a role `lead→enrollment`. Idempotente.
+    """Cria o Enrollment(RG — documento primeiro, plan/13) ligado ao HUB herdado + promove a role
+    `lead→enrollment`. Idempotente.
 
     Chamado DENTRO da transação do hook de pagamento (lead pago). Se o enrollment já existe (webhook
     re-tentou), devolve o existente sem duplicar nem re-promover.
@@ -52,7 +53,7 @@ def create_from_lead(*, user, promoter, hub) -> Enrollment:
         user=user,
         promoter=promoter,
         hub=hub,
-        status=Enrollment.Status.STARTED,
+        status=Enrollment.Status.RG,
     )
     if "enrollment" not in roles.active_roles(user):
         roles.promote(user, "enrollment")
@@ -184,84 +185,155 @@ def me_dict(enr: Enrollment) -> dict:
 
 
 # ── 6b: funil de coleta ──────────────────────────────────────────────────────
-# `status` = a seção que o aluno preenche AGORA (vocabulário do wizard do front, 2026-06-11):
-# started(perfil) → address → rg → education → selfie → awaiting_release → completed.
-# Gates ESTRITOS: cada seção só aceita POST no próprio status; seção já avançada → 409
-# `{detail, code:WRONG_STATUS, expected_status}` (o front salta pro lugar certo com isso).
+# `status` = a seção que o aluno preenche AGORA (vocabulário do wizard do front).
+# Ordem nova (plan/13, Victor 2026-06-11): DOCUMENTO primeiro — a extração povoa o perfil.
+# rg → address → education → selfie → awaiting_release → completed.
+# Gates ESTRITOS nos POSTs de seção; fora de hora → 409 {detail, code:WRONG_STATUS,
+# expected_status}. GETs são leitura (qualquer etapa). Avanço com CHAIN-SKIP: se a próxima
+# seção já está completa, pula — ninguém fica preso numa etapa sem nada a fazer.
 
 
-def set_profile(
-    *,
-    user_external_id: str,
-    mother_name=None,
-    father_name=None,
-    marital_status=None,
-    birthplace=None,
-    nationality=None,
-) -> Enrollment:
-    enr = _require(user_external_id, _S.STARTED)
-    for field, value in (
-        ("mother_name", mother_name),
-        ("father_name", father_name),
-        ("marital_status", marital_status),
-        ("birthplace", birthplace),
-        ("nationality", nationality),
-    ):
-        if value is not None:
-            setattr(enr, field, value)
-    enr.save()
-    _set_status(enr, _S.ADDRESS)  # perfil é um form só → concluiu, vai pro endereço
-    return enr
+def _has_education(enr: Enrollment) -> bool:
+    try:
+        return enr.educational_data is not None
+    except EducationalData.DoesNotExist:
+        return False
+
+
+def _advance_to(enr: Enrollment, target: str) -> None:
+    """Avança pra `target` PULANDO seções já completas (chain-skip, plan/13)."""
+    user_ext = str(enr.user.external_id)
+    status = target
+    while True:
+        if status == _S.ADDRESS and address_iface.is_complete(
+            address_iface.get_by_external_id(user_ext)
+        ):
+            status = _S.EDUCATION
+            continue
+        if status == _S.EDUCATION and _has_education(enr):
+            status = _S.SELFIE
+            continue
+        break
+    _set_status(enr, status)
+
+
+# ── seção ENDEREÇO (plan/13): POST só com CEP · PATCH só-vazios · GET ────────
+# `missing_fields` em toda resposta: o front renderiza input SÓ do que está na lista
+# (ex.: ["number"] = ViaCEP achou tudo, falta o número; rua/bairro na lista = CEP único).
+_ADDRESS_FIELDS = (
+    "street",
+    "number",
+    "neighborhood",
+    "city",
+    "state",
+)  # complement opcional
+
+
+def _address_dict(user_external_id: str) -> dict:
+    data = address_iface.as_public_dict(
+        address_iface.get_by_external_id(user_external_id)
+    )
+    data["missing_fields"] = [f for f in _ADDRESS_FIELDS if not data.get(f)]
+    return data
 
 
 def get_address(*, user_external_id: str) -> dict:
-    """GET do endereço (o front vê o que está vazio p/ saber o que ainda pode preencher)."""
+    """GET do endereço + `missing_fields` (o que ainda falta preencher)."""
     _require(user_external_id)
-    return address_iface.as_public_dict(
-        address_iface.get_by_external_id(user_external_id)
-    )
+    return _address_dict(user_external_id)
 
 
 def set_address_cep(*, user_external_id: str, cep: str) -> dict:
-    """Busca o CEP (ViaCEP) e preenche o endereço. Em cidade de CEP único a rua fica vazia p/ digitar."""
+    """POST do endereço (plan/13): body só `{cep}`. Acha no ViaCEP, grava, e a resposta JÁ AVISA
+    o que falta: rua achada → `missing_fields=["number"]`; cidade de CEP único → rua/bairro/número."""
     enr = _require(user_external_id, _S.ADDRESS)
     address_iface.set_by_cep(external_id=user_external_id, cep=cep)
     _advance_address(enr, user_external_id)
-    return address_iface.as_public_dict(
-        address_iface.get_by_external_id(user_external_id)
-    )
+    return _address_dict(user_external_id)
 
 
 def set_address_data(*, user_external_id: str, **fields) -> dict:
-    """Preenche os demais campos do endereço — SÓ os que estão VAZIOS (não sobrescreve o que o CEP trouxe)."""
+    """PATCH do endereço — preenche SÓ o que está VAZIO (não sobrescreve o que o CEP trouxe)."""
     enr = _require(user_external_id, _S.ADDRESS)
     address_iface.fill_empty(external_id=user_external_id, **fields)
     _advance_address(enr, user_external_id)
-    return address_iface.as_public_dict(
-        address_iface.get_by_external_id(user_external_id)
-    )
+    return _address_dict(user_external_id)
 
 
 def _advance_address(enr: Enrollment, user_external_id: str) -> None:
-    """Avança ADDRESS→RG quando o endereço fica completo (campos essenciais preenchidos)."""
+    """Endereço completo → EDUCATION (ordem plan/13), com chain-skip."""
     if enr.status == _S.ADDRESS and address_iface.is_complete(
         address_iface.get_by_external_id(user_external_id)
     ):
-        _set_status(enr, _S.RG)
+        _advance_to(enr, _S.EDUCATION)
 
 
-def set_documents_rg(
-    *, user_external_id: str, number: str, issuing_agency=None, issue_date=None
-) -> dict:
-    enr = _require(user_external_id, _S.RG)
-    rg = {"number": number}
-    if issuing_agency is not None:
-        rg["issuing_agency"] = issuing_agency
-    if issue_date is not None:
-        rg["issue_date"] = issue_date
-    result = documents_iface.update(user_external_id, {"rg": rg})
+# ── seção DOCUMENTO (plan/13): GET rico · PATCH completa/corrige ─────────────
+# Campos editáveis: do RG (number/órgão/emissão) + os de perfil que o documento povoa
+# (filiação/naturalidade) ou não traz (estado civil/nacionalidade). `name`/`birth_date`
+# vêm do CPFHub/extração — NÃO editáveis pelo aluno.
+_RG_DOC_FIELDS = ("number", "issuing_agency", "issue_date")
+_RG_PROFILE_FIELDS = (
+    "mother_name",
+    "father_name",
+    "birthplace",
+    "marital_status",
+    "nationality",
+)
+
+
+def _rg_section_dict(enr: Enrollment) -> dict:
+    user_ext = str(enr.user.external_id)
+    rg = documents_iface.get_rg(user_ext)
+    p = profiles.get(enr.user)
+    fields = {
+        "number": rg.number if rg else None,
+        "issuing_agency": rg.issuing_agency if rg else None,
+        "issue_date": rg.issue_date.isoformat() if (rg and rg.issue_date) else None,
+        "mother_name": enr.mother_name,
+        "father_name": enr.father_name,
+        "birthplace": enr.birthplace,
+        "marital_status": enr.marital_status,
+        "nationality": enr.nationality,
+    }
+    result = (rg.validation_result or {}) if rg else {}
+    return {
+        **fields,
+        "name": p.name if p else None,
+        "birth_date": p.birth_date.isoformat() if (p and p.birth_date) else None,
+        "front_photo": rg.front_photo if rg else None,
+        "back_photo": rg.back_photo if rg else None,
+        "full_photo": rg.full_photo if rg else None,
+        "validation_status": rg.validation_status if rg else None,
+        "validation_reason": result.get("reason"),
+        "missing_fields": [
+            k for k in (*_RG_DOC_FIELDS, *_RG_PROFILE_FIELDS) if not fields[k]
+        ],
+    }
+
+
+def get_rg_section(*, user_external_id: str) -> dict:
+    """GET da seção documento (plan/13): fotos + validação + TODOS os campos (extraídos pela IA
+    ou digitados) + `missing_fields` (o que o aluno ainda precisa completar)."""
+    enr = _require(user_external_id)
+    return _rg_section_dict(enr)
+
+
+def patch_rg_section(*, user_external_id: str, **fields) -> dict:
+    """PATCH da seção documento (plan/13): completa/CORRIGE o que a extração não trouxe — campos
+    do doc e do perfil. Aceito em qualquer etapa da coleta (é dado do aluno, não progressão);
+    a foto do documento segue sendo a fonte de verdade pra auditoria do coordenador."""
+    enr = _require(user_external_id, _S.RG, _S.ADDRESS, _S.EDUCATION, _S.SELFIE)
+    doc_payload = {k: fields[k] for k in _RG_DOC_FIELDS if fields.get(k) is not None}
+    if doc_payload:
+        documents_iface.update(user_external_id, {"rg": doc_payload})
+    enr_changed = [k for k in _RG_PROFILE_FIELDS if fields.get(k) is not None]
+    for k in enr_changed:
+        setattr(enr, k, fields[k])
+    if enr_changed:
+        enr.save(update_fields=[*enr_changed, "updated_at"])
     _advance_rg(enr, user_external_id)
-    return result
+    return _rg_section_dict(enr)
 
 
 def upload_rg_photo(*, user_external_id: str, slot: str, upload) -> str:
@@ -280,15 +352,15 @@ def upload_rg_photo(*, user_external_id: str, slot: str, upload) -> str:
 
 
 def _advance_rg(enr: Enrollment, user_external_id: str) -> None:
-    """Avança RG→EDUCATION quando a seção fecha (plan/12): validação IA APROVADA (frente+verso
-    OU inteira) + `number` presente (extraído pelo OCR ou digitado no fallback)."""
+    """Avança RG→ADDRESS (ordem plan/13) quando a seção fecha: validação IA APROVADA (frente+verso
+    OU inteira) + `number` presente (extraído pelo OCR ou digitado no PATCH). Com chain-skip."""
     from users.roles import _document_ai as doc_ai
 
     if enr.status != _S.RG:
         return
     rg = documents_iface.get_rg(user_external_id)
     if rg is not None and rg.validation_status == doc_ai.APPROVED and rg.number:
-        _set_status(enr, _S.EDUCATION)
+        _advance_to(enr, _S.ADDRESS)
 
 
 # ── validação do RG por IA (plan/12): visão → OCR → extração → biometria ────
@@ -460,6 +532,7 @@ def _rg_extract_and_finish(enr: Enrollment, rg, result: dict, images: list) -> N
         return
     _apply_rg_extracted(enr, rg, data)
     _finish_rg(enr, rg, doc_ai.APPROVED, name_reason or "Documento validado.", result)
+    _notify_rg_approved(enr)  # notify também no aprovado automático (plan/13)
     _rg_post_approval(enr, rg)
 
 
@@ -535,20 +608,37 @@ def _finish_rg(
 
 
 def _rg_post_approval(enr: Enrollment, rg) -> None:
-    """Aprovado → rosto do documento vira biometria (best-effort) + tenta avançar o wizard."""
+    """Aprovado → rosto do documento vira biometria (best-effort) + tenta avançar o wizard.
+
+    Recorte (plan/13): InsightFace direto (já detecta/recorta); NÃO achou rosto → a visão
+    localiza a região da foto do titular, o Pillow recorta e tenta de novo. Nunca trava o fluxo."""
     from pathlib import Path
 
     from integrations.tools.biometric import service as biometric
 
+    from users.roles import _document_ai as doc_ai
+
     face_path = rg.front_photo or rg.full_photo
     face_slot = "rg_front" if rg.front_photo else "rg_full"
     if face_path:
-        biometric.try_enroll_document(
+        full = Path(settings.MEDIA_ROOT) / face_path
+        enrolled = biometric.try_enroll_document(
             user=enr.user,
             slot=face_slot,
-            image_path=str(Path(settings.MEDIA_ROOT) / face_path),
+            image_path=str(full),
             caller="enrollment.document",
         )
+        if enrolled is None and full.exists():
+            cropped = doc_ai.crop_face(full.read_bytes(), caller="enrollment.rg")
+            if cropped:
+                crop_path = full.with_name("rg_face_crop.jpg")
+                crop_path.write_bytes(cropped)
+                biometric.try_enroll_document(
+                    user=enr.user,
+                    slot="rg_front",
+                    image_path=str(crop_path),
+                    caller="enrollment.document_crop",
+                )
     _advance_rg(enr, str(enr.user.external_id))
 
 
@@ -729,6 +819,20 @@ def _notify_rg_approved(enr: Enrollment) -> None:
         logger.warning("enrollment.notify_rg_approved_failed", error=str(exc))
 
 
+def get_education(*, user_external_id: str) -> dict:
+    """GET dos dados educacionais (plan/13). Tudo None = ainda não preenchido."""
+    enr = _require(user_external_id)
+    try:
+        edu = enr.educational_data
+    except EducationalData.DoesNotExist:
+        edu = None
+    return {
+        "last_year_studied": edu.last_year_studied if edu else None,
+        "last_school": edu.last_school if edu else None,
+        "last_year_when": edu.last_year_when if edu else None,
+    }
+
+
 def set_education(
     *,
     user_external_id: str,
@@ -749,39 +853,109 @@ def set_education(
     return enr
 
 
+def get_selfie(*, user_external_id: str) -> dict:
+    """GET da selfie/ASSINATURA (plan/13): foto, quando foi enviada, status e os comentários da
+    IA/biometria (inclusive as instruções de como ser aprovada). `exists: false` = não enviada."""
+    enr = _require(user_external_id)
+    return {
+        "exists": bool(enr.selfie_image),
+        "photo": enr.selfie_image,
+        "taken_at": enr.selfie_taken_at.isoformat() if enr.selfie_taken_at else None,
+        "status": enr.selfie_status if enr.selfie_image else None,
+        "verified": enr.selfie_verified,
+        "description": enr.selfie_description,
+    }
+
+
 def set_selfie(
     *, user_external_id: str, image_bytes: bytes, content_type: str = "image/jpeg"
 ) -> Enrollment:
-    """Selfie ("assinar a matrícula"): valida por IA (3 estados). APROVADA → AWAITING_RELEASE (avisa o
-    coordenador). REPROVADA → fica em `selfie` pra refazer (avisa o aluno). REVISÃO → o coordenador decide."""
-    from users.roles import _selfie
+    """Selfie = a ASSINATURA da matrícula (plan/13). Salva a foto e ENFILEIRA a análise: IA
+    pré-analisa (vale ir pra biometria?) → face-match vs rosto do DOCUMENTO → reprovou? a IA
+    INSTRUI como ser aprovada. Responde na hora; o front acompanha pelo GET /selfie (status)."""
+    from django.utils import timezone
 
-    from pathlib import Path
+    from users.roles import _selfie
 
     enr = _require(user_external_id, _S.SELFIE)
     enr.selfie_image = _save_selfie(enr, image_bytes, content_type)
+    enr.selfie_taken_at = timezone.now()
+    enr.selfie_status = _selfie.SelfieStatus.PENDING
+    enr.selfie_verified = False
+    enr.selfie_description = None
+    enr.save()
+    from django_q.tasks import async_task
+
+    async_task("users.roles.enrollment.tasks.validate_selfie", enr.id)
+    return enr
+
+
+def run_selfie_validation(enrollment_id: int) -> None:
+    """Pipeline da task da selfie (plan/13). Idempotente: só age com `selfie_status` pending.
+
+    a) liveness (é selfie real? adianta ir pra biometria?) → b) face-match vs rosto do DOCUMENTO
+    (biometria do RG) → c) reprovou? a visão olha DE NOVO e gera INSTRUÇÕES práticas de como ser
+    aprovada (vão no GET e no notify) → d) notifies: aprovada→aluno; reprovada→aluno; review→coord."""
+    from pathlib import Path
+
+    from users.roles import _selfie
+
+    enr = (
+        Enrollment.objects.select_related("user", "hub", "hub__coordinator")
+        .filter(id=enrollment_id)
+        .first()
+    )
+    if enr is None or not enr.selfie_image or enr.status != _S.SELFIE:
+        return
+    if enr.selfie_status != _selfie.SelfieStatus.PENDING:
+        return
+    fp = Path(settings.MEDIA_ROOT) / enr.selfie_image
+    if not fp.exists():
+        return
+    content_type = _MIME_BY_EXT.get(fp.suffix.lstrip(".").lower(), "image/jpeg")
+    image_bytes = fp.read_bytes()
     status, desc = _selfie.verify(image_bytes, content_type, caller="enrollment.selfie")
-    # SOMAR (Victor 2026-06-05): face-match biométrico selfie × documento (RG). Avança só se os dois passarem.
+    # SOMAR (Victor 2026-06-05): face-match biométrico selfie × documento. Avança só se os dois passarem.
     status, desc = _selfie.add_face_match(
         user=enr.user,
-        selfie_image_path=str(Path(settings.MEDIA_ROOT) / enr.selfie_image),
+        selfie_image_path=str(fp),
         caller="enrollment.selfie",
         liveness_status=status,
         liveness_desc=desc,
     )
+    if status == _selfie.REJECTED:
+        tips = _selfie.instructions(
+            image_bytes, content_type, reason=desc, caller="enrollment.selfie"
+        )
+        if tips:
+            desc = f"{desc}\n\nComo resolver: {tips}"
+    enr.refresh_from_db(fields=["selfie_status"])
+    if enr.selfie_status != _selfie.SelfieStatus.PENDING:
+        return  # re-upload no meio tempo — este veredito é de foto velha, descarta
     enr.selfie_status = status
     enr.selfie_verified = status == _selfie.APPROVED
     enr.selfie_description = desc
-    enr.save()
+    enr.save(
+        update_fields=[
+            "selfie_status",
+            "selfie_verified",
+            "selfie_description",
+            "updated_at",
+        ]
+    )
+    logger.info(
+        "enrollment.selfie_validated", enrollment=str(enr.external_id), status=status
+    )
     _resolve_selfie(enr)
-    return enr
 
 
 def _resolve_selfie(enr: Enrollment) -> None:
-    """Reage ao veredito: aprovada→aguarda liberação; reprovada→avisa o aluno; revisão→avisa o coordenador."""
+    """Reage ao veredito: aprovada→avisa o aluno + aguarda liberação; reprovada→avisa o aluno
+    (com as instruções); revisão→avisa o coordenador."""
     from users.roles import _selfie
 
     if enr.selfie_status == _selfie.APPROVED:
+        _notify_selfie_approved(enr)  # notify também no aprovado (plan/13)
         _advance_to_release(enr)
     elif enr.selfie_status == _selfie.REJECTED:
         _notify_selfie_rejected(enr)
@@ -829,6 +1003,7 @@ def decide_selfie(
         ]
     )
     if approve:
+        _notify_selfie_approved(enr)  # notify também no aprovado (plan/13)
         _advance_to_release(enr)
     else:
         _notify_selfie_rejected(enr)
@@ -845,12 +1020,31 @@ def _notify_selfie_rejected(enr: Enrollment) -> None:
             text=msgs.text(
                 "enrollment.selfie_rejected",
                 name=msgs.first_name(p.name if p else None),
+                detail=(enr.selfie_description or "").strip(),
             ),
             caller="enrollment.selfie_rejected",
             phone=p.phone if p else None,
         )
     except Exception as exc:  # noqa: BLE001
         logger.warning("enrollment.notify_selfie_rejected_failed", error=str(exc))
+
+
+def _notify_selfie_approved(enr: Enrollment) -> None:
+    from notify.interface.send import send
+    from users.roles import notifications as msgs
+
+    p = profiles.get(enr.user)
+    try:
+        send(
+            text=msgs.text(
+                "enrollment.selfie_approved",
+                name=msgs.first_name(p.name if p else None),
+            ),
+            caller="enrollment.selfie_approved",
+            phone=p.phone if p else None,
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("enrollment.notify_selfie_approved_failed", error=str(exc))
 
 
 def _notify_selfie_review(enr: Enrollment) -> None:

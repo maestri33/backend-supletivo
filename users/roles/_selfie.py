@@ -103,3 +103,32 @@ def add_face_match(
         " |"
     )
     return status, desc
+
+
+def instructions(
+    image_bytes: bytes, content_type: str, *, reason: str | None, caller: str
+) -> str | None:
+    """Reprovou? A IA olha a foto DE NOVO e INSTRUI o que fazer pra ser aprovada (plan/13).
+
+    Instruções curtas e práticas, faladas direto com a pessoa — vão no GET da selfie e no
+    notify de reprovação. Best-effort: IA fora do ar → None (o motivo da reprovação já basta)."""
+    from integrations.ai import service as ai
+
+    prompt = (
+        "Esta foto foi REPROVADA como selfie de verificação de identidade"
+        + (f", pelo motivo: {reason}" if reason else "")
+        + ". Olhe a imagem e dê instruções CURTAS e PRÁTICAS (2 a 3 frases, em português, "
+        "falando diretamente com a pessoa) do que ela deve fazer pra nova foto ser aprovada — "
+        "ex.: tirar a foto ao vivo segurando o celular (não fotografar outra foto ou tela), "
+        "rosto inteiro visível e centralizado, boa iluminação, sem boné ou óculos escuros. "
+        "Seja específico pro problema DESTA imagem; não repita o motivo, diga o que FAZER."
+    )
+    try:
+        return ai.describe_image(
+            image_bytes, caller=caller, mime_type=content_type, prompt=prompt
+        )
+    except Exception as exc:  # noqa: BLE001 — instrução é apoio; o motivo já foi guardado
+        logger.warning(
+            "selfie_instructions_failed", caller=caller, error=str(exc)[:200]
+        )
+        return None

@@ -149,6 +149,11 @@ class AddressOut(Schema):
     city: str | None = None
     state: str | None = None
     country: str | None = None
+    missing_fields: list[str] = Field(
+        default=[],
+        description='O que ainda falta preencher (plan/13): ["number"] = ViaCEP achou tudo, '
+        "só falta o número; rua/bairro na lista = cidade de CEP único (digitar no PATCH)",
+    )
 
 
 class StudentPlatformOut(Schema):
@@ -294,33 +299,21 @@ api.add_router("/lead", lead_router)
 
 
 # ── matrícula: funil de coleta (autenticado, role enrollment) — 6b ──────────
-# ⚠️ 6b NÃO TESTADO (nem in-process completo, nem com aluno real).
-class ProfileIn(Schema):
-    mother_name: str | None = None
-    father_name: str | None = None
-    marital_status: str | None = None
-    birthplace: str | None = None
-    nationality: str | None = None
-
-
+# Fluxo plan/13 (Victor 2026-06-11): DOCUMENTO primeiro (a IA extrai e povoa o perfil) →
+# endereço (POST só com CEP) → educação → selfie (= ASSINATURA da matrícula) → liberação.
+# Convenção: as seções devolvem `missing_fields` — o front renderiza input SÓ do que falta.
 class AddressCepIn(Schema):
     cep: str
 
 
 class AddressDataIn(Schema):
-    # demais campos — o backend só preenche os que estão VAZIOS (não sobrescreve o CEP).
+    # PATCH — o backend só preenche os que estão VAZIOS (não sobrescreve o que o CEP trouxe).
     street: str | None = None
     number: str | None = None
     complement: str | None = None
     neighborhood: str | None = None
     city: str | None = None
     state: str | None = None
-
-
-class RgIn(Schema):
-    number: str
-    issuing_agency: str | None = None
-    issue_date: str | None = None
 
 
 class EducationIn(Schema):
@@ -332,12 +325,66 @@ class EducationIn(Schema):
 class EnrollmentOut(Schema):
     external_id: str
     status: str = Field(
-        description="Seção do wizard a preencher AGORA: started (=perfil) | address | rg | education "
+        description="Seção do wizard a preencher AGORA: rg (documento) | address | education "
         "| selfie | awaiting_release | completed"
     )
     hub_external_id: str
     selfie_verified: bool
-    selfie_status: str  # pending/approved/rejected/review — front sabe quando caiu p/ revisão do coord
+    selfie_status: str  # pending(analisando)/approved/rejected/review
+
+
+class RgSectionOut(Schema):
+    """Seção DOCUMENTO completa (GET/PATCH /enrollment/documents/rg) — plan/13."""
+
+    # editáveis no PATCH (completa/corrige o que a extração não trouxe)
+    number: str | None = None
+    issuing_agency: str | None = None
+    issue_date: str | None = None
+    mother_name: str | None = None
+    father_name: str | None = None
+    birthplace: str | None = None
+    marital_status: str | None = None
+    nationality: str | None = None
+    # do CPFHub/extração — NÃO editáveis pelo aluno
+    name: str | None = None
+    birth_date: str | None = None
+    # fotos + validação por IA
+    front_photo: str | None = None
+    back_photo: str | None = None
+    full_photo: str | None = None
+    validation_status: str | None = Field(
+        None,
+        description="pending (analisando) | approved | rejected (refazer — motivo em "
+        "validation_reason) | review (coordenador vai decidir)",
+    )
+    validation_reason: str | None = None  # o PORQUÊ (a IA sempre justifica)
+    missing_fields: list[str] = []  # o aluno completa SÓ esses (no PATCH)
+
+
+class RgPatchIn(Schema):
+    number: str | None = None
+    issuing_agency: str | None = None
+    issue_date: str | None = None  # AAAA-MM-DD
+    mother_name: str | None = None
+    father_name: str | None = None
+    birthplace: str | None = None
+    marital_status: str | None = None
+    nationality: str | None = None
+
+
+class SelfieOut(Schema):
+    """GET /enrollment/selfie — a selfie é a ASSINATURA da matrícula (plan/13)."""
+
+    exists: bool
+    photo: str | None = None
+    taken_at: str | None = None
+    status: str | None = Field(
+        None, description="pending (analisando) | approved | rejected | review"
+    )
+    verified: bool = False
+    description: str | None = (
+        None  # comentários da IA/biometria + instruções p/ ser aprovada
+    )
 
 
 class EnrollmentProfileOut(Schema):
@@ -397,48 +444,7 @@ def enrollment_me(request):
     return enrollment_iface.me_dict(enr)
 
 
-@api.post("/enrollment/profile", response=EnrollmentOut, tags=["enrollment"])
-def enrollment_profile(request, payload: ProfileIn):
-    ext = _enr_guard(request)
-    enr = enrollment_iface.set_profile(user_external_id=ext, **payload.dict())
-    return enrollment_iface.to_dict(enr)
-
-
-@api.get("/enrollment/address", response=AddressOut, tags=["enrollment"])
-def enrollment_get_address(request):
-    """GET do endereço (o front vê o que está vazio p/ saber o que ainda pode preencher)."""
-    ext = _enr_guard(request)
-    return enrollment_iface.get_address(user_external_id=ext)
-
-
-@api.post("/enrollment/address/cep", response=AddressOut, tags=["enrollment"])
-def enrollment_address_cep(request, payload: AddressCepIn):
-    """Busca o CEP (ViaCEP) e preenche o endereço. Em cidade de CEP único a rua fica vazia p/ digitar."""
-    ext = _enr_guard(request)
-    return enrollment_iface.set_address_cep(user_external_id=ext, cep=payload.cep)
-
-
-@api.post("/enrollment/address/data", response=AddressOut, tags=["enrollment"])
-def enrollment_address_data(request, payload: AddressDataIn):
-    """Preenche os demais campos — SÓ os que estão VAZIOS (não sobrescreve o que o CEP trouxe)."""
-    ext = _enr_guard(request)
-    return enrollment_iface.set_address_data(
-        user_external_id=ext, **payload.dict(exclude_none=True)
-    )
-
-
-@api.post("/enrollment/documents/rg", response=EnrollmentOut, tags=["enrollment"])
-def enrollment_rg(request, payload: RgIn):
-    ext = _enr_guard(request)
-    enrollment_iface.set_documents_rg(
-        user_external_id=ext,
-        number=payload.number,
-        issuing_agency=payload.issuing_agency,
-        issue_date=payload.issue_date,
-    )
-    return enrollment_iface.to_dict(enrollment_iface.get_for_user_external_id(ext))
-
-
+# ── seção DOCUMENTO (primeira do wizard — plan/13) ───────────────────────────
 # slot da borda (`front`/`back`/`full` — o path já diz que é RG) → slot interno do documents.
 _RG_SLOTS = {"front": "rg_front", "back": "rg_back", "full": "rg_full"}
 
@@ -447,7 +453,8 @@ _RG_SLOTS = {"front": "rg_front", "back": "rg_back", "full": "rg_full"}
 def enrollment_rg_photo(request, slot: str, file: UploadedFile = File(...)):
     """Foto do RG — `slot` aceita **`front`**, **`back`** ou **`full`** (documento inteiro numa
     imagem). Arquivo: JPEG/PNG/WEBP ou **PDF** (convertido internamente). A análise por IA roda
-    em 2º plano (plan/12): acompanhe `rg.validation_status` (+ motivo) no `GET /enrollment/me`."""
+    em 2º plano: acompanhe `validation_status` (+ motivo e campos extraídos) no
+    `GET /enrollment/documents/rg`."""
     ext = _enr_guard(request)
     real_slot = _RG_SLOTS.get(slot)
     if real_slot is None:
@@ -456,6 +463,58 @@ def enrollment_rg_photo(request, slot: str, file: UploadedFile = File(...)):
         user_external_id=ext, slot=real_slot, upload=file
     )
     return {"slot": slot, "stored": path, "analysis": "pending"}
+
+
+@api.get("/enrollment/documents/rg", response=RgSectionOut, tags=["enrollment"])
+def enrollment_rg_get(request):
+    """Seção documento completa: fotos, validação (status+motivo), TODOS os campos extraídos
+    pela IA (doc + filiação/naturalidade/nascimento) e `missing_fields` (o que falta digitar)."""
+    ext = _enr_guard(request)
+    return enrollment_iface.get_rg_section(user_external_id=ext)
+
+
+@api.patch("/enrollment/documents/rg", response=RgSectionOut, tags=["enrollment"])
+def enrollment_rg_patch(request, payload: RgPatchIn):
+    """Completa/CORRIGE manualmente o que a extração não trouxe (`missing_fields`): campos do
+    documento (número/órgão/emissão) e do perfil (filiação/naturalidade/estado civil/nacionalidade)."""
+    ext = _enr_guard(request)
+    return enrollment_iface.patch_rg_section(
+        user_external_id=ext, **payload.dict(exclude_none=True)
+    )
+
+
+# ── seção ENDEREÇO (plan/13: POST só com CEP) ────────────────────────────────
+@api.get("/enrollment/address", response=AddressOut, tags=["enrollment"])
+def enrollment_get_address(request):
+    """GET do endereço + `missing_fields` (o que ainda falta preencher)."""
+    ext = _enr_guard(request)
+    return enrollment_iface.get_address(user_external_id=ext)
+
+
+@api.post("/enrollment/address", response=AddressOut, tags=["enrollment"])
+def enrollment_address(request, payload: AddressCepIn):
+    """Body só `{cep}`: acha no ViaCEP, grava o endereço e a resposta JÁ AVISA o que falta
+    (`missing_fields`): `["number"]` = achou tudo, só falta o número; rua/bairro na lista =
+    cidade de CEP único (digite no PATCH)."""
+    ext = _enr_guard(request)
+    return enrollment_iface.set_address_cep(user_external_id=ext, cep=payload.cep)
+
+
+@api.patch("/enrollment/address", response=AddressOut, tags=["enrollment"])
+def enrollment_address_patch(request, payload: AddressDataIn):
+    """Preenche os demais campos — SÓ os que estão VAZIOS (não sobrescreve o que o CEP trouxe)."""
+    ext = _enr_guard(request)
+    return enrollment_iface.set_address_data(
+        user_external_id=ext, **payload.dict(exclude_none=True)
+    )
+
+
+# ── seção EDUCAÇÃO ───────────────────────────────────────────────────────────
+@api.get("/enrollment/education", response=EducationOut, tags=["enrollment"])
+def enrollment_get_education(request):
+    """GET dos dados educacionais (tudo None = ainda não preenchido)."""
+    ext = _enr_guard(request)
+    return enrollment_iface.get_education(user_external_id=ext)
 
 
 @api.post("/enrollment/education", response=EnrollmentOut, tags=["enrollment"])
@@ -470,8 +529,19 @@ def enrollment_education(request, payload: EducationIn):
     return enrollment_iface.to_dict(enr)
 
 
+# ── seção SELFIE (= a ASSINATURA da matrícula — plan/13) ─────────────────────
+@api.get("/enrollment/selfie", response=SelfieOut, tags=["enrollment"])
+def enrollment_get_selfie(request):
+    """Foto, quando foi enviada, status da análise e os comentários da IA/biometria (inclusive
+    instruções de como ser aprovada, se reprovou). `exists: false` = ainda não enviada."""
+    ext = _enr_guard(request)
+    return enrollment_iface.get_selfie(user_external_id=ext)
+
+
 @api.post("/enrollment/selfie", response=EnrollmentOut, tags=["enrollment"])
 def enrollment_selfie(request, file: UploadedFile = File(...)):
+    """Envia a selfie (assinatura). A análise roda em 2º plano (IA + biometria vs rosto do
+    DOCUMENTO): acompanhe `status` no `GET /enrollment/selfie` (`pending` = analisando)."""
     ext = _enr_guard(request)
     enr = enrollment_iface.set_selfie(
         user_external_id=ext,

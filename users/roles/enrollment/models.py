@@ -22,13 +22,13 @@ class Enrollment(ExternalIdModel):
     """A matrícula de um aluno (1-1 com o User). Carrega o hub herdado do promotor que indicou."""
 
     class Status(models.TextChoices):
-        # status = a seção que o aluno preenche AGORA (vocabulário do wizard do front, 2026-06-11).
-        # `started` = preencher o perfil; concluir uma seção avança pro NOME da próxima.
-        STARTED = "started", "iniciada (preencher perfil)"
+        # status = a seção que o aluno preenche AGORA (vocabulário do wizard do front).
+        # Ordem nova (plan/13, Victor 2026-06-11): DOCUMENTO primeiro — a extração povoa o
+        # perfil (a etapa `started`/perfil morreu). Concluir uma seção avança pro NOME da próxima.
+        RG = "rg", "RG (fotos + dados)"
         ADDRESS = "address", "endereço"
-        RG = "rg", "RG (dados + fotos)"
         EDUCATION = "education", "dados escolares"
-        SELFIE = "selfie", "selfie"
+        SELFIE = "selfie", "selfie (assinatura da matrícula)"
         AWAITING_RELEASE = "awaiting_release", "aguardando liberação"
         COMPLETED = "completed", "concluída"
 
@@ -52,7 +52,7 @@ class Enrollment(ExternalIdModel):
     status = models.CharField(
         max_length=20,
         choices=Status.choices,
-        default=Status.STARTED,
+        default=Status.RG,
         db_index=True,
     )
     # dados da plataforma externa que o COORDENADOR posta na liberação (6c). Schema livre por ora
@@ -65,8 +65,10 @@ class Enrollment(ExternalIdModel):
     marital_status = models.CharField(max_length=32, null=True, blank=True)
     birthplace = models.CharField(max_length=128, null=True, blank=True)
     nationality = models.CharField(max_length=64, null=True, blank=True)
-    # selfie (etapa `selfie`, 6b) — foto em media/enrollment/<ext>/ + validação IA 3 estados + revisão.
+    # selfie/ASSINATURA (etapa `selfie`, 6b) — foto em media/enrollment/<ext>/ + validação IA
+    # 3 estados + revisão. `taken_at` = quando o aluno enviou (GET /selfie, plan/13).
     selfie_image = models.CharField(max_length=255, null=True, blank=True)
+    selfie_taken_at = models.DateTimeField("selfie enviada em", null=True, blank=True)
     selfie_verified = models.BooleanField(
         default=False
     )  # = selfie_status aprovado (compat)

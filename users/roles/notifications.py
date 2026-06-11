@@ -80,7 +80,12 @@ _MESSAGES: dict[str, str] = {
         "Seja muito bem-vindo(a), {name}!"
     ),
     "enrollment.selfie_rejected": (
-        "{name}, sua selfie não pôde ser confirmada. Envie uma nova foto, nítida e mostrando o rosto, {name}."
+        "{name}, sua selfie não pôde ser confirmada: {detail}\n"
+        "Envie uma nova foto pelo aplicativo, {name}."
+    ),
+    "enrollment.selfie_approved": (
+        "Tudo certo, {name}! ✅ Sua foto foi aprovada e sua matrícula está assinada. "
+        "Agora é com a gente, {name} — avisamos assim que sua matrícula for liberada."
     ),
     "enrollment.selfie_in_review": (
         "{name}, a selfie de uma matrícula precisa da sua análise — a IA ficou em dúvida. "

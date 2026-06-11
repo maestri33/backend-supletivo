@@ -24,3 +24,9 @@ def fill_rg_data(enrollment_id: int) -> None:
     """Pós-aprovação humana (decide): OCR+extração best-effort SÓ pra preencher campos — sem veto."""
     service.run_rg_fill(enrollment_id)
     logger.info("enrollment.task_rg_filled", enrollment_id=enrollment_id)
+
+
+def validate_selfie(enrollment_id: int) -> None:
+    """Valida a selfie/assinatura (liveness → face-match vs documento → instruções se reprovar)."""
+    service.run_selfie_validation(enrollment_id)
+    logger.info("enrollment.task_selfie_validated", enrollment_id=enrollment_id)
