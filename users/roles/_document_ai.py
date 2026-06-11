@@ -23,20 +23,19 @@ REVIEW = "review"
 
 _AI_DOWN = "IA indisponível no momento — enviado para revisão manual do coordenador."
 
-# lado da foto → o que a visão deve enxergar (front/back = par tradicional; full = documento inteiro)
+# lado esperado da foto (CONTEXTO no prompt — não é critério rígido de reprovação; o aluno pode
+# trocar os lados e o conteúdo se resolve na extração/biometria). front/back = par; full = inteiro.
 _SIDE_DESC = {
     "front": (
-        "a FRENTE de uma carteira de identidade brasileira (RG ou CIN) — o lado que "
-        "contém a FOTO do titular"
+        "a FRENTE da carteira — o lado com a FOTO do titular, a impressão digital, a assinatura "
+        "e o cabeçalho (REPÚBLICA FEDERATIVA DO BRASIL / órgão emissor)"
     ),
     "back": (
-        "o VERSO de uma carteira de identidade brasileira (RG ou CIN) — o lado com os "
-        "dados (número do registro, filiação, naturalidade, data de expedição)"
+        "o VERSO da carteira — o lado dos dados: REGISTRO GERAL, NOME, FILIAÇÃO, NATURALIDADE, "
+        "DOC DE ORIGEM, DATA DE EXPEDIÇÃO/NASCIMENTO (no modelo antigo verde, traz a referência "
+        "à 'LEI Nº 7.116 DE 29/08/83')"
     ),
-    "full": (
-        "uma carteira de identidade brasileira (RG ou CIN) COMPLETA — frente E verso "
-        "visíveis na mesma imagem"
-    ),
+    "full": "a carteira INTEIRA (frente e verso na mesma imagem)",
 }
 
 # Campos que a extração devolve (todos podem vir null — a IA NÃO inventa).
@@ -81,12 +80,17 @@ def check_photo(
     from integrations.ai import service as ai
 
     prompt = (
-        f"Esta imagem mostra {_SIDE_DESC[side]}? Avalie também a LEGIBILIDADE: a imagem deve "
-        "estar nítida, com o documento inteiro (sem cortes) e sem reflexos ou sombras que "
-        "escondam os dados. Responda em português começando OBRIGATORIAMENTE com a palavra "
-        "APROVADO (se for esse documento e estiver legível) ou REPROVADO (caso contrário), "
-        "seguida de um motivo curto e claro (ex.: 'não é um RG', 'imagem desfocada', "
-        "'documento cortado')."
+        f"Esta imagem deve mostrar {_SIDE_DESC[side]} de uma CARTEIRA DE IDENTIDADE brasileira "
+        "(RG ou a nova CIN), de qualquer modelo — inclusive o ANTIGO (cartão verde), que É um RG "
+        "válido. NÃO confunda com CNH: a CNH tem elementos de HABILITAÇÃO (categoria A/B/C, "
+        "validade, 'PERMISSÃO PARA DIRIGIR') — só trate como CNH se vir ESSES elementos. "
+        "A imagem pode ter sido endireitada automaticamente; NÃO reprove por orientação/rotação. "
+        "Documento plastificado costuma ter brilho/reflexo — só é problema se ESCONDER os dados. "
+        "Reprove APENAS se: (a) não for uma carteira de identidade (RG/CIN) — ex.: CNH, QR code, "
+        "selfie, outro papel; ou (b) os dados estiverem genuinamente ilegíveis (muito "
+        "desfocado/escuro ou cortado escondendo informação). NÃO reprove só porque parece ser o "
+        "outro lado da carteira. Responda em português começando OBRIGATORIAMENTE com APROVADO "
+        "ou REPROVADO, seguida de um motivo curto e claro."
     )
     try:
         desc = ai.describe_image(
@@ -101,6 +105,41 @@ def check_photo(
     if "APROVADO" in head:
         return APPROVED, desc
     return REVIEW, desc or "IA não foi conclusiva — enviado para revisão manual."
+
+
+def fix_orientation(
+    image_path: str, *, mime_type: str = "image/jpeg", caller: str
+) -> bool:
+    """Endireita a foto pela orientação EXIF do celular (decisão do Victor 2026-06-11: tratar a
+    imagem antes de validar). REGRAVA reta no mesmo arquivo (formato preservado). Retorna se mudou.
+
+    Só EXIF (de propósito): é o que o celular grava ao fotografar de lado, resolve o caso real e é
+    determinístico. NÃO tentamos adivinhar rotação de imagem SEM EXIF — a visão e o OCR (Google
+    Vision) leem o documento em qualquer orientação, então endireitar é melhoria de UX/biometria,
+    não pré-requisito da validação. Best-effort: erro → não mexe na imagem."""
+    from pathlib import Path
+
+    from PIL import Image, ImageOps
+
+    try:
+        img = Image.open(image_path)
+        exif = img.getexif()
+        orientation = exif.get(0x0112, 1)  # tag Orientation; 1 = normal (nada a fazer)
+        if orientation == 1:
+            return False
+        fixed = ImageOps.exif_transpose(img).convert("RGB")
+        fmt = "PNG" if Path(image_path).suffix.lower() == ".png" else "JPEG"
+        save_kwargs = {"quality": 90} if fmt == "JPEG" else {}
+        fixed.save(image_path, format=fmt, **save_kwargs)
+        logger.info(
+            "document_ai.orientation_fixed", caller=caller, exif_orientation=orientation
+        )
+        return True
+    except Exception as exc:  # noqa: BLE001 — endireitar é apoio; nunca quebra o pipeline
+        logger.warning(
+            "document_ai.fix_orientation_failed", caller=caller, error=str(exc)[:200]
+        )
+        return False
 
 
 def ocr_images(images: list[bytes], *, caller: str) -> str:

@@ -360,10 +360,14 @@ def run_rg_validation(enrollment_id: int, slot: str) -> None:
         fp = Path(settings.MEDIA_ROOT) / path
         if not fp.exists():
             return
+        mime = _MIME_BY_EXT.get(fp.suffix.lstrip(".").lower(), "image/jpeg")
+        # pré-tratamento (Victor 2026-06-11): endireita a foto ANTES de validar — EXIF + auto-rotação
+        # por IA. Melhora visão/OCR/biometria e deixa o documento guardado reto. Best-effort.
+        doc_ai.fix_orientation(str(fp), mime_type=mime, caller="enrollment.rg")
         status, reason = doc_ai.check_photo(
             fp.read_bytes(),
             side=_RG_SLOT_SIDE[slot],
-            mime_type=_MIME_BY_EXT.get(fp.suffix.lstrip(".").lower(), "image/jpeg"),
+            mime_type=mime,
             caller="enrollment.rg",
         )
         # merge FRESCO: a visão leva 10–60s e frente+verso viram 2 tasks em workers paralelos —
