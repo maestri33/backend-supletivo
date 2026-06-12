@@ -4,15 +4,24 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
-        ('users', '0009_user_token_version'),
+        ("users", "0009_user_token_version"),
     ]
 
     operations = [
         migrations.AlterField(
-            model_name='studentdocument',
-            name='validation_status',
-            field=models.CharField(choices=[('pending', 'aguardando IA'), ('approved', 'aprovado'), ('rejected', 'reprovado'), ('review', 'em revisão (coordenador decide)')], db_index=True, default='pending', max_length=20),
+            model_name="studentdocument",
+            name="validation_status",
+            field=models.CharField(
+                choices=[
+                    ("pending", "aguardando IA"),
+                    ("approved", "aprovado"),
+                    ("rejected", "reprovado"),
+                    ("review", "em revisão (coordenador decide)"),
+                ],
+                db_index=True,
+                default="pending",
+                max_length=20,
+            ),
         ),
     ]

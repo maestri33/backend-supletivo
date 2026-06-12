@@ -4,15 +4,14 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
-        ('users', '0008_checkout_short_token'),
+        ("users", "0008_checkout_short_token"),
     ]
 
     operations = [
         migrations.AddField(
-            model_name='user',
-            name='token_version',
+            model_name="user",
+            name="token_version",
             field=models.PositiveIntegerField(default=0),
         ),
     ]
