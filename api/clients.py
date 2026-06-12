@@ -11,7 +11,6 @@ from __future__ import annotations
 from typing import Literal
 
 from ninja import Field, File, Router, Schema
-from ninja.errors import HttpError
 from ninja.files import UploadedFile
 
 from api.auth import require_roles
@@ -19,12 +18,38 @@ from api.base import build_group
 from users.auth import interface as auth_iface
 from users.auth.jwt import service as jwt_service
 from users.auth.models import User
+from users.exceptions import Forbidden, NotFound, Unauthorized, ValidationError
 from users.roles import interface as roles
 from users.roles.enrollment import interface as enrollment_iface
 from users.roles.lead import interface as lead_iface
 from users.roles.student import interface as student_iface
 
-api = build_group("clients", "Funil do aluno: lead, enrollment, student, veteran.")
+# Registry de `code` de erro (proposta API #5): TODO 4xx sai `{detail, code, …extra}` — o front
+# roteia por `switch(code)`, nunca parseando `detail`. Vai na descrição do grupo → OpenAPI.
+_ERROR_REGISTRY = """
+### Códigos de erro (`{detail, code, …extra}`)
+
+| code | quando | extras |
+|---|---|---|
+| `WRONG_STATUS` | ação fora da etapa do wizard (409) | `expected_status` (etapa a abrir), `missing_fields` (se faltam campos do RG/perfil) |
+| `VALIDATION_ERROR` | body/query fora do schema (422) | `detail` = lista do pydantic |
+| `SLOT_INVALID` | slot de foto desconhecido (422) | — |
+| `MISSING_FIELD` | faltou cpf/phone/external_id no check (422) | — |
+| `CPF_EXISTS` / `PHONE_EXISTS` / `EMAIL_EXISTS` | cadastro duplicado (409) | — |
+| `CPF_INVALID` / `PHONE_INVALID` / `CPF_NOT_FOUND` | dado rejeitado na validação (422) | — |
+| `CPF_SERVICE_DOWN` / `PHONE_SERVICE_DOWN` / `CEP_SERVICE_DOWN` | serviço externo fora (502) | — |
+| `CEP_NOT_FOUND` / `STATE_INVALID` | endereço inválido (422) | — |
+| `ENROLLMENT_NOT_FOUND` / `LEAD_NOT_FOUND` / `CHECKOUT_NOT_FOUND` / `USER_NOT_FOUND` / `STUDENT_NOT_FOUND` / `ADDRESS_NOT_FOUND` | recurso não existe (404) | — |
+| `UNAUTHORIZED` / `SESSION_EXPIRED` | sem token ou token vencido (401) | — |
+| `FORBIDDEN_ROLE` / `NOT_IN_FUNNEL` | papel sem acesso à rota (403) | — |
+| `RATE_LIMITED` | espera do OTP (429) | `retry_after_s` |
+| `ERROR` | fallback (erro sem code próprio) | — |
+"""
+
+api = build_group(
+    "clients",
+    "Funil do aluno: lead, enrollment, student, veteran.\n" + _ERROR_REGISTRY,
+)
 
 # roles do funil do aluno, mais avançada primeiro (login emite JWT com TODAS as ativas).
 _FUNNEL_ROLES = ("veteran", "student", "enrollment", "lead")
@@ -52,7 +77,9 @@ class CheckoutOut(Schema):
 
 
 class LeadOut(Schema):
-    external_id: str
+    external_id: str = Field(
+        description="external_id do LEAD (≠ do user — proposta #8)"
+    )
     status: str
     checkout: CheckoutOut | None = None
 
@@ -67,7 +94,10 @@ class CheckIn(Schema):
 
 class CheckOut(Schema):
     found: bool
-    external_id: str | None = None
+    external_id: str | None = Field(
+        None,
+        description="external_id do USER (é o que o /auth/login espera — proposta #8)",
+    )
     otp_sent: bool
     otp_wait: int | None = None
     whatsapp: bool | None = None
@@ -75,7 +105,7 @@ class CheckOut(Schema):
 
 
 class LoginIn(Schema):
-    external_id: str
+    external_id: str = Field(description="external_id do USER (veio do /auth/check)")
     otp: str
 
 
@@ -112,7 +142,9 @@ class LeadCustomerOut(Schema):
 
 
 class LeadPromoterOut(Schema):
-    external_id: str
+    external_id: str = Field(
+        description="external_id do USER do promotor (o mesmo do `?ref=` da landing — proposta #8)"
+    )
     name: str | None = None
 
 
@@ -130,7 +162,9 @@ class LeadSelfCheckoutOut(Schema):
 
 
 class LeadMeOut(Schema):
-    external_id: str
+    external_id: str = Field(
+        description="external_id do LEAD (≠ do user — proposta #8)"
+    )
     status: str = Field(description="pending | paid | failed")
     failed_reason: str | None = None
     created_at: str
@@ -172,7 +206,7 @@ class StudentDocumentOut(Schema):
 
 
 class PendencyOut(Schema):
-    external_id: str
+    external_id: str = Field(description="external_id da PENDÊNCIA (proposta #8)")
     kind: str
     description: str | None = None
     amount_cents: int | None = None
@@ -188,7 +222,9 @@ class StudentDiplomaOut(Schema):
 
 
 class StudentMeOut(Schema):
-    external_id: str
+    external_id: str = Field(
+        description="external_id do STUDENT (≠ do user, ≠ da matrícula — proposta #8)"
+    )
     status: str = Field(
         description="awaiting_documents | documents_under_review | exam_released | exam_scheduled "
         "| exam_failed | awaiting_documentation_dispatch | pending | awaiting_diploma_issuance "
@@ -248,11 +284,13 @@ def login(request, payload: LoginIn):
     student; veteran exige student) e emite JWT com TODAS as roles ativas."""
     user = User.objects.filter(external_id=payload.external_id).first()
     if user is None:
-        raise HttpError(404, "Usuário não encontrado.")
+        raise NotFound("Usuário não encontrado.", code="USER_NOT_FOUND")
     active = roles.active_roles(user)
     funnel_role = next((r for r in _FUNNEL_ROLES if r in active), None)
     if funnel_role is None:
-        raise HttpError(403, "Usuário não faz parte do funil do aluno.")
+        raise Forbidden(
+            "Usuário não faz parte do funil do aluno.", code="NOT_IN_FUNNEL"
+        )
     return auth_iface.login(
         external_id=payload.external_id, role=funnel_role, otp=payload.otp
     )
@@ -266,7 +304,9 @@ def refresh(request, payload: RefreshIn):
     try:
         return jwt_service.refresh(payload.refresh_token)
     except jwt_service.TokenError as exc:
-        raise HttpError(401, "Sessão expirada — faça login novamente.") from exc
+        raise Unauthorized(
+            "Sessão expirada — faça login novamente.", code="SESSION_EXPIRED"
+        ) from exc
 
 
 # ── clients/lead — a fase LEAD do funil: estado + a URL (leitura do PRÓPRIO dado) ─
@@ -277,7 +317,7 @@ def _lead_guard(request):
     require_roles(request.auth, *_FUNNEL_ROLES)
     lead = lead_iface.get_for_user_external_id(request.auth.external_id)
     if lead is None:
-        raise HttpError(404, "Lead não encontrado.")
+        raise NotFound("Lead não encontrado.", code="LEAD_NOT_FOUND")
     return lead
 
 
@@ -292,7 +332,7 @@ def lead_checkout_url(request):
     """Só a URL de pagamento/recibo do lead (link único ✦ que redireciona checkout↔recibo)."""
     url = lead_iface.checkout_url_for(_lead_guard(request))
     if url is None:
-        raise HttpError(404, "Checkout não encontrado.")
+        raise NotFound("Checkout não encontrado.", code="CHECKOUT_NOT_FOUND")
     return {"url": url}
 
 
@@ -487,7 +527,7 @@ def enrollment_me(request):
     ext = _enr_guard(request)
     enr = enrollment_iface.get_for_user_external_id(ext)
     if enr is None:
-        raise HttpError(404, "Matrícula não encontrada.")
+        raise NotFound("Matrícula não encontrada.", code="ENROLLMENT_NOT_FOUND")
     return enrollment_iface.me_dict(enr)
 
 
@@ -521,7 +561,9 @@ def enrollment_rg_photo(request, slot: str, file: UploadedFile = File(...)):
     ext = _enr_guard(request)
     real_slot = _RG_SLOTS.get(slot)
     if real_slot is None:
-        raise HttpError(422, "Slot inválido. Aceitos: front, back, full.")
+        raise ValidationError(
+            "Slot inválido. Aceitos: front, back, full.", code="SLOT_INVALID"
+        )
     ack = enrollment_iface.upload_rg_photo(
         user_external_id=ext, slot=real_slot, upload=file
     )
@@ -640,7 +682,7 @@ def _student_guard(request) -> str:
 def _student_dict(ext: str):
     s = student_iface.get_for_user_external_id(ext)
     if s is None:
-        raise HttpError(404, "Aluno não encontrado.")
+        raise NotFound("Aluno não encontrado.", code="STUDENT_NOT_FOUND")
     return student_iface.to_dict(s)
 
 

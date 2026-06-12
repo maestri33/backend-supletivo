@@ -12,10 +12,10 @@ tripas do `decode`/`issue`). O `AccessToken` do ninja-jwt já rejeita token expi
 from __future__ import annotations
 
 import structlog
-from ninja.errors import HttpError
 from ninja.security import HttpBearer
 
 from users.auth.jwt import service as jwt_service
+from users.exceptions import Forbidden
 
 logger = structlog.get_logger()
 
@@ -47,9 +47,9 @@ class JWTAuth(HttpBearer):
 
 
 def require_roles(principal: Principal, *roles: str) -> None:
-    """Gate de role por rota: 403 se o principal não tem nenhuma das `roles`."""
+    """Gate de role por rota: 403 `{detail, code:FORBIDDEN_ROLE}` se não tem nenhuma das `roles`."""
     if roles and not principal.has_any(roles):
-        raise HttpError(403, "Acesso negado para o seu papel.")
+        raise Forbidden("Acesso negado para o seu papel.", code="FORBIDDEN_ROLE")
 
 
 def require_superuser(principal: Principal):
@@ -67,5 +67,5 @@ def require_superuser(principal: Principal):
         .first()
     )
     if user is None or not user.is_superuser:
-        raise HttpError(403, "Acesso restrito ao staff.")
+        raise Forbidden("Acesso restrito ao staff.", code="STAFF_ONLY")
     return user
