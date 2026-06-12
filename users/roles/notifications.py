@@ -104,6 +104,24 @@ _MESSAGES: dict[str, str] = {
         "Boa notícia, {name}! ✅ Seu RG foi aprovado e sua matrícula segue em frente. "
         "Continue o preenchimento, {name}."
     ),
+    # Ciclo da TAXA da matrícula (plan/14, Victor 2026-06-12) — TODOS pro COORDENADOR, nunca pro
+    # aluno (política interna do polo). Sem TTS (não é momento especial). {student_name} = o aluno.
+    "enrollment.fee_paid": (
+        "{name}, a 1ª parcela da taxa de {student_name} foi PAGA ({valor}). ✅ "
+        "A instituição já pode liberar o login e a senha — conclua a matrícula no painel, {name}."
+    ),
+    "enrollment.fee_scheduled": (
+        "{name}, a 2ª parcela da taxa de {student_name} ({valor}) foi agendada para {due_date}. "
+        "O pagamento sai sozinho no vencimento, {name}."
+    ),
+    "enrollment.fee_due_paid": (
+        "{name}, a 2ª parcela da taxa de {student_name} ({valor}) foi PAGA no vencimento. ✅ "
+        "Taxa quitada, {name} — nada mais a fazer."
+    ),
+    "enrollment.fee_problem": (
+        "{name}, deu problema na taxa de {student_name}: {detail} "
+        "Confira no painel, {name}, e tente de novo se for o caso."
+    ),
     # ── CANDIDATE → TRAINING → PROMOTER (funil do colaborador) ────────────────
     "candidate.training_started": (
         "Cadastro concluído, {name}! 🎓 Seu treinamento começou — acesse para estudar e responder "

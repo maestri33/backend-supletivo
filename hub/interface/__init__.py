@@ -160,3 +160,11 @@ def set_coordinator(*, hub_external_id: str, coordinator_external_id: str) -> Hu
         coordinator=coordinator_external_id,
     )
     return hub
+
+
+def coordinated_by(user):
+    """O hub que `user` COORDENA de fato (FK `Hub.coordinator`) — ou None.
+
+    Diferente do `hub_of` (que resolve o polo de um PROMOTOR com fallback pro padrão): aqui é o
+    gate duro do coordenador (plan/14) — sem hub coordenado, não há login de coordenador."""
+    return Hub.objects.filter(coordinator=user).order_by("created_at").first()

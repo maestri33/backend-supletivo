@@ -384,3 +384,27 @@ def _notify_training_started(cand: Candidate) -> None:
         )
     except Exception as exc:  # noqa: BLE001
         logger.warning("candidate.notify_failed", error=str(exc))
+
+
+def list_selfie_reviews_for_hub(*, hub) -> list[dict]:
+    """Candidatos do polo com a selfie parada em REVISÃO (decisão do coordenador — plan/14).
+
+    Cada item aponta pro POST de decisão que já existe (`/candidates/{ext}/selfie/decide`)."""
+    from users.roles._selfie import SelfieStatus
+
+    out = []
+    qs = (
+        Candidate.objects.filter(hub=hub, selfie_status=SelfieStatus.REVIEW)
+        .select_related("user")
+        .order_by("updated_at")
+    )
+    for cand in qs:
+        p = profiles.get(cand.user)
+        out.append(
+            {
+                "external_id": str(cand.external_id),
+                "name": p.name if p else None,
+                "since": cand.updated_at.isoformat(),
+            }
+        )
+    return out

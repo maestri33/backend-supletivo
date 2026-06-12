@@ -6,6 +6,7 @@ from users.roles.candidate.service import (
     CandidateError,
     create_candidate,
     decide_selfie,
+    list_selfie_reviews_for_hub,
     get_address,
     get_for_user_external_id,
     set_address_cep,
@@ -32,4 +33,5 @@ __all__ = [
     "set_pix",
     "set_selfie",
     "decide_selfie",
+    "list_selfie_reviews_for_hub",
 ]

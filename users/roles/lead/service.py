@@ -603,3 +603,18 @@ def lead_to_dict(lead: Lead) -> dict:
         "payment_link": checkout_links.short_url(c.short_token) if c else None,
         "receipt_url": c.receipt_url if c else None,
     }
+
+
+def get_lead_for_hub(*, external_id: str, hub) -> Lead | None:
+    """Um lead específico, SÓ se pertence ao polo — a MESMA régua da listagem (`list_leads`):
+    hub do promotor que captou OU hub da matrícula pós-pagamento. None = não existe / não é do
+    polo (a borda devolve 404 sem vazar existência pra outro coordenador — plan/14)."""
+    from django.db.models import Q
+
+    return (
+        Lead.objects.filter(external_id=external_id)
+        .filter(Q(promoter__promoter__hub=hub) | Q(user__enrollment__hub=hub))
+        .select_related("user", "promoter", "checkout")
+        .distinct()
+        .first()
+    )

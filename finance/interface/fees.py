@@ -21,8 +21,27 @@ from integrations.bank.asaas import qrpay
 
 logger = structlog.get_logger()
 
-# Reexporta o enum de origem da fila pra o caller (ex.: enrollment) não furar a fronteira do interface (§3).
+# Reexporta os enums da fila pra o caller (ex.: enrollment) não furar a fronteira do interface (§3).
 SourceType = PaymentRequest.SourceType
+PaymentStatus = PaymentRequest.Status
+
+
+def latest_fee_request(reference_prefix: str) -> PaymentRequest | None:
+    """A tentativa MAIS RECENTE de uma fee pela FAMÍLIA de referência (prefixo determinístico).
+
+    É como o caller (ex.: matrícula, plan/14) lê os FATOS da taxa — paga/agendada/falhou — sem furar
+    a fronteira do finance (§3). Re-tentativas após falha ganham referência NOVA (`_r2`, `_r3`…),
+    porque o Asaas é idempotente por referência: reusar a ref de uma falha devolveria a falha velha
+    (gotcha provado no motor de payout)."""
+    return (
+        PaymentRequest.objects.filter(
+            external_reference__startswith=reference_prefix,
+            kind=PaymentRequest.Kind.FEE,
+        )
+        .order_by("-created_at")
+        .first()
+    )
+
 
 SP_TZ = ZoneInfo("America/Sao_Paulo")
 # Hora do dia em que pagamos uma despesa AGENDADA pelo vencimento do QR (horário comercial SP).
@@ -79,6 +98,37 @@ def request_fee_payment(
     return pr
 
 
+def retry_fee_payment(
+    reference_prefix: str, *, qr_payload, amount, scheduled_for=None
+) -> PaymentRequest:
+    """NOVA tentativa de uma fee que FALHOU: cria OUTRA entrada na fila com referência fresca
+    (`<prefixo>_rN`) — a falhada fica na fila como auditoria. Referência nova porque o Asaas é
+    idempotente por referência (reusar a da falha devolveria a falha velha). Só permite re-tentar
+    se a tentativa mais recente está FAILED (plan/14: o coordenador re-posta após um B.O.)."""
+    latest = latest_fee_request(reference_prefix)
+    if latest is None:
+        raise ValueError(f"fee inexistente: {reference_prefix}")
+    if latest.status != PaymentRequest.Status.FAILED:
+        raise ValueError(
+            f"fee não está em falha (status={latest.status}) — nada a re-tentar"
+        )
+    attempt = (
+        PaymentRequest.objects.filter(
+            external_reference__startswith=reference_prefix
+        ).count()
+        + 1
+    )
+    return request_fee_payment(
+        amount=amount,
+        qr_payload=qr_payload,
+        supplier_name=latest.supplier_name,
+        scheduled_for=scheduled_for,
+        external_reference=f"{reference_prefix}_r{attempt}",
+        source_type=latest.source_type,
+        source_external_id=latest.source_external_id,
+    )
+
+
 def _due_to_scheduled(due_date: str) -> datetime:
     """Converte o `dueDate` do Asaas no instante de pagamento: 09:00 (SP) do dia de vencimento.
 
@@ -106,7 +156,12 @@ def plan_qr_payment(*, qr_payload, amount=None) -> dict:
     Devolve `{"amount": <reais>, "scheduled_for": datetime|None, "due_date": str|None}`
     (`scheduled_for=None` ⇒ imediato).
     """
-    info = qrpay.decode_qr(qr_payload)
+    try:
+        info = qrpay.decode_qr(qr_payload)
+    except qrpay.QrPayError as exc:
+        # normaliza na FRONTEIRA (§3): o caller (ex.: enrollment) só conhece ValueError —
+        # QR lixo/ilegível vira erro de domínio (422), não 500.
+        raise ValueError(f"QR ilegível ou inválido ({exc})") from exc
     if not info.get("canBePaid", False):
         reason = info.get("cannotBePaidReason") or "motivo não informado pelo Asaas"
         raise ValueError(f"QR não pode ser pago: {reason}")

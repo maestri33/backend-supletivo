@@ -30,6 +30,10 @@ class Enrollment(ExternalIdModel):
         EDUCATION = "education", "dados escolares"
         SELFIE = "selfie", "selfie (assinatura da matrícula)"
         AWAITING_RELEASE = "awaiting_release", "aguardando liberação"
+        # fase da TAXA (plan/14, Victor 2026-06-12) — INTERNA do polo: o aluno NUNCA vê estas duas
+        # (na visão dele aparecem como `awaiting_release` — política interna; máscara no service).
+        FEE_PAID = "fee_paid", "1ª parcela da taxa paga"
+        FEE_SCHEDULED = "fee_scheduled", "2ª parcela da taxa agendada"
         COMPLETED = "completed", "concluída"
 
     user = models.OneToOneField(

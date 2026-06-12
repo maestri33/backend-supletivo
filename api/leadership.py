@@ -1,21 +1,28 @@
-"""Grupo `leadership` (PLACEHOLDER) — coordenador do polo (cargo de confiança). Toda ação do
-coordenador é sobre o `hub/`.
+"""Grupo `leadership` — coordenador do polo (cargo de confiança). Toda ação do coordenador é
+sobre o `hub/` (plan/14, Victor 2026-06-12).
 
-- Funil do aluno: liberar a matrícula (`awaiting_release` → student).
-- Funil do colaborador: autoria de matéria do treino (também) + **entrevista** (aprovar/rejeitar o trainee
-  do seu polo → promove a promotor).
-
-⚠️ NÃO TESTADO (nem in-process completo, nem com fluxo real).
+- **Entrada**: `/auth/check` (diz se coordena um polo; quem não coordena é redirecionado pra área
+  da própria role) + `/auth/login` (OTP → JWT; NÃO há registro — só o staff cadastra polo e
+  define o coordenador) + `/auth/refresh`.
+- **Consultas**: leads do polo (lista + detalhe COMPLETO), matrículas (lista + filtro + detalhe
+  rico) e `/reviews` (tudo que espera análise/decisão do coordenador, num lugar só).
+- **Funil do aluno**: a fase da TAXA em 2 parcelas (`fee/pay` à vista + `fee/schedule` pro
+  vencimento do QR) → `conclude` (credenciais da plataforma → promove a student). O aluno NUNCA
+  sabe da taxa (política interna do polo).
+- **Funil do colaborador**: autoria de matéria do treino + entrevista (aprovar/rejeitar trainee).
 """
 
 from __future__ import annotations
 
-from ninja import Schema
+from ninja import Field, Router, Schema
 from ninja.errors import HttpError
 
 from api.auth import require_roles
 from api.base import build_group
+from users.auth import interface as auth_iface
+from users.auth.jwt import service as jwt_service
 from users.auth.models import User
+from users.exceptions import Forbidden, NotFound, Unauthorized
 from hub import interface as hub_iface
 from users.roles.candidate import interface as candidate_iface
 from users.roles.enrollment import interface as enrollment_iface
@@ -25,6 +32,11 @@ from users.roles.training import interface as training_iface
 
 api = build_group(
     "leadership", "Coordenador do polo (hub): aprovações, acesso, taxas, diploma."
+)
+
+_NOT_COORDINATOR_DETAIL = (
+    "Você não pode entrar como coordenador: não coordena nenhum polo. "
+    "Faça seu login na área da sua função."
 )
 
 
@@ -39,51 +51,241 @@ def _coordinator(request) -> User:
     return user
 
 
+def _coordinator_hub(coordinator: User):
+    """O polo que o coordenador COORDENA (gate duro plan/14 — sem fallback de promotor/padrão)."""
+    hub = hub_iface.coordinated_by(coordinator)
+    if hub is None:
+        raise Forbidden(_NOT_COORDINATOR_DETAIL, code="NOT_HUB_COORDINATOR")
+    return hub
+
+
+# ── entrada do coordenador (público): check → login (OTP) → refresh — plan/14 ───────────────
+class CheckIn(Schema):
+    cpf: str | None = None
+    phone: str | None = None
+    external_id: str | None = None  # re-dispara OTP de usuário já conhecido (do USER)
+
+
+class HubOut(Schema):
+    external_id: str
+    brand: str
+
+
+class CoordinatorCheckOut(Schema):
+    found: bool
+    external_id: str | None = Field(
+        None, description="external_id do USER (é o que o /auth/login espera)"
+    )
+    otp_sent: bool = False
+    otp_wait: int | None = None
+    whatsapp: bool | None = None
+    roles: list[str] | None = None
+    is_coordinator: bool = False
+    hub: HubOut | None = Field(
+        None, description="o polo que a pessoa coordena (se coordena)"
+    )
+    detail: str | None = Field(
+        None,
+        description="presente quando a pessoa existe mas NÃO coordena polo — o front "
+        "redireciona pra área de login da role dela (em `roles`), levando o external_id",
+    )
+
+
+class LoginIn(Schema):
+    external_id: str = Field(description="external_id do USER (veio do /auth/check)")
+    otp: str
+
+
+class RefreshIn(Schema):
+    refresh_token: str
+
+
+class TokenOut(Schema):
+    access_token: str
+    refresh_token: str
+    token_type: str
+
+
+auth_router = Router(tags=["auth"])
+
+
+@auth_router.post("/check", response=CoordinatorCheckOut, auth=None)
+def check(request, payload: CheckIn):
+    """REUSA o check geral (acha a pessoa e dispara o OTP normal — §5: vaza existência de
+    propósito) e soma a resposta do coordenador: coordena um polo? Quem NÃO coordena recebe
+    `detail` + `roles` — o front redireciona pra área certa levando o `external_id`, e a pessoa
+    loga lá com o MESMO OTP já enviado (palavra do Victor 2026-06-12)."""
+    result = auth_iface.check(
+        cpf=payload.cpf, phone=payload.phone, external_id=payload.external_id
+    )
+    if not result.get("found"):
+        return result
+    user = User.objects.filter(
+        external_id=result["external_id"], is_active=True
+    ).first()
+    hub = hub_iface.coordinated_by(user) if user else None
+    if hub is None:
+        return {**result, "is_coordinator": False, "detail": _NOT_COORDINATOR_DETAIL}
+    return {
+        **result,
+        "is_coordinator": True,
+        "hub": {"external_id": str(hub.external_id), "brand": hub.brand},
+    }
+
+
+@auth_router.post("/login", response=TokenOut, auth=None)
+def login(request, payload: LoginIn):
+    """Login do COORDENADOR (OTP do check → JWT). NÃO há registro neste grupo: só o staff cadastra
+    o polo e define quem coordena. Quem não coordena polo → 403 com a mesma mensagem do check."""
+    user = User.objects.filter(external_id=payload.external_id, is_active=True).first()
+    if user is None:
+        raise NotFound("Usuário não encontrado.", code="USER_NOT_FOUND")
+    if hub_iface.coordinated_by(user) is None:
+        raise Forbidden(_NOT_COORDINATOR_DETAIL, code="NOT_HUB_COORDINATOR")
+    return auth_iface.login(
+        external_id=payload.external_id, role="coordinator", otp=payload.otp
+    )
+
+
+@auth_router.post("/refresh", response=TokenOut, auth=None)
+def refresh(request, payload: RefreshIn):
+    """Renova o par de tokens (rotação) — espelho do clients, pro front do coordenador não
+    depender de outro grupo."""
+    try:
+        return jwt_service.refresh(payload.refresh_token)
+    except jwt_service.TokenError as exc:
+        raise Unauthorized(
+            "Sessão expirada — faça login novamente.", code="SESSION_EXPIRED"
+        ) from exc
+
+
+api.add_router("/auth", auth_router)
+
+
 # ── leads do polo (coordenador vê os leads do SEU hub) ──────────────────────
 @api.get("/leads", tags=["lead"])
 def list_hub_leads(request, status: str | None = None):
     """Lista os leads do polo do coordenador (link de pagamento + comprovante). Filtro opcional por status."""
     coordinator = _coordinator(request)
-    hub = hub_iface.hub_of(coordinator)
+    hub = _coordinator_hub(coordinator)
     leads = lead_iface.list_leads(hub=hub, status=status)
     return [lead_iface.lead_to_dict(lead) for lead in leads]
 
 
-# ── funil do aluno: liberação da matrícula ──────────────────────────────────
-class ReleaseIn(Schema):
-    # dados de acesso à plataforma de estudo (campos estruturados — Victor 2026-06-04).
-    platform_url: str | None = None
-    platform_login: str | None = None
-    platform_password: str | None = None
-    platform_notes: str | None = None
-    # QR(s) PIX da taxa do parceiro credenciador (imediato e/ou com vencimento). O backend roteia cada QR
-    # pelo próprio QR e a taxa sai pela fila Asaas; a promoção NÃO espera o pagamento (Victor 2026-06-05).
-    fee_qr_codes: list[str] | None = None
-
-
-class ReleaseOut(Schema):
-    external_id: str
-    status: str
-
-
-@api.post(
-    "/enrollments/{external_id}/release", response=ReleaseOut, tags=["enrollment"]
-)
-def release_enrollment(request, external_id: str, payload: ReleaseIn):
-    """O coordenador do hub libera a matrícula → promove o aluno a `student` (cria o Student)."""
+@api.get("/leads/{external_id}", tags=["lead"])
+def get_hub_lead(request, external_id: str):
+    """Detalhe COMPLETO de um lead do polo — o coordenador vê TUDO (nome, cpf, e-mail, telefone,
+    promotor, checkout com link e recibo — Victor 2026-06-12). 404 se não existe OU não é do polo."""
     coordinator = _coordinator(request)
-    try:
-        enr = enrollment_iface.release(
-            enrollment_external_id=external_id,
-            coordinator=coordinator,
-            platform_url=payload.platform_url,
-            platform_login=payload.platform_login,
-            platform_password=payload.platform_password,
-            platform_notes=payload.platform_notes,
-            fee_qr_codes=payload.fee_qr_codes,
-        )
-    except enrollment_iface.EnrollmentError as exc:
-        raise HttpError(422, str(exc)) from exc
+    hub = _coordinator_hub(coordinator)
+    lead = lead_iface.get_lead_for_hub(external_id=external_id, hub=hub)
+    if lead is None:
+        raise NotFound("Lead não encontrado neste polo.", code="LEAD_NOT_FOUND")
+    return lead_iface.lead_self_dict(lead)
+
+
+# ── matrículas do polo: lista + detalhe + análises pendentes (plan/14) ──────
+@api.get("/enrollments", tags=["enrollment"])
+def list_hub_enrollments(request, status: str | None = None):
+    """Matrículas do polo: status REAL + resumo das 2 parcelas da taxa em cada item.
+    `?status=awaiting_release` = quem terminou o wizard e espera ação do coordenador."""
+    coordinator = _coordinator(request)
+    hub = _coordinator_hub(coordinator)
+    return enrollment_iface.list_for_hub(hub=hub, status=status)
+
+
+@api.get("/enrollments/{external_id}", tags=["enrollment"])
+def get_hub_enrollment(request, external_id: str):
+    """Detalhe COMPLETO de uma matrícula do polo: todas as seções do wizard (visão rica do /me) +
+    status REAL (sem máscara) + situação das 2 parcelas da taxa."""
+    coordinator = _coordinator(request)
+    return enrollment_iface.detail_for_hub(
+        enrollment_external_id=external_id, coordinator=coordinator
+    )
+
+
+@api.get("/reviews", tags=["review"])
+def list_reviews(request):
+    """TUDO que espera análise/decisão do coordenador no polo, num lugar só (plan/14): RG e selfie
+    de matrículas em revisão, selfie de candidatos, documentos de students e entrevistas de
+    trainees. Cada item aponta pro POST de decisão correspondente (que já existe)."""
+    coordinator = _coordinator(request)
+    hub = _coordinator_hub(coordinator)
+    enrollment_reviews = enrollment_iface.list_reviews_for_hub(hub=hub)
+    return {
+        "enrollment_rg": enrollment_reviews["rg"],
+        "enrollment_selfie": enrollment_reviews["selfie"],
+        "candidate_selfie": candidate_iface.list_selfie_reviews_for_hub(hub=hub),
+        "student_documents": student_iface.list_document_reviews_for_hub(hub=hub),
+        "trainees_awaiting_interview": training_iface.list_awaiting_interview_for_hub(
+            hub=hub
+        ),
+    }
+
+
+# ── funil do aluno: fase da TAXA (2 parcelas) → conclusão (plan/14) ─────────
+# Substitui o `/release` antigo (QRs juntos) — descartado pelo Victor 2026-06-12 ("delírio de IA").
+class FeeIn(Schema):
+    qr_code: str = Field(
+        description="QR code PIX (copia-e-cola) da cobrança do credenciador"
+    )
+    amount: str | None = Field(
+        None, description="opcional — sem ele, usa o valor de DENTRO do QR"
+    )
+
+
+class ConcludeIn(Schema):
+    # credenciais da plataforma de estudo — a instituição só as libera com a 1ª parcela PAGA.
+    platform_login: str
+    platform_password: str
+    platform_url: str | None = None
+    platform_notes: str | None = None
+
+
+@api.post("/enrollments/{external_id}/fee/pay", tags=["enrollment"])
+def pay_enrollment_fee(request, external_id: str, payload: FeeIn):
+    """1ª parcela da taxa (À VISTA): valida o QR e dispara o PIX imediato pela fila. O status do
+    matriculado muda quando o pagamento CONFIRMAR pago (`fee_paid`) — e o coordenador é avisado
+    (é a deixa pra buscar as credenciais na instituição). Idempotente: repetir não paga 2×.
+    O aluno NÃO fica sabendo (política interna do polo)."""
+    coordinator = _coordinator(request)
+    return enrollment_iface.pay_fee(
+        enrollment_external_id=external_id,
+        coordinator=coordinator,
+        qr_code=payload.qr_code,
+        amount=payload.amount,
+    )
+
+
+@api.post("/enrollments/{external_id}/fee/schedule", tags=["enrollment"])
+def schedule_enrollment_fee(request, external_id: str, payload: FeeIn):
+    """2ª parcela da taxa (AGENDADA): o vencimento vem de DENTRO do QR (cobrança com vencimento);
+    QR sem vencimento → 422. O status muda NA HORA pra `fee_scheduled`; o PIX dispara sozinho no
+    dia (worker). NÃO depende da 1ª estar paga — a CONCLUSÃO é que exige as duas."""
+    coordinator = _coordinator(request)
+    return enrollment_iface.schedule_fee(
+        enrollment_external_id=external_id,
+        coordinator=coordinator,
+        qr_code=payload.qr_code,
+        amount=payload.amount,
+    )
+
+
+@api.post("/enrollments/{external_id}/conclude", tags=["enrollment"])
+def conclude_enrollment(request, external_id: str, payload: ConcludeIn):
+    """CONCLUSÃO da matrícula: com a 1ª parcela PAGA e a 2ª AGENDADA, o coordenador cadastra o
+    login/senha da plataforma (fornecidos pela instituição) → o aluno vira `student` (promoção
+    atômica; o JWT antigo dele cai — token_version). Falta parcela → 409 FEES_INCOMPLETE dizendo
+    o que falta."""
+    coordinator = _coordinator(request)
+    enr = enrollment_iface.conclude(
+        enrollment_external_id=external_id,
+        coordinator=coordinator,
+        platform_login=payload.platform_login,
+        platform_password=payload.platform_password,
+        platform_url=payload.platform_url,
+        platform_notes=payload.platform_notes,
+    )
     return {"external_id": str(enr.external_id), "status": enr.status}
 
 

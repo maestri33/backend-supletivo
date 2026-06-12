@@ -25,3 +25,10 @@ class UsersConfig(AppConfig):
         from users.roles.lead.hooks import on_payment_paid
 
         core_hooks.register("payment.paid", on_payment_paid)
+
+        # Hooks da TAXA da matrícula (plan/14): o worker do finance dispara 'fee.paid'/'fee.problem'
+        # → a matrícula avança o status (1ª paga → fee_paid) e o COORDENADOR é notificado.
+        from users.roles.enrollment.hooks import on_fee_paid, on_fee_problem
+
+        core_hooks.register("fee.paid", on_fee_paid)
+        core_hooks.register("fee.problem", on_fee_problem)

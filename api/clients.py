@@ -523,9 +523,13 @@ def _enr_guard(request) -> str:
 
 @api.get("/enrollment/me", response=EnrollmentMeOut, tags=["enrollment"])
 def enrollment_me(request):
-    """Estado COMPLETO da matrícula pro resume do wizard: status + cada seção já preenchida, numa chamada."""
-    ext = _enr_guard(request)
-    enr = enrollment_iface.get_for_user_external_id(ext)
+    """Estado COMPLETO da matrícula pro resume do wizard: status + cada seção já preenchida, numa chamada.
+
+    Aceita também o STUDENT (plan/14, Victor 2026-06-12): depois de concluída, o aluno continua
+    enxergando todos os dados da matrícula. A fase da taxa NUNCA aparece aqui (status mascarado —
+    política interna do polo)."""
+    require_roles(request.auth, "enrollment", "student")
+    enr = enrollment_iface.get_for_user_external_id(request.auth.external_id)
     if enr is None:
         raise NotFound("Matrícula não encontrada.", code="ENROLLMENT_NOT_FOUND")
     return enrollment_iface.me_dict(enr)

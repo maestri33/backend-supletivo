@@ -771,3 +771,32 @@ def _notify_coordinator(student: Student, *, event: str, key: str, **ctx) -> Non
         )
     except Exception as exc:  # noqa: BLE001
         logger.warning("student.notify_coord_failed", caller=event, error=str(exc))
+
+
+def list_document_reviews_for_hub(*, hub) -> list[dict]:
+    """Documentos de students do polo parados em REVISÃO (decisão do coordenador — plan/14).
+
+    Cada item traz o PAR (student, documento) que o POST de decisão já existente espera
+    (`/students/{ext}/documents/{doc_ext}/decide`)."""
+    from users.profiles import interface as profiles
+
+    out = []
+    qs = (
+        StudentDocument.objects.filter(
+            student__hub=hub, validation_status=StudentDocument.Validation.REVIEW
+        )
+        .select_related("student", "student__user")
+        .order_by("updated_at")
+    )
+    for doc in qs:
+        p = profiles.get(doc.student.user)
+        out.append(
+            {
+                "student_external_id": str(doc.student.external_id),
+                "document_external_id": str(doc.external_id),
+                "doc_type": doc.doc_type,
+                "name": p.name if p else None,
+                "since": doc.updated_at.isoformat(),
+            }
+        )
+    return out

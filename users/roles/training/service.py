@@ -376,3 +376,31 @@ def _notify_approved(trainee: Trainee) -> None:
         )
     except Exception as exc:  # noqa: BLE001
         logger.warning("training.notify_approved_failed", error=str(exc))
+
+
+def list_awaiting_interview_for_hub(*, hub) -> list[dict]:
+    """Trainees do polo aguardando a ENTREVISTA do coordenador (plan/14). O hub do trainee é o do
+    candidato de origem — a MESMA régua do `approve_interview` (`_hub_of_trainee`).
+
+    Cada item aponta pros POSTs que já existem (`/trainees/{ext}/approve` | `/reject`)."""
+    from users.profiles import interface as profiles
+
+    out = []
+    qs = (
+        Trainee.objects.filter(
+            status=Trainee.Status.AWAITING_INTERVIEW, user__candidate__hub=hub
+        )
+        .select_related("user")
+        .order_by("awaiting_interview_at")
+    )
+    for trainee in qs:
+        p = profiles.get(trainee.user)
+        since = trainee.awaiting_interview_at or trainee.updated_at
+        out.append(
+            {
+                "external_id": str(trainee.external_id),
+                "name": p.name if p else None,
+                "since": since.isoformat() if since else None,
+            }
+        )
+    return out

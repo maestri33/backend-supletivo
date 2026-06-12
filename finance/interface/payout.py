@@ -42,6 +42,29 @@ def _cascade(pr: PaymentRequest, status: str) -> None:
     Commission.objects.filter(payment_request=pr).update(status=status)
 
 
+def _dispatch_fee_hook(
+    pr: PaymentRequest, event: str, *, detail: str | None = None
+) -> None:
+    """Dispara o hook do app de origem quando uma FEE muda de vida (plan/14, CONVENTION §7.3).
+
+    `fee.paid` = pagamento confirmado; `fee.problem` = qualquer B.O. (recusa, sem saldo, falha).
+    Só pra fee COM origem (source_type) — comissão segue pelo `_cascade`. O dispatch isola exceção
+    de handler (não derruba o worker)."""
+    if pr.kind != PaymentRequest.Kind.FEE or not pr.source_type:
+        return
+    from core import hooks as core_hooks
+
+    core_hooks.dispatch(
+        event,
+        external_reference=pr.external_reference,
+        source_type=pr.source_type,
+        source_external_id=str(pr.source_external_id),
+        amount=str(pr.amount),
+        detail=detail,
+        asaas_status=pr.asaas_status or None,
+    )
+
+
 def process_payment_requests() -> dict:
     """Uma passada do worker: envia as filas prontas e reconcilia as enviadas. Devolve um resumo."""
     now = timezone.now()
@@ -112,6 +135,9 @@ def _submit(pr: PaymentRequest, summary: dict) -> None:
             pr.last_error = reason
             pr.save(update_fields=["status", "last_error", "attempts", "updated_at"])
             _cascade(pr, Commission.Status.FAILED)
+            _dispatch_fee_hook(
+                pr, "fee.problem", detail=f"recusado pelo Asaas: {reason}"
+            )
             summary["failed"] += 1
             logger.warning(
                 "finance.payout_rejected", ref=pr.external_reference, error=reason
@@ -124,6 +150,9 @@ def _submit(pr: PaymentRequest, summary: dict) -> None:
             pr.last_error = f"max_attempts: {reason}"
             pr.save(update_fields=["status", "last_error", "attempts", "updated_at"])
             _cascade(pr, Commission.Status.FAILED)
+            _dispatch_fee_hook(
+                pr, "fee.problem", detail=f"esgotou as tentativas: {reason}"
+            )
             summary["failed"] += 1
             return
         pr.last_error = reason
@@ -171,12 +200,14 @@ def _reconcile(pr: PaymentRequest, summary: dict) -> None:
         summary["awaiting"] += 1
         return
 
+    was_awaiting_balance = pr.status == PaymentRequest.Status.AWAITING_BALANCE
     pr.asaas_status = payment.status
     status = (payment.status or "").upper()
     if status == "PAID":
         pr.status = PaymentRequest.Status.PAID
         pr.save(update_fields=["status", "asaas_status", "updated_at"])
         _cascade(pr, Commission.Status.PAID)
+        _dispatch_fee_hook(pr, "fee.paid")
         summary["paid"] += 1
         logger.info(
             "finance.payout_paid", ref=pr.external_reference, amount=str(pr.amount)
@@ -186,6 +217,7 @@ def _reconcile(pr: PaymentRequest, summary: dict) -> None:
         pr.last_error = f"asaas {status}"
         pr.save(update_fields=["status", "asaas_status", "last_error", "updated_at"])
         _cascade(pr, Commission.Status.FAILED)
+        _dispatch_fee_hook(pr, "fee.problem", detail=f"pagamento {status} no Asaas")
         summary["failed"] += 1
     elif status == "AWAITING_BALANCE":
         pr.status = PaymentRequest.Status.AWAITING_BALANCE
@@ -193,6 +225,13 @@ def _reconcile(pr: PaymentRequest, summary: dict) -> None:
         pr.save(
             update_fields=["status", "asaas_status", "next_attempt_at", "updated_at"]
         )
+        if not was_awaiting_balance:
+            # só na TRANSIÇÃO pra sem-saldo (senão spamaria a cada passada do worker).
+            _dispatch_fee_hook(
+                pr,
+                "fee.problem",
+                detail="sem saldo na conta Asaas — a fila re-tenta sozinha quando houver",
+            )
         summary["awaiting"] += 1
     else:
         # ainda em trânsito (SUBMITTED/SUBMITTING/...): reconcilia de novo depois.

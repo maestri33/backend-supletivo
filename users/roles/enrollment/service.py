@@ -94,10 +94,11 @@ def _require(user_external_id: str, *allowed_status) -> Enrollment:
         raise NotFound("Matrícula não encontrada.", code="ENROLLMENT_NOT_FOUND")
     if allowed_status and enr.status not in allowed_status:
         # 409 + expected_status = a etapa ATUAL no servidor — o front roteia o wizard com isso.
+        # `public_status`: o ALUNO nunca vê a fase da taxa (plan/14 — política interna do polo).
         raise Conflict(
             "Sua matrícula está em outra etapa.",
             code="WRONG_STATUS",
-            extra={"expected_status": enr.status},
+            extra={"expected_status": public_status(enr)},
         )
     return enr
 
@@ -145,10 +146,18 @@ def _reconcile_stale_analyses(enr: Enrollment) -> None:
         )
 
 
+def public_status(enr: Enrollment) -> str:
+    """Status na visão do ALUNO. A fase da taxa (`fee_paid`/`fee_scheduled`) é INTERNA do polo
+    (plan/14, Victor 2026-06-12: o aluno NUNCA sabe da taxa) — pra ele aparece `awaiting_release`."""
+    if enr.status in (_S.FEE_PAID, _S.FEE_SCHEDULED):
+        return _S.AWAITING_RELEASE
+    return enr.status
+
+
 def to_dict(enr: Enrollment) -> dict:
     return {
         "external_id": str(enr.external_id),
-        "status": enr.status,
+        "status": public_status(enr),
         "hub_external_id": str(enr.hub.external_id),
         "selfie_verified": enr.selfie_verified,
         "selfie_status": enr.selfie_status,
@@ -1228,55 +1237,224 @@ def _notify_coordinator_awaiting(enr: Enrollment) -> None:
         logger.warning("enrollment.notify_coord_failed", error=str(exc))
 
 
-# ── 6c: liberação do coordenador → student ──────────────────────────────────
+# ── 6c: fase da TAXA do coordenador → conclusão student (plan/14, Victor 2026-06-12) ────────
+# A taxa do credenciador é SEMPRE 2 parcelas: a 1ª À VISTA e a 2ª AGENDADA pro vencimento lido de
+# DENTRO do QR. Os FATOS (paga/agendada) moram na fila do finance (referência determinística);
+# o aluno NUNCA sabe da taxa (política interna — máscara em `public_status`). A CONCLUSÃO exige
+# os 2 fatos (independente da ordem) e aí sim promove `enrollment→student` com as credenciais.
+# (Substitui o `release` antigo de QRs juntos — descartado pelo Victor: "criado em delírio de IA".)
 
 
-def release(
-    *,
-    enrollment_external_id: str,
-    coordinator,
-    platform_url=None,
-    platform_login=None,
-    platform_password=None,
-    platform_notes=None,
-    fee_qr_codes=None,
-) -> Enrollment:
-    """Coordenador do hub libera a matrícula: promove `enrollment→student`, marca COMPLETED e CRIA o
-    `Student` (§4 item 9) já com os dados estruturados da plataforma de estudo + o hub herdado.
+def _fee_now_ref(enr: Enrollment) -> str:
+    """Referência determinística da 1ª parcela (à vista) — idempotência na fila do finance."""
+    return f"fee_enr_{enr.external_id}_now"
 
-    `fee_qr_codes` (opcional): QR(s) PIX da taxa do parceiro credenciador que o coordenador cola na hora da
-    liberação. Cada QR é roteado pelo PRÓPRIO QR — COM vencimento → agendado, SEM → imediato — e a taxa sai
-    pela MESMA fila Asaas das comissões (`finance.fees`). A promoção é SÍNCRONA e **não espera o pagamento**
-    (o aluno já sai estudando — palavra do Victor); o PIX real ocorre depois, no worker. O ALUNO NÃO SABE da
-    taxa (sem notify de fee). Os QR são validados (decodificados) ANTES de promover: QR inválido aborta a
-    liberação sem criar o aluno (o coordenador corrige e tenta de novo)."""
+
+def _fee_due_ref(enr: Enrollment) -> str:
+    """Referência determinística da 2ª parcela (agendada pro vencimento do QR)."""
+    return f"fee_enr_{enr.external_id}_due"
+
+
+def _fee_dict(pr) -> dict | None:
+    if pr is None:
+        return None
+    return {
+        "status": pr.status,
+        "amount": str(pr.amount),
+        "scheduled_for": pr.scheduled_for.isoformat() if pr.scheduled_for else None,
+        "paid": pr.status == "paid",
+        "last_error": pr.last_error or None,
+    }
+
+
+def fee_facts(enr: Enrollment) -> dict:
+    """Situação das 2 parcelas da taxa, lida da fila do finance (visão do COORDENADOR — interna)."""
     from finance.interface import fees
-    from users.roles.student import interface as student_iface
 
+    first = fees.latest_fee_request(_fee_now_ref(enr))
+    second = fees.latest_fee_request(_fee_due_ref(enr))
+    return {
+        "first": _fee_dict(first),
+        "second": _fee_dict(second),
+        "first_paid": bool(
+            first is not None and first.status == fees.PaymentStatus.PAID
+        ),
+        "second_scheduled": second is not None,
+    }
+
+
+def _enrollment_for_coordinator(
+    enrollment_external_id: str, coordinator, *allowed_status
+) -> Enrollment:
+    """Carrega a matrícula e exige que o `coordinator` coordene o hub dela (gate de TODA ação plan/14)."""
     enr = get_by_external_id(enrollment_external_id)
     if enr is None:
         raise NotFound("Matrícula não encontrada.", code="ENROLLMENT_NOT_FOUND")
     if enr.hub.coordinator_id != coordinator.id:
-        raise EnrollmentError("not_hub_coordinator")
-    if enr.status != _S.AWAITING_RELEASE:
+        raise EnrollmentError(
+            "Você não coordena o polo desta matrícula.", code="NOT_HUB_COORDINATOR"
+        )
+    if allowed_status and enr.status not in allowed_status:
+        # visão do coordenador → status REAL (sem máscara).
         raise Conflict(
             "A matrícula está em outra etapa.",
             code="WRONG_STATUS",
             extra={"expected_status": enr.status},
         )
+    return enr
 
-    # 1) Valida/decodifica os QR FORA da transação (chamada de rede ao Asaas, READ-ONLY): um QR ruim aborta
-    #    a liberação ANTES de promover — não cria aluno meia-boca. Não move dinheiro aqui.
-    fee_plans = []
-    for qr in fee_qr_codes or []:
-        if not (qr or "").strip():
-            continue
-        try:
-            fee_plans.append((qr, fees.plan_qr_payment(qr_payload=qr)))
-        except ValueError as exc:
-            raise EnrollmentError(f"fee_qr_invalid:{exc}") from exc
 
-    # 2) Promoção + criação do Student + enfileiramento das fees: tudo ATÔMICO (só escrita local, sem rede).
+def _plan_fee_qr(qr_code: str, amount=None) -> dict:
+    """Valida/decodifica o QR no Asaas (read-only, NÃO move dinheiro). QR ruim → erro de domínio."""
+    from finance.interface import fees
+
+    if not (qr_code or "").strip():
+        raise EnrollmentError("Informe o QR code PIX da taxa.", code="FEE_QR_INVALID")
+    try:
+        return fees.plan_qr_payment(qr_payload=qr_code, amount=amount)
+    except ValueError as exc:
+        raise EnrollmentError(
+            f"QR code inválido: {exc}", code="FEE_QR_INVALID"
+        ) from exc
+
+
+def _queue_fee(enr: Enrollment, *, qr_code: str, amount, scheduled_for, ref: str):
+    """Enfileira (ou REENFILEIRA, se a tentativa anterior falhou) uma parcela na fila do finance."""
+    from finance.interface import fees
+
+    existing = fees.latest_fee_request(ref)
+    if existing is not None and existing.status == fees.PaymentStatus.FAILED:
+        # B.O. na tentativa anterior → o coordenador re-posta (até com QR novo) e a fila re-arma
+        # com referência FRESCA (a falhada fica como auditoria; Asaas é idempotente por referência).
+        return fees.retry_fee_payment(
+            ref, qr_payload=qr_code, amount=amount, scheduled_for=scheduled_for
+        )
+    return fees.request_fee_payment(
+        amount=amount,
+        qr_payload=qr_code,
+        supplier_name="credenciador",
+        scheduled_for=scheduled_for,
+        external_reference=ref,
+        # relaciona a fee à matrícula (interno; o aluno NÃO sabe da taxa — palavra do Victor).
+        source_type=fees.SourceType.ENROLLMENT,
+        source_external_id=enr.external_id,
+    )
+
+
+def pay_fee(
+    *, enrollment_external_id: str, coordinator, qr_code: str, amount=None
+) -> dict:
+    """1ª parcela (À VISTA): valida o QR e enfileira o PIX IMEDIATO (mesmo que o QR tenha vencimento —
+    à vista é à vista; antecipação já provada real). O status do matriculado NÃO muda aqui: muda quando
+    o pagamento CONFIRMAR PAGO (hook `fee.paid` → `fee_paid` — palavra do Victor 2026-06-12).
+    Idempotente: repetir o POST não paga 2× (referência determinística `_now`)."""
+    enr = _enrollment_for_coordinator(
+        enrollment_external_id, coordinator, _S.AWAITING_RELEASE, _S.FEE_SCHEDULED
+    )
+    if fee_facts(enr)["first_paid"]:
+        raise Conflict("A 1ª parcela desta taxa já está paga.", code="FEE_ALREADY_PAID")
+    plan = _plan_fee_qr(qr_code, amount)
+    pr = _queue_fee(
+        enr,
+        qr_code=qr_code,
+        amount=plan["amount"],
+        scheduled_for=None,
+        ref=_fee_now_ref(enr),
+    )
+    logger.info(
+        "enrollment.fee_pay_queued",
+        external_id=str(enr.external_id),
+        amount=str(pr.amount),
+    )
+    return {
+        "external_id": str(enr.external_id),
+        "status": enr.status,
+        "fees": fee_facts(enr),
+    }
+
+
+def schedule_fee(
+    *, enrollment_external_id: str, coordinator, qr_code: str, amount=None
+) -> dict:
+    """2ª parcela (AGENDADA): o vencimento vem de DENTRO do QR (cobrança com vencimento); QR sem
+    vencimento → erro claro (não chuta data). O status muda NO ATO do agendamento → `fee_scheduled`
+    (Victor 2026-06-12); QR já vencido → paga imediato (o vencimento chegou — semântica provada).
+    NÃO depende da 1ª parcela estar paga — o que depende das duas é a CONCLUSÃO (palavra dele)."""
+    enr = _enrollment_for_coordinator(
+        enrollment_external_id, coordinator, _S.AWAITING_RELEASE, _S.FEE_PAID
+    )
+    if fee_facts(enr)["second_scheduled"]:
+        raise Conflict(
+            "A 2ª parcela desta taxa já está agendada.", code="FEE_ALREADY_SCHEDULED"
+        )
+    plan = _plan_fee_qr(qr_code, amount)
+    if plan["due_date"] is None:
+        raise EnrollmentError(
+            "Este QR não tem data de vencimento — pra agendar, use o QR da cobrança COM vencimento "
+            "(ou pague à vista).",
+            code="FEE_QR_NO_DUE_DATE",
+        )
+    pr = _queue_fee(
+        enr,
+        qr_code=qr_code,
+        amount=plan["amount"],
+        scheduled_for=plan["scheduled_for"],
+        ref=_fee_due_ref(enr),
+    )
+    _set_status(enr, _S.FEE_SCHEDULED)
+    _notify_fee_event(
+        enr,
+        "enrollment.fee_scheduled",
+        valor=f"R$ {pr.amount}",
+        due_date=plan["due_date"],
+    )
+    logger.info(
+        "enrollment.fee_scheduled",
+        external_id=str(enr.external_id),
+        amount=str(pr.amount),
+        due_date=plan["due_date"],
+    )
+    return {
+        "external_id": str(enr.external_id),
+        "status": enr.status,
+        "fees": fee_facts(enr),
+    }
+
+
+def conclude(
+    *,
+    enrollment_external_id: str,
+    coordinator,
+    platform_login: str,
+    platform_password: str,
+    platform_url=None,
+    platform_notes=None,
+) -> Enrollment:
+    """CONCLUSÃO (substitui o `release` antigo): com a 1ª parcela PAGA e a 2ª AGENDADA, o coordenador
+    cadastra as credenciais da plataforma (fornecidas pela instituição — que só as libera com a 1ª paga)
+    e o aluno vira student. Promoção ATÔMICA (role + COMPLETED + Student) — o miolo provado do release."""
+    from users.roles.student import interface as student_iface
+
+    enr = _enrollment_for_coordinator(
+        enrollment_external_id,
+        coordinator,
+        _S.AWAITING_RELEASE,
+        _S.FEE_PAID,
+        _S.FEE_SCHEDULED,
+    )
+    facts = fee_facts(enr)
+    missing = []
+    if not facts["first_paid"]:
+        missing.append("first_fee_paid")
+    if not facts["second_scheduled"]:
+        missing.append("second_fee_scheduled")
+    if missing:
+        raise Conflict(
+            "A taxa ainda não está completa pra concluir a matrícula.",
+            code="FEES_INCOMPLETE",
+            extra={"missing": missing},
+        )
+
     with transaction.atomic():
         if "student" not in roles.active_roles(enr.user):
             roles.promote(enr.user, "student")
@@ -1290,23 +1468,155 @@ def release(
             platform_password=platform_password,
             platform_notes=platform_notes,
         )
-        for i, (qr, plan) in enumerate(fee_plans):
-            fees.request_fee_payment(
-                amount=plan["amount"],
-                qr_payload=qr,
-                supplier_name="credenciador",
-                scheduled_for=plan["scheduled_for"],
-                external_reference=f"fee_enr_{enr.external_id}_{i}",
-                # relaciona a fee à matrícula (interno; o aluno NÃO sabe da taxa — palavra do Victor).
-                source_type=fees.SourceType.ENROLLMENT,
-                source_external_id=enr.external_id,
-            )
 
     _notify_released(enr)
-    logger.info(
-        "enrollment.released", external_id=str(enr.external_id), fees=len(fee_plans)
-    )
+    logger.info("enrollment.concluded", external_id=str(enr.external_id))
     return enr
+
+
+# ── reação aos hooks do finance (fee.paid / fee.problem — plan/14) ───────────
+
+
+def apply_fee_paid(enr: Enrollment, *, external_reference: str, amount=None) -> bool:
+    """Hook `fee.paid`: 1ª parcela paga → `fee_paid` (se ainda aguardando) + notify ao coordenador
+    (é o gatilho do mundo real: a instituição só libera as credenciais com a 1ª paga). 2ª parcela
+    paga no vencimento → só notify (o status já andou no agendamento)."""
+    valor = f"R$ {amount}" if amount else "—"
+    # match por PREFIXO: re-tentativas pós-falha carregam sufixo `_rN` na mesma família de ref.
+    if external_reference.startswith(_fee_now_ref(enr)):
+        if enr.status == _S.AWAITING_RELEASE:
+            _set_status(enr, _S.FEE_PAID)
+        _notify_fee_event(enr, "enrollment.fee_paid", valor=valor)
+        logger.info("enrollment.fee_paid", external_id=str(enr.external_id))
+        return True
+    if external_reference.startswith(_fee_due_ref(enr)):
+        _notify_fee_event(enr, "enrollment.fee_due_paid", valor=valor)
+        logger.info("enrollment.fee_due_paid", external_id=str(enr.external_id))
+        return True
+    return False
+
+
+def apply_fee_problem(
+    enr: Enrollment, *, external_reference: str, detail=None, asaas_status=None
+) -> bool:
+    """Hook `fee.problem`: QUALQUER B.O. com a taxa (sem saldo, falha, erro) notifica o coordenador
+    (palavra do Victor 2026-06-12). O status da matrícula NÃO regride — o coordenador re-posta a
+    parcela (a fila re-arma via `_queue_fee`)."""
+    if external_reference.startswith(_fee_now_ref(enr)):
+        which = "1ª parcela (à vista)"
+    elif external_reference.startswith(_fee_due_ref(enr)):
+        which = "2ª parcela (agendada)"
+    else:
+        return False
+    _notify_fee_event(
+        enr,
+        "enrollment.fee_problem",
+        detail=f"{which} — {detail or 'erro desconhecido'}.",
+        idem_suffix=f"_{asaas_status or 'err'}",
+    )
+    logger.warning(
+        "enrollment.fee_problem",
+        external_id=str(enr.external_id),
+        ref=external_reference,
+        detail=detail,
+    )
+    return True
+
+
+def _notify_fee_event(
+    enr: Enrollment, event: str, idem_suffix: str = "", **placeholders
+) -> None:
+    """Notify do ciclo da taxa → SEMPRE o COORDENADOR, nunca o aluno (política interna). Sem TTS."""
+    from notify.interface.send import send
+    from users.roles import notifications as msgs
+
+    coord = enr.hub.coordinator
+    if coord is None:
+        logger.warning(
+            "enrollment.fee_notify_no_coordinator", external_id=str(enr.external_id)
+        )
+        return
+    cp = profiles.get(coord)
+    sp = profiles.get(enr.user)
+    try:
+        send(
+            text=msgs.text(
+                event,
+                name=msgs.first_name(cp.name if cp else None),
+                student_name=(sp.name if sp else None) or "um aluno",
+                **placeholders,
+            ),
+            caller=event,
+            phone=cp.phone if cp else None,
+            email=cp.email if cp else None,
+            email_channel=bool(cp and cp.email),
+            idempotency_key=f"{event}_{enr.external_id}{idem_suffix}",
+        )
+    except Exception as exc:  # noqa: BLE001 — notify nunca quebra o fluxo (§12)
+        logger.warning("enrollment.fee_notify_failed", event=event, error=str(exc))
+
+
+# ── visão do COORDENADOR: listagem/detalhe do polo + análises pendentes (plan/14) ───────────
+
+
+def _hub_item_dict(enr: Enrollment) -> dict:
+    p = profiles.get(enr.user)
+    return {
+        "external_id": str(enr.external_id),
+        "name": p.name if p else None,
+        "phone": p.phone if p else None,
+        "status": enr.status,  # status REAL (visão do coordenador, sem máscara)
+        "fees": fee_facts(enr),
+        "created_at": enr.created_at.isoformat(),
+    }
+
+
+def list_for_hub(*, hub, status: str | None = None) -> list[dict]:
+    """Matrículas do polo (visão do coordenador): status REAL + resumo das 2 parcelas da taxa.
+    `?status=awaiting_release` = quem terminou o wizard e espera ação do coordenador."""
+    qs = (
+        Enrollment.objects.filter(hub=hub)
+        .select_related("user")
+        .order_by("-created_at")
+    )
+    if status:
+        qs = qs.filter(status=status)
+    return [_hub_item_dict(enr) for enr in qs]
+
+
+def detail_for_hub(*, enrollment_external_id: str, coordinator) -> dict:
+    """Detalhe COMPLETO de uma matrícula pro coordenador: a visão rica do /me (todas as seções)
+    + status REAL (sem máscara) + fatos da taxa."""
+    enr = _enrollment_for_coordinator(enrollment_external_id, coordinator)
+    return {**me_dict(enr), "status": enr.status, "fees": fee_facts(enr)}
+
+
+def list_reviews_for_hub(*, hub) -> dict:
+    """Análises da MATRÍCULA paradas esperando decisão do coordenador (RG e selfie em revisão).
+    Cada item aponta pro POST de decisão que já existe (`/rg/decide`, `/selfie/decide`)."""
+    from users.roles import _analysis, _selfie
+
+    def _item(enr: Enrollment) -> dict:
+        p = profiles.get(enr.user)
+        return {
+            "external_id": str(enr.external_id),
+            "name": p.name if p else None,
+            "since": enr.updated_at.isoformat(),
+        }
+
+    rg_qs = (
+        Enrollment.objects.filter(
+            hub=hub, user__document__rg__validation_status=_analysis.REVIEW
+        )
+        .select_related("user")
+        .order_by("updated_at")
+    )
+    selfie_qs = (
+        Enrollment.objects.filter(hub=hub, selfie_status=_selfie.SelfieStatus.REVIEW)
+        .select_related("user")
+        .order_by("updated_at")
+    )
+    return {"rg": [_item(e) for e in rg_qs], "selfie": [_item(e) for e in selfie_qs]}
 
 
 def _notify_released(enr: Enrollment) -> None:
