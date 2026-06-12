@@ -462,12 +462,17 @@ class EducationOut(Schema):
 
 
 class EnrollmentMeOut(EnrollmentOut):
-    """Resposta RICA do /me: o resume do wizard pré-preenche tudo numa chamada (bloco None = vazio)."""
+    """Resposta CANÔNICA da matrícula (proposta #3): o /me e TODA mutação que mexe na máquina
+    devolvem este shape completo — o front roteia pelo `status` sem re-fetch. Bloco None = vazio."""
 
     profile: EnrollmentProfileOut | None = None
-    address_complete: bool
+    address_complete: bool = Field(
+        description="[DEPRECATED — use address.missing_fields]"
+    )
+    address: AddressOut | None = None
     rg: RgOut | None = None
     education: EducationOut | None = None
+    selfie: SelfieOut | None = None
 
 
 def _enr_guard(request) -> str:
@@ -531,10 +536,11 @@ def enrollment_rg_get(request):
     return enrollment_iface.get_rg_section(user_external_id=ext)
 
 
-@api.patch("/enrollment/documents/rg", response=RgSectionOut, tags=["enrollment"])
+@api.patch("/enrollment/documents/rg", response=EnrollmentMeOut, tags=["enrollment"])
 def enrollment_rg_patch(request, payload: RgPatchIn):
     """Completa/CORRIGE manualmente o que a extração não trouxe (`missing_fields`): campos do
-    documento (número/órgão/emissão) e do perfil (filiação/naturalidade/estado civil/nacionalidade)."""
+    documento (número/órgão/emissão) e do perfil (filiação/naturalidade/estado civil/nacionalidade).
+    Devolve o **EnrollmentMe canônico** (proposta #3) — o detalhe do RG segue no GET da seção."""
     ext = _enr_guard(request)
     return enrollment_iface.patch_rg_section(
         user_external_id=ext, **payload.dict(exclude_none=True)
@@ -549,18 +555,19 @@ def enrollment_get_address(request):
     return enrollment_iface.get_address(user_external_id=ext)
 
 
-@api.post("/enrollment/address", response=AddressOut, tags=["enrollment"])
+@api.post("/enrollment/address", response=EnrollmentMeOut, tags=["enrollment"])
 def enrollment_address(request, payload: AddressCepIn):
-    """Body só `{cep}`: acha no ViaCEP, grava o endereço e a resposta JÁ AVISA o que falta
-    (`missing_fields`): `["number"]` = achou tudo, só falta o número; rua/bairro na lista =
-    cidade de CEP único (digite no PATCH)."""
+    """Body só `{cep}`: acha no ViaCEP, grava o endereço e devolve o **EnrollmentMe canônico**
+    (proposta #3) — `address.missing_fields` JÁ AVISA o que falta: `["number"]` = achou tudo, só
+    falta o número; rua/bairro na lista = cidade de CEP único (digite no PATCH)."""
     ext = _enr_guard(request)
     return enrollment_iface.set_address_cep(user_external_id=ext, cep=payload.cep)
 
 
-@api.patch("/enrollment/address", response=AddressOut, tags=["enrollment"])
+@api.patch("/enrollment/address", response=EnrollmentMeOut, tags=["enrollment"])
 def enrollment_address_patch(request, payload: AddressDataIn):
-    """Preenche os demais campos — SÓ os que estão VAZIOS (não sobrescreve o que o CEP trouxe)."""
+    """Preenche os demais campos — SÓ os que estão VAZIOS (não sobrescreve o que o CEP trouxe).
+    Devolve o EnrollmentMe canônico (proposta #3)."""
     ext = _enr_guard(request)
     return enrollment_iface.set_address_data(
         user_external_id=ext, **payload.dict(exclude_none=True)
@@ -575,8 +582,10 @@ def enrollment_get_education(request):
     return enrollment_iface.get_education(user_external_id=ext)
 
 
-@api.post("/enrollment/education", response=EnrollmentOut, tags=["enrollment"])
+@api.post("/enrollment/education", response=EnrollmentMeOut, tags=["enrollment"])
 def enrollment_education(request, payload: EducationIn):
+    """Grava os dados escolares e devolve o **EnrollmentMe canônico** (proposta #3) — o corpo já
+    traz o novo `status` (ex.: `selfie`), sem GET extra."""
     ext = _enr_guard(request)
     enr = enrollment_iface.set_education(
         user_external_id=ext,
@@ -584,7 +593,7 @@ def enrollment_education(request, payload: EducationIn):
         last_school=payload.last_school,
         last_year_when=payload.last_year_when,
     )
-    return enrollment_iface.to_dict(enr)
+    return enrollment_iface.me_dict(enr)
 
 
 # ── seção SELFIE (= a ASSINATURA da matrícula — plan/13) ─────────────────────
@@ -596,18 +605,19 @@ def enrollment_get_selfie(request):
     return enrollment_iface.get_selfie(user_external_id=ext)
 
 
-@api.post("/enrollment/selfie", response=EnrollmentOut, tags=["enrollment"])
+@api.post("/enrollment/selfie", response=EnrollmentMeOut, tags=["enrollment"])
 def enrollment_selfie(request, file: UploadedFile = File(...)):
     """Envia a selfie (assinatura). A análise roda em 2º plano (IA + biometria vs rosto do
     DOCUMENTO): acompanhe `analysis_status` no `GET /enrollment/selfie` (`pending` = analisando),
-    voltando a perguntar a cada `poll_after_ms` (a resposta já traz o ack — proposta #2)."""
+    voltando a perguntar a cada `poll_after_ms` (a resposta já traz o ack — proposta #2) e o
+    **EnrollmentMe canônico** (proposta #3)."""
     ext = _enr_guard(request)
     enr = enrollment_iface.set_selfie(
         user_external_id=ext,
         image_bytes=file.read(),
         content_type=getattr(file, "content_type", "image/jpeg"),
     )
-    return {**enrollment_iface.to_dict(enr), **enrollment_iface.selfie_ack(enr)}
+    return {**enrollment_iface.me_dict(enr), **enrollment_iface.selfie_ack(enr)}
 
 
 # ── aluno: funil final student→veteran (autenticado, role student) — §4 item 9 ──

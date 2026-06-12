@@ -203,10 +203,10 @@ def me_dict(enr: Enrollment) -> dict:
             "analysis_reason": rg_data.get("validation_reason"),
             "validation_status": rg_data.get("validation_status"),
             "validation_reason": rg_data.get("validation_reason"),
+            # MESMA régua da seção (doc + perfil) — é a lista que trava a selfie (proposta #10)
             "missing_fields": [
-                f
-                for f in ("number", "issuing_agency", "issue_date")
-                if not rg_data.get(f)
+                *(f for f in _RG_DOC_FIELDS if not rg_data.get(f)),
+                *(f for f in _RG_PROFILE_FIELDS if not getattr(enr, f)),
             ],
         }
 
@@ -227,6 +227,10 @@ def me_dict(enr: Enrollment) -> dict:
         **to_dict(enr),
         "profile": profile,
         "address_complete": address_iface.is_complete(address),
+        # blocos COMPLETOS de address e selfie (proposta #3): o /me vira a resposta canônica única —
+        # toda mutação devolve este shape e o front nunca re-fetcha pra rotear.
+        "address": _address_dict(user_ext),
+        "selfie": _selfie_dict(enr),
         "rg": rg,
         "education": education,
     }
@@ -292,20 +296,22 @@ def get_address(*, user_external_id: str) -> dict:
 
 
 def set_address_cep(*, user_external_id: str, cep: str) -> dict:
-    """POST do endereço (plan/13): body só `{cep}`. Acha no ViaCEP, grava, e a resposta JÁ AVISA
-    o que falta: rua achada → `missing_fields=["number"]`; cidade de CEP único → rua/bairro/número."""
+    """POST do endereço (plan/13): body só `{cep}`. Acha no ViaCEP, grava e devolve o **EnrollmentMe
+    canônico** (proposta #3) — o bloco `address.missing_fields` JÁ AVISA o que falta: rua achada →
+    `["number"]`; cidade de CEP único → rua/bairro/número."""
     enr = _require(user_external_id, _S.ADDRESS)
     address_iface.set_by_cep(external_id=user_external_id, cep=cep)
     _advance_address(enr, user_external_id)
-    return _address_dict(user_external_id)
+    return me_dict(enr)
 
 
 def set_address_data(*, user_external_id: str, **fields) -> dict:
-    """PATCH do endereço — preenche SÓ o que está VAZIO (não sobrescreve o que o CEP trouxe)."""
+    """PATCH do endereço — preenche SÓ o que está VAZIO (não sobrescreve o que o CEP trouxe).
+    Devolve o EnrollmentMe canônico (proposta #3)."""
     enr = _require(user_external_id, _S.ADDRESS)
     address_iface.fill_empty(external_id=user_external_id, **fields)
     _advance_address(enr, user_external_id)
-    return _address_dict(user_external_id)
+    return me_dict(enr)
 
 
 def _advance_address(enr: Enrollment, user_external_id: str) -> None:
@@ -385,7 +391,9 @@ def patch_rg_section(*, user_external_id: str, **fields) -> dict:
     if enr_changed:
         enr.save(update_fields=[*enr_changed, "updated_at"])
     _advance_rg(enr, user_external_id)
-    return _rg_section_dict(enr)
+    return me_dict(
+        enr
+    )  # resposta canônica (proposta #3): o rg detalhado segue no GET da seção
 
 
 def upload_rg_photo(*, user_external_id: str, slot: str, upload) -> str:
@@ -921,13 +929,10 @@ def set_education(
     return enr
 
 
-def get_selfie(*, user_external_id: str) -> dict:
-    """GET da selfie/ASSINATURA (plan/13): foto, quando foi enviada, status e os comentários da
-    IA/biometria (inclusive as instruções de como ser aprovada). `exists: false` = não enviada."""
+def _selfie_dict(enr: Enrollment) -> dict:
+    """Bloco da selfie (GET /selfie e o bloco `selfie` do /me — proposta #3)."""
     from users.roles import _analysis
 
-    enr = _require(user_external_id)
-    _reconcile_stale_analyses(enr)  # TTL guard (proposta #2)
     status = enr.selfie_status if enr.selfie_image else None
     return {
         "exists": bool(enr.selfie_image),
@@ -946,6 +951,14 @@ def get_selfie(*, user_external_id: str) -> dict:
         "verified": enr.selfie_verified,
         "description": enr.selfie_description,
     }
+
+
+def get_selfie(*, user_external_id: str) -> dict:
+    """GET da selfie/ASSINATURA (plan/13): foto, quando foi enviada, status e os comentários da
+    IA/biometria (inclusive as instruções de como ser aprovada). `exists: false` = não enviada."""
+    enr = _require(user_external_id)
+    _reconcile_stale_analyses(enr)  # TTL guard (proposta #2)
+    return _selfie_dict(enr)
 
 
 def set_selfie(
