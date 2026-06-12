@@ -239,14 +239,35 @@ Todas exigem Bearer com papel `student` (`403` se não tiver).
 
 ---
 
-## Padrão de erros (Django Ninja)
+## Padrão de erros — envelope `{detail, code, …extra}` (proposta API #5, 2026-06-12)
 
-- Erro de **validação do body** (campo faltando / formato errado) → `422` com
-  `{ "detail": [ { "type", "loc", "msg" } ] }`.
-- Erro lançado pelo router (`HttpError`) → o status (`401`/`403`/`404`/`422`) com
-  `{ "detail": "mensagem em pt-br" }`.
-- `401` = sem token / token inválido, expirado ou de papel já invalidado (troca de role).
-- `403` = papel errado pra rota.
+**TODO 4xx/5xx sai com `code`** — o front roteia por `switch(code)`, nunca parseando `detail`.
+O registry completo (tabela code → quando → extras) está na **descrição do grupo no OpenAPI**
+(`GET /api/v1/clients/openapi.json` → `info.description`). Destaques:
+
+- `WRONG_STATUS` (409) + `expected_status` (e `missing_fields` quando faltam campos do RG/perfil)
+  — o front roteia o wizard com isso.
+- Validação do body → `422 {"detail": [lista pydantic], "code": "VALIDATION_ERROR"}`.
+- `401 UNAUTHORIZED` (sem token/expirado/role trocada) · `SESSION_EXPIRED` (refresh vencido) ·
+  `403 FORBIDDEN_ROLE`/`NOT_IN_FUNNEL` · `*_NOT_FOUND` (404) · `SLOT_INVALID` (422) ·
+  `RATE_LIMITED` (429, + `retry_after_s`).
+
+## Contrato unificado das análises + resposta canônica (propostas #2/#3/#4, 2026-06-12)
+
+- **`analysis_status`** (`pending|approved|rejected|review`) + **`analysis_reason`** = o nome
+  canônico ÚNICO da análise por IA em RG **e** selfie. `validation_status`/`selfie_status`/
+  `status` (selfie)/`description` seguem como **alias deprecated** até o front migrar.
+- **TTL**: `pending` que estoura `ANALYSIS_TTL_SECONDS` (default 120s) **vira `review`** nas
+  leituras do funil — nunca "analisando…" eterno. Uploads (foto RG, selfie) respondem o **ack**
+  `{analysis_status, poll_after_ms, expires_at}`: o front polla até `expires_at` e para.
+- **Toda mutação devolve o `EnrollmentMe` canônico** (PATCH rg, POST/PATCH address, POST
+  education, POST selfie) — mesmo shape do `GET /me`, que ganhou os blocos completos `address`
+  (com `missing_fields`) e `selfie`. Zero re-fetch pra rotear. Upload de foto devolve o ack.
+- **Gates** (#9/#10): `POST /selfie` exige RG com frente|inteira **aprovada** e
+  `missing_fields` vazio → senão `409 WRONG_STATUS expected_status:"rg"`; a virada
+  selfie→awaiting_release também trava com campos faltando (o PATCH rg destrava).
+- **Push na resolução** (#11): aprovado/reprovado (IA ou coordenador) notifica o aluno por
+  WhatsApp + e-mail com deep-link de volta (`FRONTEND_URL` + `ENROLLMENT_RESUME_PATH`).
 
 ---
 
@@ -259,8 +280,8 @@ Todas exigem Bearer com papel `student` (`403` se não tiver).
   collaborators) usa `address_iface.as_public_dict` (sem `id`); as views DMZ legadas seguem com
   `as_dict` (intactas). `Address` ainda não tem `external_id` próprio — o front acessa o endereço
   pelo contexto do user logado (não precisa de id próprio).
-- Falta sinal explícito de **"próximo passo / o que falta"** no `me` (hoje o front tem que
-  mapear `status`→tela). **«PENDÊNCIA»: melhoria de produto.**
+- ✅ Sinal de "próximo passo" resolvido (2026-06-12): `status` canônico + `missing_fields`
+  por seção no `/me` + `expected_status` nos 409 — o front roteia sem mapear nada à mão.
 
 ## Ver também
 
