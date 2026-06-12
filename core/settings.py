@@ -492,3 +492,7 @@ DEFAULT_STAFF_CPF = env("DEFAULT_STAFF_CPF", default="")
 DEFAULT_STAFF_PHONE = env("DEFAULT_STAFF_PHONE", default="")
 DEFAULT_STAFF_NAME = env("DEFAULT_STAFF_NAME", default="Staff")
 DEFAULT_STAFF_PASSWORD = os.environ.get("DEFAULT_STAFF_PASSWORD", "")
+# Chave Pix da conta-mãe — destino dos payouts dela (comissões de promotor/coordenador). O seed grava
+# no Profile se estiver vazio (fecha o «rabo» "setei à mão" dos flashes de 06-06 e 06-10). Sem validação
+# DICT aqui: é seed de sistema; a chave já foi provada em payout real.
+DEFAULT_STAFF_PIX = env("DEFAULT_STAFF_PIX", default="")

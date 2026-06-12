@@ -56,6 +56,7 @@ class Command(BaseCommand):
                 cpf=cpf, phone=phone, name=name, password=password
             )
             self._ensure_roles(user)
+            self._ensure_pix(user)
             hub, hub_created = self._ensure_default_hub(brand=brand, coordinator=user)
             promoter = promoter_iface.create_promoter(user=user, hub=hub)  # idempotente
 
@@ -100,6 +101,18 @@ class Command(BaseCommand):
         """promoter + coordinator DIRETO (bypass catálogo — seed de sistema). Idempotente."""
         for role in ("promoter", "coordinator"):
             UserRole.objects.get_or_create(user=user, role=role, revoked_at=None)
+
+    def _ensure_pix(self, user):
+        """Pix da conta-mãe (destino dos payouts dela) — grava DEFAULT_STAFF_PIX se o Profile está
+        sem chave. Fecha o «rabo» dos flashes (06-06/06-10): toda recriação do db exigia setar à mão,
+        e sem pix o fechamento semanal trava o payout. Não sobrescreve chave já definida."""
+        pix = settings.DEFAULT_STAFF_PIX
+        if not pix:
+            return
+        profile = Profile.objects.filter(user=user).first()
+        if profile is not None and not profile.pix_key:
+            profile.pix_key = pix
+            profile.save(update_fields=["pix_key", "updated_at"])
 
     def _ensure_default_hub(self, *, brand, coordinator):
         """Garante o hub padrão (coordenador = conta-mãe). Idempotente pelo flag is_default."""
