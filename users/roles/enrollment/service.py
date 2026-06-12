@@ -391,6 +391,11 @@ def patch_rg_section(*, user_external_id: str, **fields) -> dict:
     if enr_changed:
         enr.save(update_fields=[*enr_changed, "updated_at"])
     _advance_rg(enr, user_external_id)
+    # destrave do gate #10: selfie já aprovada que só esperava os campos → fecha a coleta agora
+    from users.roles import _selfie
+
+    if enr.status == _S.SELFIE and enr.selfie_status == _selfie.APPROVED:
+        _advance_to_release(enr)
     return me_dict(
         enr
     )  # resposta canônica (proposta #3): o rg detalhado segue no GET da seção
@@ -972,6 +977,7 @@ def set_selfie(
     from users.roles import _selfie
 
     enr = _require(user_external_id, _S.SELFIE)
+    _require_rg_ready_for_selfie(enr)  # gates #9/#10: rosto do doc + perfil completo
     enr.selfie_image = _save_selfie(enr, image_bytes, content_type)
     enr.selfie_taken_at = timezone.now()
     enr.selfie_status = _selfie.SelfieStatus.PENDING
@@ -982,6 +988,37 @@ def set_selfie(
 
     async_task("users.roles.enrollment.tasks.validate_selfie", enr.id)
     return enr
+
+
+def _require_rg_ready_for_selfie(enr: Enrollment) -> None:
+    """Gates da selfie (propostas #9/#10), 409 `WRONG_STATUS` + `expected_status:"rg"`:
+
+    - **#9**: a biometria compara a selfie com o ROSTO do documento → exige frente OU inteira
+      APROVADA (o wizard normalmente garante; o buraco é a aprovação HUMANA com só o verso).
+    - **#10**: a matrícula não pode fechar sem estado civil/nacionalidade (campos que o RG não
+      traz) → exige `missing_fields` vazio; o front roteia de volta pro PATCH rg."""
+    from users.roles import _document_ai as doc_ai
+
+    rg = documents_iface.get_rg(str(enr.user.external_id))
+    if (
+        rg is None
+        or rg.validation_status != doc_ai.APPROVED
+        or not (rg.front_photo or rg.full_photo)
+    ):
+        raise Conflict(
+            "Envie a frente do RG antes da selfie.",
+            code="WRONG_STATUS",
+            extra={"expected_status": _S.RG.value},
+        )
+    missing = _rg_section_dict(enr)["missing_fields"]
+    if missing:
+        raise Conflict(
+            "Complete os dados do documento antes da selfie: "
+            + ", ".join(missing)
+            + ".",
+            code="WRONG_STATUS",
+            extra={"expected_status": _S.RG.value, "missing_fields": missing},
+        )
 
 
 def run_selfie_validation(enrollment_id: int) -> None:
@@ -1058,8 +1095,20 @@ def _resolve_selfie(enr: Enrollment) -> None:
 
 
 def _advance_to_release(enr: Enrollment) -> None:
-    """Selfie aprovada → AWAITING_RELEASE + avisa o coordenador. Idempotente (só sai de SELFIE)."""
+    """Selfie aprovada → AWAITING_RELEASE + avisa o coordenador. Idempotente (só sai de SELFIE).
+
+    Gate #10: com `missing_fields` do RG/perfil pendentes (ex.: selfie aprovada pelo COORDENADOR
+    enquanto faltava nacionalidade) a matrícula NÃO fecha — fica em SELFIE com a selfie aprovada;
+    o `patch_rg_section` destrava quando o aluno completar."""
     if enr.status != _S.SELFIE:
+        return
+    missing = _rg_section_dict(enr)["missing_fields"]
+    if missing:
+        logger.info(
+            "enrollment.release_blocked_missing_fields",
+            enrollment=str(enr.external_id),
+            missing=missing,
+        )
         return
     _set_status(enr, _S.AWAITING_RELEASE)
     _notify_coordinator_awaiting(enr)
