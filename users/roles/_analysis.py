@@ -1,0 +1,73 @@
+"""Contrato unificado das análises assíncronas por IA (proposta API #2/#4/#6).
+
+UM vocabulário só pros estados de qualquer análise que roda em 2º plano (RG, selfie e, no
+futuro, docs do student): `pending | approved | rejected | review`. Os models já gravam
+exatamente esses 4 valores (RG.Validation, SelfieStatus) — aqui a gente expõe sob o nome
+CANÔNICO (`analysis_status`) e dá:
+
+  • o **ack de polling** (`poll_after_ms` = quando o front volta a perguntar; `expires_at` =
+    até quando o `pending` vale) pras mutações que disparam análise;
+  • a régua do **TTL**: um `pending` que estourou o prazo VIRA `review` — nunca fica preso em
+    "analisando…" se a task da IA morreu/sumiu (plan/9: "IA fora do ar/em dúvida → review, a
+    gente resolve"; e [[feedback-qcluster-sempre-no-ar]]: sem o worker a fila represa calada).
+
+Helpers PUROS (sem efeito no banco) — quem persiste o flip é o service do funil.
+"""
+
+from __future__ import annotations
+
+from datetime import datetime, timedelta
+
+from django.conf import settings
+from django.utils import timezone
+
+# Estados canônicos — iguais aos dos enums dos models (RG.Validation, SelfieStatus).
+PENDING = "pending"
+APPROVED = "approved"
+REJECTED = "rejected"
+REVIEW = "review"
+
+# Literal pros schemas Ninja: o OpenAPI passa a mostrar o enum em vez de `"string"` (proposta #6).
+STATUS_VALUES = (PENDING, APPROVED, REJECTED, REVIEW)
+
+_STALE_REASON = "Análise automática expirou — em revisão pela equipe."
+
+
+def ttl_seconds() -> int:
+    return int(getattr(settings, "ANALYSIS_TTL_SECONDS", 120))
+
+
+def poll_after_ms() -> int:
+    return int(getattr(settings, "ANALYSIS_POLL_MS", 2500))
+
+
+def expires_at(started_at: datetime | None) -> datetime | None:
+    """Quando o `pending` disparado em `started_at` deixa de valer (vira review na próxima leitura)."""
+    if started_at is None:
+        return None
+    return started_at + timedelta(seconds=ttl_seconds())
+
+
+def is_stale(status: str | None, started_at: datetime | None) -> bool:
+    """`pending` cujo prazo já estourou → DEVE virar review (o caller persiste)."""
+    if status != PENDING or started_at is None:
+        return False
+    return timezone.now() > started_at + timedelta(seconds=ttl_seconds())
+
+
+def stale_reason() -> str:
+    return _STALE_REASON
+
+
+def ack(status: str | None, started_at: datetime | None) -> dict:
+    """Ack de uma mutação que dispara análise async (proposta #2): o front sabe QUANDO voltar a
+    perguntar (`poll_after_ms`) e até QUANDO o `pending` vale (`expires_at`). Já reflete o TTL: se
+    o prazo estourou, o `analysis_status` devolvido é `review`."""
+    exp = expires_at(started_at)
+    return {
+        "analysis_status": REVIEW
+        if is_stale(status, started_at)
+        else (status or PENDING),
+        "poll_after_ms": poll_after_ms(),
+        "expires_at": exp.isoformat() if exp else None,
+    }

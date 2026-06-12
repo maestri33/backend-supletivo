@@ -107,6 +107,44 @@ def _set_status(enr: Enrollment, to_status: str) -> None:
     enr.save(update_fields=["status", "updated_at"])
 
 
+def _rg_started_at(rg):
+    """Quando a análise do RG (re)começou — do JSON do reset (proposta #2). None = sem referência."""
+    from datetime import datetime
+
+    raw = (rg.validation_result or {}).get("analysis_started_at") if rg else None
+    if not raw:
+        return None
+    try:
+        return datetime.fromisoformat(raw)
+    except (ValueError, TypeError):
+        return None
+
+
+def _reconcile_stale_analyses(enr: Enrollment) -> None:
+    """TTL guard (proposta #2): `pending` que estourou o prazo vira `review` — o aluno nunca fica
+    preso em "analisando…" se a task da IA morreu. Persiste o flip (cai na fila do coordenador) e
+    avisa, reusando os mesmos caminhos do review da IA. Idempotente; roda nas LEITURAS do funil."""
+    from users.roles import _analysis, _selfie
+
+    if _analysis.is_stale(enr.selfie_status, enr.selfie_taken_at):
+        enr.selfie_status = _selfie.REVIEW
+        enr.selfie_description = (
+            enr.selfie_description or ""
+        ).strip() or _analysis.stale_reason()
+        enr.save(update_fields=["selfie_status", "selfie_description", "updated_at"])
+        _notify_selfie_review(enr)
+
+    rg = documents_iface.get_rg(str(enr.user.external_id))
+    if rg is not None and _analysis.is_stale(rg.validation_status, _rg_started_at(rg)):
+        _finish_rg(
+            enr,
+            rg,
+            _analysis.REVIEW,
+            _analysis.stale_reason(),
+            rg.validation_result or {},
+        )
+
+
 def to_dict(enr: Enrollment) -> dict:
     return {
         "external_id": str(enr.external_id),
@@ -114,12 +152,18 @@ def to_dict(enr: Enrollment) -> dict:
         "hub_external_id": str(enr.hub.external_id),
         "selfie_verified": enr.selfie_verified,
         "selfie_status": enr.selfie_status,
+        # canônico unificado (proposta #4): a análise da SELFIE/assinatura sob o nome `analysis_status`.
+        # `selfie_status` segue como alias (compat) até o front migrar.
+        "analysis_status": enr.selfie_status,
     }
 
 
 def me_dict(enr: Enrollment) -> dict:
     """GET /me RICO (auditoria do front 2026-06-10): o resume do wizard pré-preenche TODAS as seções
     numa chamada só. Bloco `None` = seção ainda não preenchida; `address_complete` = endereço pronto."""
+    _reconcile_stale_analyses(
+        enr
+    )  # TTL guard (proposta #2): pending estourado → review, aqui também
     user_ext = str(enr.user.external_id)
 
     profile = None
@@ -152,7 +196,11 @@ def me_dict(enr: Enrollment) -> dict:
             "front_photo": rg_data.get("front_photo"),
             "back_photo": rg_data.get("back_photo"),
             "full_photo": rg_data.get("full_photo"),
-            # validação IA (plan/12): o front mostra "analisando…"/motivo e o que falta digitar
+            # validação IA (plan/12): o front mostra "analisando…"/motivo e o que falta digitar.
+            # `analysis_status`/`analysis_reason` = nome CANÔNICO (proposta #4); os `validation_*`
+            # seguem como alias (compat) até o front migrar.
+            "analysis_status": rg_data.get("validation_status"),
+            "analysis_reason": rg_data.get("validation_reason"),
             "validation_status": rg_data.get("validation_status"),
             "validation_reason": rg_data.get("validation_reason"),
             "missing_fields": [
@@ -304,6 +352,9 @@ def _rg_section_dict(enr: Enrollment) -> dict:
         "front_photo": rg.front_photo if rg else None,
         "back_photo": rg.back_photo if rg else None,
         "full_photo": rg.full_photo if rg else None,
+        # canônico unificado (proposta #4) + alias `validation_*` (compat) até o front migrar.
+        "analysis_status": rg.validation_status if rg else None,
+        "analysis_reason": result.get("reason"),
         "validation_status": rg.validation_status if rg else None,
         "validation_reason": result.get("reason"),
         "missing_fields": [
@@ -316,6 +367,7 @@ def get_rg_section(*, user_external_id: str) -> dict:
     """GET da seção documento (plan/13): fotos + validação + TODOS os campos (extraídos pela IA
     ou digitados) + `missing_fields` (o que o aluno ainda precisa completar)."""
     enr = _require(user_external_id)
+    _reconcile_stale_analyses(enr)  # TTL guard (proposta #2)
     return _rg_section_dict(enr)
 
 
@@ -342,13 +394,24 @@ def upload_rg_photo(*, user_external_id: str, slot: str, upload) -> str:
     Salva (PDF vira JPEG no `documents`), re-zera a validação e ENFILEIRA o pipeline de IA
     (visão → OCR → extração → biometria). O upload responde na hora; o veredito (e o motivo,
     se reprovar) sai pelo `/enrollment/me`. Aluno: RG é obrigatório (Victor)."""
+    from users.roles import _analysis
+
     enr = _require(user_external_id, _S.RG)
     path = documents_iface.upload_photo(user_external_id, slot, upload)
     _reset_rg_validation(user_external_id, slot)
     from django_q.tasks import async_task
 
     async_task("users.roles.enrollment.tasks.validate_rg", enr.id, slot)
-    return path
+    # ack de polling (proposta #2): a análise acabou de (re)começar → started_at = agora.
+    rg = documents_iface.get_rg(user_external_id)
+    return {"stored": path, **_analysis.ack(_analysis.PENDING, _rg_started_at(rg))}
+
+
+def selfie_ack(enr: Enrollment) -> dict:
+    """Ack de polling da selfie (proposta #2) — pro POST devolver junto com o estado."""
+    from users.roles import _analysis
+
+    return _analysis.ack(enr.selfie_status, enr.selfie_taken_at)
 
 
 def _advance_rg(enr: Enrollment, user_external_id: str) -> None:
@@ -388,12 +451,17 @@ def _reset_rg_validation(user_external_id: str, slot: str) -> None:
     rg = documents_iface.get_rg(user_external_id)
     if rg is None:
         return
+    from django.utils import timezone
+
     result = rg.validation_result or {}
     photos = dict(result.get("photos") or {})
     photos.pop(slot, None)
     for key in ("extracted", "name_match", "reason", "human"):
         result.pop(key, None)
     result["photos"] = photos
+    # marca o INÍCIO da análise (proposta #2): o re-upload reinicia o relógio do TTL. Guardado no
+    # JSON (sem migração); só vale enquanto `pending` (o `_finish_rg` reescreve o result ao concluir).
+    result["analysis_started_at"] = timezone.now().isoformat()
     rg.validation_status = doc_ai.PENDING
     rg.validation_result = result
     rg.validated_at = None
@@ -856,12 +924,25 @@ def set_education(
 def get_selfie(*, user_external_id: str) -> dict:
     """GET da selfie/ASSINATURA (plan/13): foto, quando foi enviada, status e os comentários da
     IA/biometria (inclusive as instruções de como ser aprovada). `exists: false` = não enviada."""
+    from users.roles import _analysis
+
     enr = _require(user_external_id)
+    _reconcile_stale_analyses(enr)  # TTL guard (proposta #2)
+    status = enr.selfie_status if enr.selfie_image else None
     return {
         "exists": bool(enr.selfie_image),
         "photo": enr.selfie_image,
         "taken_at": enr.selfie_taken_at.isoformat() if enr.selfie_taken_at else None,
-        "status": enr.selfie_status if enr.selfie_image else None,
+        "status": status,
+        # canônico unificado (proposta #4): `analysis_status`/`analysis_reason` + alias `status`/
+        # `description` (compat). `expires_at` = até quando o `pending` vale (proposta #2).
+        "analysis_status": status,
+        "analysis_reason": enr.selfie_description,
+        "expires_at": (
+            _analysis.expires_at(enr.selfie_taken_at).isoformat()
+            if status == _analysis.PENDING and enr.selfie_taken_at
+            else None
+        ),
         "verified": enr.selfie_verified,
         "description": enr.selfie_description,
     }

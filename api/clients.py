@@ -8,6 +8,8 @@ O funil autenticado da matrícula (enrollment) entra na 6b.
 
 from __future__ import annotations
 
+from typing import Literal
+
 from ninja import Field, File, Router, Schema
 from ninja.errors import HttpError
 from ninja.files import UploadedFile
@@ -322,15 +324,39 @@ class EducationIn(Schema):
     last_year_when: str | None = None
 
 
+# enums canônicos no OpenAPI (proposta #6): em vez de `"string"`, o schema declara os valores.
+AnalysisStatus = Literal["pending", "approved", "rejected", "review"]
+WizardStatus = Literal[
+    "rg", "address", "education", "selfie", "awaiting_release", "completed"
+]
+
+
 class EnrollmentOut(Schema):
-    external_id: str
-    status: str = Field(
+    external_id: str = Field(
+        description="external_id da MATRÍCULA (≠ do user, ≠ do promoter) — proposta #8"
+    )
+    status: WizardStatus = Field(
         description="Seção do wizard a preencher AGORA: rg (documento) | address | education "
         "| selfie | awaiting_release | completed"
     )
     hub_external_id: str
     selfie_verified: bool
-    selfie_status: str  # pending(analisando)/approved/rejected/review
+    # status canônico unificado da análise (proposta #4): a análise da SELFIE/assinatura.
+    analysis_status: AnalysisStatus | None = Field(
+        None, description="Análise da selfie: pending | approved | rejected | review"
+    )
+    selfie_status: str = Field(
+        description="[DEPRECATED — use analysis_status] alias de compat"
+    )
+    # ack de polling (proposta #2): preenchidos SÓ na resposta do POST /selfie (que dispara análise).
+    poll_after_ms: int | None = Field(
+        None,
+        description="Quando o front deve voltar a perguntar (ms). None fora de mutação.",
+    )
+    expires_at: str | None = Field(
+        None,
+        description="Até quando o `pending` vale; depois disso vira `review` (TTL).",
+    )
 
 
 class RgSectionOut(Schema):
@@ -352,12 +378,17 @@ class RgSectionOut(Schema):
     front_photo: str | None = None
     back_photo: str | None = None
     full_photo: str | None = None
-    validation_status: str | None = Field(
+    # canônico unificado (proposta #4): `analysis_status`/`analysis_reason`.
+    analysis_status: AnalysisStatus | None = Field(
         None,
         description="pending (analisando) | approved | rejected (refazer — motivo em "
-        "validation_reason) | review (coordenador vai decidir)",
+        "analysis_reason) | review (coordenador vai decidir)",
     )
-    validation_reason: str | None = None  # o PORQUÊ (a IA sempre justifica)
+    analysis_reason: str | None = None  # o PORQUÊ (a IA sempre justifica)
+    validation_status: AnalysisStatus | None = Field(
+        None, description="[DEPRECATED — use analysis_status] alias de compat"
+    )
+    validation_reason: str | None = None  # [DEPRECATED — use analysis_reason]
     missing_fields: list[str] = []  # o aluno completa SÓ esses (no PATCH)
 
 
@@ -378,13 +409,19 @@ class SelfieOut(Schema):
     exists: bool
     photo: str | None = None
     taken_at: str | None = None
-    status: str | None = Field(
+    # canônico unificado (proposta #4): `analysis_status`/`analysis_reason` + `expires_at` (TTL #2).
+    analysis_status: AnalysisStatus | None = Field(
         None, description="pending (analisando) | approved | rejected | review"
     )
-    verified: bool = False
-    description: str | None = (
-        None  # comentários da IA/biometria + instruções p/ ser aprovada
+    analysis_reason: str | None = None  # comentários da IA + instruções p/ ser aprovada
+    expires_at: str | None = Field(
+        None, description="Até quando o `pending` vale; depois vira `review` (TTL)."
     )
+    status: AnalysisStatus | None = Field(
+        None, description="[DEPRECATED — use analysis_status] alias de compat"
+    )
+    verified: bool = False
+    description: str | None = None  # [DEPRECATED — use analysis_reason]
 
 
 class EnrollmentProfileOut(Schema):
@@ -404,12 +441,17 @@ class RgOut(Schema):
     full_photo: str | None = (
         None  # RG inteiro (frente+verso numa imagem) — alternativa ao par
     )
-    validation_status: str | None = Field(
+    # canônico unificado (proposta #4): `analysis_status`/`analysis_reason`.
+    analysis_status: AnalysisStatus | None = Field(
         None,
         description="Validação por IA (plan/12): pending (analisando) | approved | rejected "
-        "(refazer — motivo em validation_reason) | review (coordenador vai decidir)",
+        "(refazer — motivo em analysis_reason) | review (coordenador vai decidir)",
     )
-    validation_reason: str | None = None  # o PORQUÊ do status (a IA sempre justifica)
+    analysis_reason: str | None = None  # o PORQUÊ do status (a IA sempre justifica)
+    validation_status: AnalysisStatus | None = Field(
+        None, description="[DEPRECATED — use analysis_status] alias de compat"
+    )
+    validation_reason: str | None = None  # [DEPRECATED — use analysis_reason]
     missing_fields: list[str] = []  # campos que o OCR não leu — o aluno digita só esses
 
 
@@ -449,20 +491,36 @@ def enrollment_me(request):
 _RG_SLOTS = {"front": "rg_front", "back": "rg_back", "full": "rg_full"}
 
 
-@api.post("/enrollment/documents/rg/photo/{slot}", tags=["enrollment"])
+class RgUploadAck(Schema):
+    """Ack do upload do RG (proposta #2): a análise roda em 2º plano; o front sabe quando voltar a
+    perguntar (`poll_after_ms`) e até quando o `pending` vale (`expires_at`, depois vira `review`)."""
+
+    slot: Literal["front", "back", "full"]
+    stored: str
+    analysis_status: AnalysisStatus
+    poll_after_ms: int
+    expires_at: str | None = None
+    analysis: str = Field(
+        description="[DEPRECATED — use analysis_status] alias de compat"
+    )
+
+
+@api.post(
+    "/enrollment/documents/rg/photo/{slot}", response=RgUploadAck, tags=["enrollment"]
+)
 def enrollment_rg_photo(request, slot: str, file: UploadedFile = File(...)):
     """Foto do RG — `slot` aceita **`front`**, **`back`** ou **`full`** (documento inteiro numa
     imagem). Arquivo: JPEG/PNG/WEBP ou **PDF** (convertido internamente). A análise por IA roda
-    em 2º plano: acompanhe `validation_status` (+ motivo e campos extraídos) no
-    `GET /enrollment/documents/rg`."""
+    em 2º plano: acompanhe `analysis_status` (+ motivo e campos extraídos) no
+    `GET /enrollment/documents/rg`, voltando a perguntar a cada `poll_after_ms`."""
     ext = _enr_guard(request)
     real_slot = _RG_SLOTS.get(slot)
     if real_slot is None:
         raise HttpError(422, "Slot inválido. Aceitos: front, back, full.")
-    path = enrollment_iface.upload_rg_photo(
+    ack = enrollment_iface.upload_rg_photo(
         user_external_id=ext, slot=real_slot, upload=file
     )
-    return {"slot": slot, "stored": path, "analysis": "pending"}
+    return {"slot": slot, "analysis": ack["analysis_status"], **ack}
 
 
 @api.get("/enrollment/documents/rg", response=RgSectionOut, tags=["enrollment"])
@@ -541,14 +599,15 @@ def enrollment_get_selfie(request):
 @api.post("/enrollment/selfie", response=EnrollmentOut, tags=["enrollment"])
 def enrollment_selfie(request, file: UploadedFile = File(...)):
     """Envia a selfie (assinatura). A análise roda em 2º plano (IA + biometria vs rosto do
-    DOCUMENTO): acompanhe `status` no `GET /enrollment/selfie` (`pending` = analisando)."""
+    DOCUMENTO): acompanhe `analysis_status` no `GET /enrollment/selfie` (`pending` = analisando),
+    voltando a perguntar a cada `poll_after_ms` (a resposta já traz o ack — proposta #2)."""
     ext = _enr_guard(request)
     enr = enrollment_iface.set_selfie(
         user_external_id=ext,
         image_bytes=file.read(),
         content_type=getattr(file, "content_type", "image/jpeg"),
     )
-    return enrollment_iface.to_dict(enr)
+    return {**enrollment_iface.to_dict(enr), **enrollment_iface.selfie_ack(enr)}
 
 
 # ── aluno: funil final student→veteran (autenticado, role student) — §4 item 9 ──

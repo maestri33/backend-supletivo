@@ -181,6 +181,13 @@ MEDIA_LAN_BASE = env("MEDIA_LAN_BASE", default="")
 # Limite de upload de imagem dos documentos (users/documents) — config, não hardcoded (§10).
 MAX_UPLOAD_MB = env.int("MAX_UPLOAD_MB", default=10)
 
+# Análises assíncronas por IA (users.roles._analysis — RG, selfie): TTL e cadência de polling do
+# front (proposta API #2). TTL = quanto a gente espera o worker antes de jogar o `pending` em
+# `review` (nunca fica "analisando…" eterno se a task morreu). POLL = de quanto em quanto o front
+# volta a perguntar. Config, não hardcoded (§10).
+ANALYSIS_TTL_SECONDS = env.int("ANALYSIS_TTL_SECONDS", default=120)
+ANALYSIS_POLL_MS = env.int("ANALYSIS_POLL_MS", default=2500)
+
 
 # Biometria facial (integrations.tools.biometric) — face-match doc×selfie com InsightFace (ArcFace, CPU). §8/§10.
 # BIOMETRIC_ENABLED liga/desliga o gate no funil (dev sem o modelo → desligar p/ não jogar tudo em review).
