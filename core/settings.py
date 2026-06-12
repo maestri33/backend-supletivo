@@ -228,6 +228,9 @@ EXTERNAL_URL = env("EXTERNAL_URL", default="")
 # URL do front pra onde o gateway redireciona APÓS o pagamento (cartão/PIX). Vazio => cai no EXTERNAL_URL.
 # «PENDÊNCIA»: Victor define a URL real do front.
 FRONTEND_URL = env("FRONTEND_URL", default="")
+# Path do wizard de matrícula no front — vira o deep-link dos notifies de resolução (proposta API #11:
+# o coordenador decide → o aluno recebe o link e volta direto pro passo certo). Sem FRONTEND_URL → sem link.
+ENROLLMENT_RESUME_PATH = env("ENROLLMENT_RESUME_PATH", default="/matricula")
 # Prazo default (dias) da cobrança PIX quando o caller não passa due_date.
 ASAAS_CHARGE_DUE_DAYS = env.int("ASAAS_CHARGE_DUE_DAYS", default=3)
 # Onboarding/auto-cadastro do webhook (1a-v): nome do webhook que gerenciamos no Asaas (casamos por

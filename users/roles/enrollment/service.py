@@ -838,24 +838,48 @@ def decide_rg(
     }
 
 
-def _notify_rg_rejected(enr: Enrollment, reason: str | None) -> None:
-    from notify.interface.send import send
+def _resume_link() -> str:
+    """Deep-link de re-entrada no wizard (proposta #11): FRONTEND_URL + ENROLLMENT_RESUME_PATH.
+    Sem front configurado → vazio (a mensagem sai sem o link)."""
+    from users.roles.lead.config import frontend_url
 
+    base = frontend_url().rstrip("/")
+    if not base:
+        return ""
+    return base + getattr(settings, "ENROLLMENT_RESUME_PATH", "/matricula")
+
+
+def _notify_resolution(enr: Enrollment, event_key: str, **placeholders) -> None:
+    """Notify de RESOLUÇÃO de análise pro ALUNO (aprovado/reprovado — automático OU decisão do
+    coordenador): **multicanal** (WhatsApp + e-mail) com **deep-link** de volta pro wizard
+    (proposta #11) — o aluno não precisa segurar a tela pollando. Best-effort, nunca quebra o fluxo."""
+    from notify.interface.send import send
     from users.roles import notifications as msgs
 
     p = profiles.get(enr.user)
+    text = msgs.text(
+        event_key, name=msgs.first_name(p.name if p else None), **placeholders
+    )
+    link = _resume_link()
+    if link:
+        text += f"\n\nContinue sua matrícula por aqui: {link}"
     try:
         send(
-            text=msgs.text(
-                "enrollment.rg_rejected",
-                name=msgs.first_name(p.name if p else None),
-                detail=(reason or "").strip(),
-            ),
-            caller="enrollment.rg_rejected",
+            text=text,
+            caller=event_key,
             phone=p.phone if p else None,
+            email=p.email if p else None,
+            email_channel=bool(p and p.email),
+            subject="Sua matrícula — atualização",
         )
     except Exception as exc:  # noqa: BLE001
-        logger.warning("enrollment.notify_rg_rejected_failed", error=str(exc))
+        logger.warning(
+            "enrollment.notify_resolution_failed", event=event_key, error=str(exc)
+        )
+
+
+def _notify_rg_rejected(enr: Enrollment, reason: str | None) -> None:
+    _notify_resolution(enr, "enrollment.rg_rejected", detail=(reason or "").strip())
 
 
 def _notify_rg_review(enr: Enrollment, reason: str | None) -> None:
@@ -882,22 +906,7 @@ def _notify_rg_review(enr: Enrollment, reason: str | None) -> None:
 
 
 def _notify_rg_approved(enr: Enrollment) -> None:
-    from notify.interface.send import send
-
-    from users.roles import notifications as msgs
-
-    p = profiles.get(enr.user)
-    try:
-        send(
-            text=msgs.text(
-                "enrollment.rg_approved",
-                name=msgs.first_name(p.name if p else None),
-            ),
-            caller="enrollment.rg_approved",
-            phone=p.phone if p else None,
-        )
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("enrollment.notify_rg_approved_failed", error=str(exc))
+    _notify_resolution(enr, "enrollment.rg_approved")
 
 
 def get_education(*, user_external_id: str) -> dict:
@@ -1154,40 +1163,15 @@ def decide_selfie(
 
 
 def _notify_selfie_rejected(enr: Enrollment) -> None:
-    from notify.interface.send import send
-    from users.roles import notifications as msgs
-
-    p = profiles.get(enr.user)
-    try:
-        send(
-            text=msgs.text(
-                "enrollment.selfie_rejected",
-                name=msgs.first_name(p.name if p else None),
-                detail=(enr.selfie_description or "").strip(),
-            ),
-            caller="enrollment.selfie_rejected",
-            phone=p.phone if p else None,
-        )
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("enrollment.notify_selfie_rejected_failed", error=str(exc))
+    _notify_resolution(
+        enr,
+        "enrollment.selfie_rejected",
+        detail=(enr.selfie_description or "").strip(),
+    )
 
 
 def _notify_selfie_approved(enr: Enrollment) -> None:
-    from notify.interface.send import send
-    from users.roles import notifications as msgs
-
-    p = profiles.get(enr.user)
-    try:
-        send(
-            text=msgs.text(
-                "enrollment.selfie_approved",
-                name=msgs.first_name(p.name if p else None),
-            ),
-            caller="enrollment.selfie_approved",
-            phone=p.phone if p else None,
-        )
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("enrollment.notify_selfie_approved_failed", error=str(exc))
+    _notify_resolution(enr, "enrollment.selfie_approved")
 
 
 def _notify_selfie_review(enr: Enrollment) -> None:
