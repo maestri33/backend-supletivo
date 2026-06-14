@@ -278,3 +278,29 @@ def setup(*, force: bool = False) -> dict:
         settings.ASAAS_WEBHOOK_SECRET and settings.EXTERNAL_URL and webhook
     )
     return report
+
+
+def boot_selftest() -> dict | None:
+    """Task do Django-Q enfileirada no boot (AsaasConfig): roda a bateria + auto-cadastro do webhook
+    num WORKER estável, em vez de numa thread daemon do boot.
+
+    Por que task e não thread: `setup()` faz I/O de rede via `asyncio.run()`. Rodá-la numa thread
+    daemon do boot quebrava sob o qcluster — `RuntimeError: cannot schedule new futures after
+    interpreter shutdown` (o executor padrão do asyncio recusa futures quando o processo entra em
+    shutdown). No worker do Django-Q o `asyncio.run()` roda igual ao payout/charge/qrpay (provado),
+    sem corrida com o shutdown. Falha de rede só loga — NÃO relança (sem retry em loop).
+    """
+    try:
+        report = setup()
+    except Exception as exc:  # noqa: BLE001 — task de boot nunca deve estourar nem entrar em retry-loop
+        logger.error("asaas_boot_selftest_failed", error=str(exc))
+        return None
+    logger.info(
+        "asaas_boot_selftest",
+        api_key_tested_ok=report.get("api_key_tested_ok"),
+        url_verified=report.get("url_verified"),
+        webhook_action=report.get("webhook_action"),
+        webhook_registered=bool(report.get("webhook_registered")),
+        ready=report.get("ready"),
+    )
+    return report

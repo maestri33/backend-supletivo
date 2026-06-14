@@ -21,15 +21,27 @@ class AsaasConfig(AppConfig):
         register(check_asaas_webhook_secret)
 
         # Bateria de testes + auto-cadastro do webhook em TODO boot (1a-v), NÃO-bloqueante.
-        self._maybe_start_selftest()
+        self._maybe_enqueue_selftest()
 
-    def _maybe_start_selftest(self):
-        """Dispara a bateria (onboarding.setup) numa thread daemon — não trava o boot.
+    def _maybe_enqueue_selftest(self):
+        """Enfileira a bateria (onboarding.boot_selftest) como task do Django-Q — NÃO roda inline.
+
+        Antes a bateria rodava direto numa thread daemon do boot; como ela faz I/O de rede via
+        asyncio.run(), sob o qcluster quebrava com `RuntimeError: cannot schedule new futures after
+        interpreter shutdown` (o executor padrão do asyncio recusa futures quando o processo entra em
+        shutdown) e o webhook nunca era cadastrado. Agora um WORKER do Django-Q roda a bateria em
+        contexto estável (mesmo padrão provado de payout/charge/qrpay) -> o auto-cadastro funciona
+        sozinho, inclusive em prod (gunicorn + qcluster), onde a thread antiga nem disparava. O
+        qcluster fica SEMPRE no ar junto com o app (regra do Victor), então a fila sempre tem quem rode.
+
+        A thread aqui faz SÓ o enfileiramento (um INSERT síncrono na fila — sem asyncio), então NÃO
+        repete a corrida de shutdown da thread antiga. Enfileirar fora do ready() também evita o
+        warning do Django de "acessar o banco durante o app-init" (o INSERT espera o registro de apps).
 
         Só quando o comando é "subir o servidor" (runserver/qcluster) — pula migrate/test/shell/etc.,
         que não devem falar com o Asaas. Sob o autoreload do runserver, ready() roda 2x (launcher +
-        worker): dispara só no worker (RUN_MAIN == "true"). Com --noreload não há launcher nem
-        RUN_MAIN, então o processo único é o worker -> dispara.
+        worker): enfileira só no worker (RUN_MAIN == "true"). `setup()` é idempotente -> enfileirar 2x
+        não recria o webhook.
         """
         argv = sys.argv
         if not any(cmd in argv for cmd in ("runserver", "qcluster")):
@@ -42,30 +54,24 @@ class AsaasConfig(AppConfig):
         if reloader_launcher:
             return
         threading.Thread(
-            target=self._run_selftest, name="asaas-selftest", daemon=True
+            target=self._enqueue_selftest, name="asaas-enqueue-selftest", daemon=True
         ).start()
 
-    def _run_selftest(self):
-        """Espera o servidor subir e roda setup(): testa a key, pinga a URL e auto-cadastra o webhook.
-
-        Falha de rede só loga + carimba o ledger — NUNCA derruba o processo.
-        """
+    def _enqueue_selftest(self):
+        """Espera o registro de apps terminar e enfileira a task do boot. Falha de enfileiramento só
+        loga — nunca derruba o processo."""
         import structlog
-
-        from . import onboarding
+        from django.apps import apps as django_apps
 
         logger = structlog.get_logger()
-        time.sleep(2)  # deixa o servidor escutar antes de pingar a própria EXTERNAL_URL
+        # deixa o app-init terminar antes de tocar no banco (django_apps.ready == True após os ready())
+        for _ in range(50):
+            if django_apps.ready:
+                break
+            time.sleep(0.1)
         try:
-            report = onboarding.setup()
-        except Exception as exc:  # boot nunca cai por causa do self-test
-            logger.error("asaas_boot_selftest_failed", error=str(exc))
-            return
-        logger.info(
-            "asaas_boot_selftest",
-            api_key_tested_ok=report.get("api_key_tested_ok"),
-            url_verified=report.get("url_verified"),
-            webhook_action=report.get("webhook_action"),
-            webhook_registered=bool(report.get("webhook_registered")),
-            ready=report.get("ready"),
-        )
+            from django_q.tasks import async_task
+
+            async_task("integrations.bank.asaas.onboarding.boot_selftest")
+        except Exception as exc:  # enfileirar nunca derruba o boot
+            logger.error("asaas_boot_selftest_enqueue_failed", error=str(exc))
