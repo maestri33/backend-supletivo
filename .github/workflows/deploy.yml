@@ -1,0 +1,29 @@
+name: Deploy
+# CD: push na main → runner self-hosted (CT 30101) atualiza, checa, migra e reinicia.
+# manage.py check é o gate (system checks falham → aborta antes do restart).
+on:
+  push:
+    branches: [main]
+concurrency:
+  group: deploy-backend-v7m
+  cancel-in-progress: false
+jobs:
+  deploy:
+    runs-on: [self-hosted, backend-v7m]
+    steps:
+      - name: Atualiza, checa, migra e reinicia
+        run: |
+          set -e
+          cd /opt/dmz-backend-supletivo
+          git fetch --all --prune
+          git reset --hard origin/main
+          export DJANGO_SETTINGS_MODULE=prod_settings
+          /usr/local/bin/uv sync --inexact
+          # extras de produção que não estão no pyproject (servidor ASGI + driver PG)
+          /usr/local/bin/uv pip install -q gunicorn "uvicorn[standard]" "psycopg[binary]"
+          .venv/bin/python manage.py check
+          .venv/bin/python manage.py migrate --noinput
+          .venv/bin/python manage.py collectstatic --noinput
+          systemctl restart backend-web backend-qcluster
+          sleep 5
+          curl -fsS -o /dev/null http://127.0.0.1:8000/api/v1/clients/health && echo "deploy OK — backend no ar"
