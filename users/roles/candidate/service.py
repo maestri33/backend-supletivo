@@ -368,11 +368,25 @@ _DOC_PROFILE_FIELDS = (
 )
 
 
-def _doc_started_at(sub) -> str | None:
-    started = (sub.validation_result or {}).get("analysis_started_at") if sub else None
-    return (
-        started  # ISO string; _analysis.ack parseia se vier datetime; string é tolerada
-    )
+def _doc_started_at(sub):
+    """Datetime do início da análise (pro TTL do ack). `validation_result` guarda como string
+    ISO; aqui parseia de volta. `_analysis.ack` precisa de datetime pra somar com timedelta."""
+    from datetime import datetime
+
+    from django.utils import timezone
+
+    if sub is None:
+        return None
+    started = (sub.validation_result or {}).get("analysis_started_at")
+    if not started:
+        return None
+    if isinstance(started, datetime):
+        return started if started.tzinfo else started.replace(tzinfo=timezone.utc)
+    try:
+        dt = datetime.fromisoformat(started)
+    except (TypeError, ValueError):
+        return None
+    return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
 
 
 def _reconcile_stale_analyses(cand: Candidate) -> None:
