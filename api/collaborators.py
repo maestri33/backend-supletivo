@@ -326,14 +326,27 @@ def candidate_pix(request, payload: PixIn):
 
 @api.post("/candidate/selfie", tags=["candidate"])
 def candidate_selfie(request, file: UploadedFile = File(...)):
-    """Envia a selfie (assinatura): valida por IA (3 estados) + biometria vs documento. Aprovada →
-    promove a treino. Devolve o `me_dict` canônico."""
+    """Envia a selfie (assinatura) — **assíncrona** (plan/15 C, espelha `/enrollment/selfie`):
+
+    salva a foto + enfileira `validate_candidate_selfie` (Django-Q) e responde na hora com o
+    **ack** `{stored, analysis_status:"pending", poll_after_ms, expires_at}`. O front acompanha
+    pelo `GET /candidate/selfie` até virar `approved`/`rejected`/`review`. Aprovada→promove
+    training; reprovada→avisa candidato; review→coordenador decide."""
     ext = _guard(request, "candidate")
     return candidate_iface.set_selfie(
         user_external_id=ext,
         image_bytes=file.read(),
         content_type=getattr(file, "content_type", "image/jpeg"),
     )
+
+
+@api.get("/candidate/selfie", response=dict, tags=["candidate"])
+def get_candidate_selfie(request):
+    """GET da selfie/assinatura (plan/15 C): foto + `analysis_status`/`analysis_reason` (canônico)
+    + `expires_at` (TTL do `pending`). Aplica o TTL na leitura: pending estourado vira `review`
+    + notifica o coordenador. Espelha `GET /enrollment/selfie`."""
+    ext = _guard(request, "candidate")
+    return candidate_iface.get_selfie(user_external_id=ext)
 
 
 # ── treino (autenticado, role training) ─────────────────────────────────────

@@ -120,6 +120,67 @@ def trainee_to_dict(t: Trainee) -> dict:
     return {"external_id": str(t.external_id), "status": t.status}
 
 
+def trainee_detail_for_coordinator(*, trainee_external_id: str, coordinator) -> dict:
+    """Tela de DETALHE do trainee pro coordenador decidir a entrevista (plan/15 D1).
+
+    Junta num lugar só: dados do trainee + do User (perfil) + de cada `Submission` (matéria,
+    resposta do candidato, nota da IA, justificativa). O coordenador decide VENDO, não às
+    cegas (antes só tinha o nome na fila). Gate: o coordenador tem que ser o do polo do
+    candidato de origem (mesma régua do `approve_interview`)."""
+    from users.profiles import interface as profiles
+
+    trainee = (
+        Trainee.objects.filter(external_id=trainee_external_id)
+        .select_related(
+            "user", "user__candidate", "user__candidate__hub", "coordinator"
+        )
+        .first()
+    )
+    if trainee is None:
+        raise NotFound("Treinando não encontrado.", code="TRAINEE_NOT_FOUND")
+    hub = getattr(getattr(trainee.user, "candidate", None), "hub", None)
+    if hub is None or hub.coordinator_id != coordinator.id:
+        raise TrainingError(
+            "Você não coordena o polo deste treinando.", code="NOT_HUB_COORDINATOR"
+        )
+    user = trainee.user
+    p = profiles.get(user)
+    submissions = (
+        Submission.objects.filter(user=user)
+        .select_related("material")
+        .order_by("created_at")
+    )
+    return {
+        "external_id": str(trainee.external_id),
+        "status": trainee.status,
+        "awaiting_interview_at": trainee.awaiting_interview_at.isoformat()
+        if trainee.awaiting_interview_at
+        else None,
+        "decision_at": trainee.decision_at.isoformat() if trainee.decision_at else None,
+        "rejection_reason": trainee.rejection_reason,
+        "user": {
+            "external_id": str(user.external_id),
+            "name": p.name if p else None,
+            "cpf": p.cpf if p else None,
+            "phone": p.phone if p else None,
+            "email": p.email if p else None,
+        },
+        "submissions": [
+            {
+                "external_id": str(s.external_id),
+                "material_external_id": str(s.material.external_id),
+                "material_title": s.material.title,
+                "answer": s.answer,
+                "grade": str(s.grade) if s.grade is not None else None,
+                "justification": s.justification,
+                "status": s.status,
+                "submitted_at": s.created_at.isoformat(),
+            }
+            for s in submissions
+        ],
+    }
+
+
 # ── submissão (autenticado, role training) ──────────────────────────────────
 
 

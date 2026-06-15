@@ -15,6 +15,7 @@ from users.roles.training.service import (
     reject_interview,
     submission_to_dict,
     submit,
+    trainee_detail_for_coordinator,
     trainee_to_dict,
     update_material,
 )
@@ -24,6 +25,7 @@ __all__ = [
     "create_trainee",
     "get_trainee_for_user_external_id",
     "trainee_to_dict",
+    "trainee_detail_for_coordinator",
     "create_material",
     "update_material",
     "list_awaiting_interview_for_hub",

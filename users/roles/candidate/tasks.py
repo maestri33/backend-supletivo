@@ -24,3 +24,9 @@ def fill_document_data(candidate_id: int) -> None:
     """Pós-aprovação humana (decide): OCR+extração best-effort SÓ pra preencher campos — sem veto."""
     service.run_document_fill(candidate_id)
     logger.info("candidate.task_doc_filled", candidate_id=candidate_id)
+
+
+def validate_candidate_selfie(candidate_id: int) -> None:
+    """Valida a selfie/assinatura (liveness → face-match vs documento → instruções se reprovar)."""
+    service.run_selfie_validation(candidate_id)
+    logger.info("candidate.task_selfie_validated", candidate_id=candidate_id)

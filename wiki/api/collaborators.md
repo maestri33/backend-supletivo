@@ -60,7 +60,8 @@ e o backend decide a **etapa atual** (`status`) que o wizard renderiza. **Toda m
 | PATCH | `/candidate/document` | Completa/corrige campos que o OCR não trouxe (RG ou CNH, conforme `doc_type`); aceito em qualquer etapa da coleta |
 | POST | `/candidate/documents/photo/{slot}` | `slot` ∈ `rg_front`\|`rg_back`\|`rg_full`\|`cnh_front`\|`cnh_back`\|`cnh_full` (multipart) — salva foto, enfileira IA async; devolve **ack** (`{stored, analysis_status, poll_after_ms, expires_at}`) |
 | POST | `/candidate/pix` | `{key, key_type}` — valida no Asaas/DICT (R$0,01 REAL; confere CPF do titular) |
-| POST | `/candidate/selfie` | (multipart) — IA liveness + face-match vs documento (3 estados) |
+| POST | `/candidate/selfie` | (multipart) — **assíncrono** (plan/15 C): salva, enfileira `validate_candidate_selfie` (Django-Q) e responde **ack** `{stored, analysis_status:"pending", poll_after_ms, expires_at}`. Aprovada→promove training; reprovada→avisa candidato; review→coord decide. |
+| GET | `/candidate/selfie` | Seção rica da selfie/assinatura (plan/15 C, espelha `/enrollment/selfie`): foto + `analysis_status`/`analysis_reason` (canônico, com instruções da IA se reprovou) + `expires_at` (TTL do `pending`). Aplica TTL: pending estourado vira `review` + notifica o coord. |
 
 > **Sub-decisão Portão 2 do plan/15:** a etapa `profile` coleta **só o que o documento não traz**
 > (estado civil, nacionalidade). Filiação/naturalidade/nascimento virão da **extração do documento**
@@ -160,16 +161,11 @@ Codes do `collaborators`:
 
 ## O que esta wiki ainda **NÃO cobre** (futuro)
 
-- **Fatia B do plan/15** — `POST /candidate/document/photo/{slot}` (pipeline foto+visão+OCR+extração
-  RG **e** CNH; a CNH-e do Victor é o alvo), `GET /candidate/document` (seção rica com
-  `analysis_status`/`analysis_reason`/`missing_fields`), `PATCH /candidate/document` (corrige
-  campos que a IA não leu), `POST /leadership/candidates/{ext}/document/decide` (coordenador
-  decide revisão). Reusa `_document_ai` (generalizado por `doc_type`).
-- **Fatia C do plan/15** — selfie async com polling: `POST /candidate/selfie` responde **ack**
-  (`analysis_status: pending`, `poll_after_ms`, `expires_at`); `GET /candidate/selfie` aplica TTL
-  (pending estourado → `review`); reusa `_selfie.verify` + `_selfie.add_face_match` + `_analysis`.
-- **Fatia D do plan/15** — `GET /leadership/trainees/{ext}` (perfil + respostas + notas da IA
-  pro coordenador decidir entrevista **vendo**, não às cegas) + `GET /leadership/candidates/{ext}/
-  selfie` (foto + motivo da IA em review).
+- **Fatia C do plan/15** — ✅ implementado: `POST /candidate/selfie` (ack async) +
+  `GET /candidate/selfie` (seção rica com TTL) + notify `candidate.selfie_approved`. Reusa
+  `_selfie.verify` + `_selfie.add_face_match` + `_analysis` (pipeline async via Django-Q).
+- **Fatia D do plan/15** — ✅ implementado: `GET /leadership/trainees/{ext}` (perfil +
+  respostas + notas da IA pro coordenador decidir entrevista **vendo**, não às cegas) +
+  `GET /leadership/candidates/{ext}/selfie` (foto + motivo da IA em review).
 
 Cada fatia vira item no CHANGELOG desta wiki quando entrar.

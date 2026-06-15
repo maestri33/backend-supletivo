@@ -130,6 +130,10 @@ _MESSAGES: dict[str, str] = {
     "candidate.selfie_rejected": (
         "{name}, sua selfie não pôde ser confirmada. Envie uma nova foto, nítida e mostrando o rosto, {name}."
     ),
+    "candidate.selfie_approved": (
+        "Boa notícia, {name}! ✅ Sua selfie foi aprovada e o cadastro segue em frente. "
+        "Continue o preenchimento, {name}."
+    ),
     "candidate.selfie_in_review": (
         "{name}, a selfie de um candidato precisa da sua análise — a IA ficou em dúvida. "
         "Aprove ou reprove no painel, {name}."

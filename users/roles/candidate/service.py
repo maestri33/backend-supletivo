@@ -1348,7 +1348,9 @@ def list_selfie_reviews_for_hub(*, hub) -> list[dict]:
     return out
 
 
-def candidate_selfie_for_coordinator(*, candidate_external_id: str, coordinator) -> dict:
+def candidate_selfie_for_coordinator(
+    *, candidate_external_id: str, coordinator
+) -> dict:
     """Tela de DETALHE da selfie do candidato em REVISÃO pro coordenador decidir (plan/15 D2).
 
     Devolve a foto + `analysis_status`/`analysis_reason` (motivo da IA — útil pra aprovar/

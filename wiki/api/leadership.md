@@ -58,6 +58,7 @@ Estas são as rotas que o plan/15 A6 saneou (codes pt-br + envelope via `DomainE
 |---|---|---|
 | POST | `/training/materials` | Cria matéria (texto+questão+gabarito+ordem) — autoria do coord |
 | PUT  | `/training/materials/{external_id}` | Edita campos enviados; `active=False` desativa |
+| GET  | `/trainees/{external_id}` | **Tela de detalhe (plan/15 D1):** perfil do candidato + cada `Submission` (matéria, resposta, **nota da IA, justificativa**). O coord decide a entrevista **vendo**, não às cegas (antes só tinha o nome na fila). |
 | POST | `/trainees/{external_id}/approve` | Aprova entrevista → promove `training → promoter` + cria `Promoter` no hub herdado |
 | POST | `/trainees/{external_id}/reject` | Rejeita entrevista (registra motivo) |
 
@@ -69,6 +70,7 @@ Codes: `MATERIAL_NOT_FOUND` (404), `USER_NOT_FOUND` (404), `MATERIAL_INACTIVE` (
 
 | Método | Path | Descrição |
 |---|---|---|
+| GET  | `/candidates/{external_id}/selfie` | **Tela de detalhe (plan/15 D2):** foto + `analysis_status`/`analysis_reason` (motivo da IA). O coord decide **vendo**, não às cegas (antes decidia só com o nome na fila). `in_review: true` = tá na fila de decisão. |
 | POST | `/candidates/{external_id}/selfie/decide` | `{approve: bool, reason?}` — decide selfie em REVIEW (sim/não) |
 | POST | `/candidates/{external_id}/document/decide` | `{approve: bool, reason?}` — decide RG/CNH em REVIEW (sim/não FINAL; plan/15 B3). Aprovou → biometria + extração best-effort preenche os campos; reprovou → candidato é avisado pra reenviar. |
 

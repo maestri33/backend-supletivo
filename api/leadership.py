@@ -352,6 +352,17 @@ def decide_candidate_selfie(request, external_id: str, payload: SelfieDecideIn):
     }
 
 
+@api.get("/candidates/{external_id}/selfie", response=dict, tags=["candidate"])
+def get_candidate_selfie_for_coordinator(request, external_id: str):
+    """Tela de DETALHE da selfie do candidato em REVISÃO pro coordenador decidir (plan/15 D2):
+    foto + `analysis_status`/`analysis_reason` (motivo da IA). O coord decide VENDO, não às
+    cegas (antes decidia só com o nome na fila). Gate: o coord precisa ser o do polo."""
+    coordinator = _coordinator(request)
+    return candidate_iface.candidate_selfie_for_coordinator(
+        candidate_external_id=external_id, coordinator=coordinator
+    )
+
+
 @api.post("/candidates/{external_id}/document/decide", tags=["candidate"])
 def decide_candidate_document(request, external_id: str, payload: SelfieDecideIn):
     """Coordenador decide o documento (RG ou CNH) de um candidato que a IA mandou pra REVISÃO
@@ -519,6 +530,18 @@ def approve_trainee(request, external_id: str):
         trainee_external_id=external_id, coordinator=coordinator
     )
     return training_iface.trainee_to_dict(t)
+
+
+@api.get("/trainees/{external_id}", response=dict, tags=["training"])
+def get_trainee_for_coordinator(request, external_id: str):
+    """Tela de DETALHE do trainee pro coordenador decidir a entrevista (plan/15 D1): dados do
+    User (perfil) + cada `Submission` (matéria, resposta do candidato, nota da IA, justificativa).
+    O coordenador decide VENDO, não às cegas (antes só tinha o nome na fila). Gate: o coord
+    precisa ser o do polo do candidato de origem."""
+    coordinator = _coordinator(request)
+    return training_iface.trainee_detail_for_coordinator(
+        trainee_external_id=external_id, coordinator=coordinator
+    )
 
 
 @api.post("/trainees/{external_id}/reject", tags=["training"])
