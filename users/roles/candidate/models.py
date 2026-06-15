@@ -42,12 +42,25 @@ class Candidate(ExternalIdModel):
         default=Status.STARTED,
         db_index=True,
     )
-    # tipo de documento escolhido pelo candidato (plan/15 B). `rg` ou `cnh`. Definido quando ele
-    # sobe a 1ª foto do documento (`upload_document_photo`); a validação IA + extração
-    # miram o tipo escolhido.
+
+    class DocType(models.TextChoices):
+        """Tipo de documento que o candidato escolheu subir (plan/15 B).
+
+        Fixado quando ele sobe a 1ª foto (`upload_document_photo`); a validação IA + extração
+        miram o tipo escolhido. Imutável depois (`DOC_TYPE_LOCKED` no orquestrador)."""
+
+        RG = "rg", "RG"
+        CNH = "cnh", "CNH"
+
+    # tipo de documento escolhido pelo candidato (plan/15 B). Definido quando ele sobe a 1ª
+    # foto do documento (`upload_document_photo`); a validação IA + extração miram o tipo.
     doc_type = models.CharField(
-        max_length=4, null=True, blank=True, db_index=True
-    )  # ∈ {"rg","cnh"}
+        max_length=4,
+        choices=DocType.choices,
+        null=True,
+        blank=True,
+        db_index=True,
+    )
     # dados pessoais extras (etapa profile) — porte do legado. «PENDÊNCIA» (igual enrollment): destino/conjunto.
     mother_name = models.CharField(max_length=255, null=True, blank=True)
     father_name = models.CharField(max_length=255, null=True, blank=True)
@@ -60,6 +73,9 @@ class Candidate(ExternalIdModel):
     pix_validated = models.BooleanField(default=False)
     # selfie (etapa selfie) — "assinar o contrato"; validação IA em 3 estados + revisão do coordenador.
     selfie_image = models.CharField(max_length=255, null=True, blank=True)
+    selfie_taken_at = models.DateTimeField(
+        null=True, blank=True, db_index=True
+    )  # pro TTL do _analysis (plan/15 C)
     selfie_verified = models.BooleanField(
         default=False
     )  # = selfie_status aprovado (compat)

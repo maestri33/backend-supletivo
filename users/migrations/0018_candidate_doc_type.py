@@ -4,15 +4,14 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
-        ('users', '0017_cnh_full_photo_cnh_validated_at_and_more'),
+        ("users", "0017_cnh_full_photo_cnh_validated_at_and_more"),
     ]
 
     operations = [
         migrations.AddField(
-            model_name='candidate',
-            name='doc_type',
+            model_name="candidate",
+            name="doc_type",
             field=models.CharField(blank=True, db_index=True, max_length=4, null=True),
         ),
     ]

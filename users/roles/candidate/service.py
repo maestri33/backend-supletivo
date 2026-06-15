@@ -140,15 +140,7 @@ def me_dict(cand: Candidate) -> dict:
     address = address_iface.as_public_dict(address_iface.get_by_external_id(user_ext))
     address["missing_fields"] = [f for f in _ADDRESS_FIELDS if not address.get(f)]
 
-    selfie = {
-        "image": cand.selfie_image,
-        "analysis_status": cand.selfie_status,
-        "analysis_reason": cand.selfie_description,
-        "verified": cand.selfie_verified,
-        # alias DEPRECATED (compat com o nome antigo) — front migra p/ analysis_*
-        "status": cand.selfie_status,
-        "description": cand.selfie_description,
-    }
+    selfie = _selfie_dict(cand)
 
     return {
         **to_dict(cand),
@@ -649,7 +641,11 @@ def _doc_extract_and_finish(cand: Candidate, sub, result: dict, images: list) ->
     _finish_doc(
         cand, sub, doc_ai.APPROVED, name_reason or "Documento validado.", result
     )
-    _notify_doc_approved(cand)  # notify também no aprovado automático (espelha plan/13)
+    _notify_doc_event(
+        cand=cand,
+        event="candidate.document_approved",
+        subject="Seu cadastro — documento aprovado",
+    )  # notify também no aprovado automático (espelha plan/13)
     _doc_post_approval(cand, sub)
 
 
@@ -753,9 +749,11 @@ def _finish_doc(
         status=status,
     )
     if status == doc_ai.REJECTED:
-        _notify_doc_rejected(cand, reason)
+        _notify_doc_event(cand=cand, event="candidate.document_rejected", detail=reason)
     elif status == doc_ai.REVIEW:
-        _notify_doc_review(cand, reason)
+        _notify_doc_event(
+            cand=cand, event="candidate.document_in_review", detail=reason
+        )
 
 
 def _doc_post_approval(cand: Candidate, sub) -> None:
@@ -878,12 +876,7 @@ def decide_document(
     }
     if not approve:
         _finish_doc(cand, sub, doc_ai.REJECTED, note, result)
-        return {
-            "external_id": str(cand.external_id),
-            "status": cand.status,
-            "doc_type": cand.doc_type,
-            "validation_status": sub.validation_status,
-        }
+        return me_dict(cand)
     # aprovação humana: as fotos presentes valem como aprovadas
     photos = dict(result.get("photos") or {})
     for slot, field in _DOC_SLOT_FIELD.items():
@@ -891,7 +884,11 @@ def decide_document(
             photos[slot] = {"status": doc_ai.APPROVED, "reason": note}
     result["photos"] = photos
     _finish_doc(cand, sub, doc_ai.APPROVED, note, result)
-    _notify_doc_approved(cand)
+    _notify_doc_event(
+        cand=cand,
+        event="candidate.document_approved",
+        subject="Seu cadastro — documento aprovado",
+    )
     if result.get("extracted"):
         _apply_doc_extracted(cand, sub, result["extracted"])
     else:
@@ -899,75 +896,53 @@ def decide_document(
 
         async_task("users.roles.candidate.tasks.fill_document_data", cand.id)
     _doc_post_approval(cand, sub)
-    return {
-        "external_id": str(cand.external_id),
-        "status": cand.status,
-        "doc_type": cand.doc_type,
-        "validation_status": sub.validation_status,
-    }
+    return me_dict(cand)
 
 
-def _notify_doc_rejected(cand: Candidate, reason: str | None) -> None:
+def _notify_doc_event(
+    *,
+    cand: Candidate,
+    event: str,
+    detail: str | None = None,
+    subject: str | None = None,
+) -> None:
+    """Despachante único dos notifies do documento do candidato (plan/15 B3, refator do /python-review).
+
+    Direciona o destinatário pelo `event` (catálogo `users.roles.notifications`):
+      • `candidate.document_in_review` → coordenador do hub
+      • `candidate.document_rejected` / `candidate.document_approved` → candidato
+
+    Falha do `send` vira WARNING (a análise IA segue válida — o destinatário pode descobrir pelo
+    app; o notify tem retry/canal alternativo internamente, então engolir aqui é proposital)."""
     from notify.interface.send import send
     from users.roles import notifications as msgs
 
-    p = profiles.get(cand.user)
-    text = msgs.text(
-        "candidate.document_rejected",
-        name=msgs.first_name(p.name if p else None),
-        detail=reason or "Tire outra foto mostrando o documento com nitidez.",
-    )
+    if event == "candidate.document_in_review":
+        coord = cand.hub.coordinator
+        if coord is None:
+            return
+        cp = profiles.get(coord)
+        target_name = msgs.first_name(cp.name if cp else None)
+        target_phone = cp.phone if cp else None
+        target_email = None
+    else:
+        p = profiles.get(cand.user)
+        target_name = msgs.first_name(p.name if p else None)
+        target_phone = p.phone if p else None
+        target_email = p.email if p else None
+
+    text = msgs.text(event, name=target_name, detail=detail or "")
     try:
         send(
             text=text,
-            caller="candidate.document_rejected",
-            phone=p.phone if p else None,
+            caller=event,
+            phone=target_phone,
+            email=target_email,
+            email_channel=bool(target_email),
+            subject=subject,
         )
     except Exception as exc:  # noqa: BLE001
-        logger.warning("candidate.notify_doc_rejected_failed", error=str(exc))
-
-
-def _notify_doc_review(cand: Candidate, reason: str | None) -> None:
-    from notify.interface.send import send
-    from users.roles import notifications as msgs
-
-    coord = cand.hub.coordinator
-    if coord is None:
-        return
-    cp = profiles.get(coord)
-    try:
-        send(
-            text=msgs.text(
-                "candidate.document_in_review",
-                name=msgs.first_name(cp.name if cp else None),
-                detail=reason or "",
-            ),
-            caller="candidate.document_in_review",
-            phone=cp.phone if cp else None,
-        )
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("candidate.notify_doc_review_failed", error=str(exc))
-
-
-def _notify_doc_approved(cand: Candidate) -> None:
-    from notify.interface.send import send
-    from users.roles import notifications as msgs
-
-    p = profiles.get(cand.user)
-    try:
-        send(
-            text=msgs.text(
-                "candidate.document_approved",
-                name=msgs.first_name(p.name if p else None),
-            ),
-            caller="candidate.document_approved",
-            phone=p.phone if p else None,
-            email=p.email if p else None,
-            email_channel=bool(p and p.email),
-            subject="Seu cadastro — documento aprovado",
-        )
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("candidate.notify_doc_approved_failed", error=str(exc))
+        logger.warning("candidate.notify_doc_event_failed", event=event, error=str(exc))
 
 
 def list_document_reviews_for_hub(*, hub) -> list[dict]:
@@ -1032,34 +1007,158 @@ def set_pix(*, user_external_id, key: str, key_type: str) -> dict:
     return me_dict(cand)
 
 
+def get_selfie(*, user_external_id: str) -> dict:
+    """GET da selfie/ASSINATURA (plan/15 C). Espelha a seção do enrollment: foto, taken_at,
+    `analysis_status` (canônico) + `status` (alias), `analysis_reason` (instruções se reprovou),
+    `expires_at` (TTL do `pending`). Aplica o TTL: pending estourado → `review` + notifica coord."""
+    cand = _require(user_external_id, _S.PIX, _S.SELFIE, _S.COMPLETED)
+    _reconcile_selfie_stale(cand)
+    return _selfie_dict(cand)
+
+
 def set_selfie(
     *, user_external_id, image_bytes: bytes, content_type="image/jpeg"
 ) -> dict:
-    """Selfie ("assinar"): valida por IA (3 estados). APROVADA → COMPLETED + promove candidate→training.
-    REPROVADA → refazer (avisa o candidato). REVISÃO (IA fora/dúvida) → o coordenador decide o sim/não."""
-    from users.roles import _selfie
+    """Selfie ("assinar") — ASSÍNCRONA (plan/15 C, espelha o enrollment):
 
-    from pathlib import Path
+    1. salva a foto
+    2. marca `selfie_status=PENDING` + `selfie_taken_at=now`
+    3. ENFILEIRA `users.roles.candidate.tasks.validate_candidate_selfie` (Django-Q)
+    4. devolve o **ack** `{stored, analysis_status:"pending", poll_after_ms, expires_at}`
+
+    O front acompanha pelo `GET /candidate/selfie` até virar `approved`/`rejected`/`review`. A
+    pipeline roda fora do request (liveness → face-match vs documento → instruções se reprovou);
+    o veredito final decide promover / notificar o candidato / escalar pro coordenador."""
+    from django.utils import timezone
+
+    from users.roles import _selfie
 
     cand = _require(user_external_id, _S.PIX, _S.SELFIE)
     cand.selfie_image = _save_selfie(cand, image_bytes, content_type)
+    cand.selfie_taken_at = timezone.now()
+    cand.selfie_status = _selfie.SelfieStatus.PENDING
+    cand.selfie_verified = False
+    cand.selfie_description = None
+    cand.save()
+    from django_q.tasks import async_task
+
+    async_task("users.roles.candidate.tasks.validate_candidate_selfie", cand.id)
+    return _selfie_ack(cand)
+
+
+def _selfie_ack(cand: Candidate) -> dict:
+    """Ack canônico (mesma régua do `enrollment.selfie_ack`) pra responder no POST."""
+    from users.roles import _analysis
+
+    return {
+        "stored": True,
+        "analysis_status": _analysis.PENDING,
+        "poll_after_ms": _analysis.poll_after_ms(),
+        "expires_at": _analysis.expires_at(cand.selfie_taken_at).isoformat()
+        if cand.selfie_taken_at
+        else None,
+    }
+
+
+def _selfie_dict(cand: Candidate) -> dict:
+    """Bloco da selfie (GET /selfie e o bloco `selfie` do /me — espelha enrollment/_selfie_dict)."""
+    from users.roles import _analysis
+
+    status = cand.selfie_status if cand.selfie_image else None
+    return {
+        "exists": bool(cand.selfie_image),
+        "photo": cand.selfie_image,
+        "taken_at": cand.selfie_taken_at.isoformat() if cand.selfie_taken_at else None,
+        "status": status,
+        # canônico unificado (mesma régua do enrollment — proposta API #4): alias `status`/`description`
+        # mantidos pra compat; `expires_at` = TTL do `pending` (proposta #2).
+        "analysis_status": status,
+        "analysis_reason": cand.selfie_description,
+        "expires_at": (
+            _analysis.expires_at(cand.selfie_taken_at).isoformat()
+            if status == _analysis.PENDING and cand.selfie_taken_at
+            else None
+        ),
+        "verified": cand.selfie_verified,
+        "description": cand.selfie_description,
+    }
+
+
+def _reconcile_selfie_stale(cand: Candidate) -> None:
+    """TTL do `pending` da selfie (proposta #2): se a análise estourou, vira `review` na próxima
+    leitura + avisa o coordenador (mesma régua do enrollment)."""
+    from users.roles import _analysis, _selfie
+
+    if _analysis.is_stale(cand.selfie_status, cand.selfie_taken_at):
+        cand.selfie_status = _selfie.REVIEW
+        cand.selfie_description = (
+            (cand.selfie_description or "")
+            + "\n\n[análise estourou o TTL; coordenador precisa decidir]"
+        ).strip()
+        cand.save(update_fields=["selfie_status", "selfie_description", "updated_at"])
+        _notify_selfie_review(cand)
+
+
+def run_selfie_validation(candidate_id: int) -> None:
+    """Pipeline async da selfie do CANDIDATO (plan/15 C, espelha `enrollment.run_selfie_validation`).
+
+    a) liveness (é selfie real? vale ir pra biometria?)
+    b) face-match biométrico selfie × documento (do candidato — RG ou CNH aprovada)
+    c) reprovou? a visão gera INSTRUÇÕES práticas de como ser aprovada
+    d) 3 estados: aprovada→promove training; reprovada→avisa candidato; review→avisa coord.
+
+    Idempotente: só age com `selfie_status` PENDING (re-upload no meio tempo descarta o veredito)."""
+    from pathlib import Path
+
+    from users.roles import _selfie
+
+    cand = (
+        Candidate.objects.select_related("user", "hub", "hub__coordinator")
+        .filter(id=candidate_id)
+        .first()
+    )
+    if cand is None or not cand.selfie_image or cand.status != _S.SELFIE:
+        return
+    if cand.selfie_status != _selfie.SelfieStatus.PENDING:
+        return
+    fp = Path(settings.MEDIA_ROOT) / cand.selfie_image
+    if not fp.exists():
+        return
+    image_bytes = fp.read_bytes()
+    content_type = "image/jpeg"
     status, desc = _selfie.verify(image_bytes, content_type, caller="candidate.selfie")
-    # SOMAR (Victor 2026-06-05): face-match biométrico selfie × documento. Avança só se os dois passarem.
+    # SOMAR (Victor 2026-06-05): face-match biométrico selfie × documento.
     status, desc = _selfie.add_face_match(
         user=cand.user,
-        selfie_image_path=str(Path(settings.MEDIA_ROOT) / cand.selfie_image),
+        selfie_image_path=str(fp),
         caller="candidate.selfie",
         liveness_status=status,
         liveness_desc=desc,
     )
+    if status == _selfie.REJECTED:
+        tips = _selfie.instructions(
+            image_bytes, content_type, reason=desc, caller="candidate.selfie"
+        )
+        if tips:
+            desc = f"{desc}\n\nComo resolver: {tips}"
+    cand.refresh_from_db(fields=["selfie_status"])
+    if cand.selfie_status != _selfie.SelfieStatus.PENDING:
+        return  # re-upload — veredito é de foto velha, descarta
     cand.selfie_status = status
     cand.selfie_verified = status == _selfie.APPROVED
     cand.selfie_description = desc
-    if cand.status == _S.PIX:
-        cand.status = _S.SELFIE  # avança pra etapa selfie (aguarda veredito)
-    cand.save()
+    cand.save(
+        update_fields=[
+            "selfie_status",
+            "selfie_verified",
+            "selfie_description",
+            "updated_at",
+        ]
+    )
+    logger.info(
+        "candidate.selfie_validated", candidate=str(cand.external_id), status=status
+    )
     _resolve_selfie(cand)
-    return me_dict(cand)
 
 
 def _save_selfie(cand: Candidate, image_bytes: bytes, content_type: str) -> str:
@@ -1074,15 +1173,38 @@ def _save_selfie(cand: Candidate, image_bytes: bytes, content_type: str) -> str:
 
 
 def _resolve_selfie(cand: Candidate) -> None:
-    """Reage ao veredito da selfie: aprovada→promove; reprovada→avisa candidato; revisão→avisa coordenador."""
+    """Reage ao veredito da selfie: aprovada→notifica+promove; reprovada→avisa candidato; revisão→avisa coordenador."""
     from users.roles import _selfie
 
     if cand.selfie_status == _selfie.APPROVED:
+        _notify_selfie_approved(cand)
         _promote_to_training(cand)
     elif cand.selfie_status == _selfie.REJECTED:
         _notify_selfie_rejected(cand)
     elif cand.selfie_status == _selfie.REVIEW:
         _notify_selfie_review(cand)
+
+
+def _notify_selfie_approved(cand: Candidate) -> None:
+    """Notify do aprovado (plan/15 C — paridade com `enrollment.selfie_approved`). Sem TTS."""
+    from notify.interface.send import send
+    from users.roles import notifications as msgs
+
+    p = profiles.get(cand.user)
+    try:
+        send(
+            text=msgs.text(
+                "candidate.selfie_approved",
+                name=msgs.first_name(p.name if p else None),
+            ),
+            caller="candidate.selfie_approved",
+            phone=p.phone if p else None,
+            email=p.email if p else None,
+            email_channel=bool(p and p.email),
+            idempotency_key=f"candidate_selfie_approved_{cand.external_id}",
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("candidate.notify_selfie_approved_failed", error=str(exc))
 
 
 def _promote_to_training(cand: Candidate) -> None:
@@ -1224,3 +1346,37 @@ def list_selfie_reviews_for_hub(*, hub) -> list[dict]:
             }
         )
     return out
+
+
+def candidate_selfie_for_coordinator(*, candidate_external_id: str, coordinator) -> dict:
+    """Tela de DETALHE da selfie do candidato em REVISÃO pro coordenador decidir (plan/15 D2).
+
+    Devolve a foto + `analysis_status`/`analysis_reason` (motivo da IA — útil pra aprovar/
+    reprovar com contexto). O coordenador decide VENDO, não às cegas (antes decidia só com o
+    nome na fila). Gate: o coord precisa ser o do polo do candidato (mesma régua do decide)."""
+    from users.roles import _selfie
+
+    cand = (
+        Candidate.objects.filter(external_id=candidate_external_id)
+        .select_related("hub", "user")
+        .first()
+    )
+    if cand is None:
+        raise CandidateError("Candidato não encontrado.", code="CANDIDATE_NOT_FOUND")
+    if cand.hub.coordinator_id != coordinator.id:
+        raise CandidateError(
+            "Você não coordena o polo deste candidato.", code="NOT_HUB_COORDINATOR"
+        )
+    p = profiles.get(cand.user)
+    return {
+        "external_id": str(cand.external_id),
+        "user": {
+            "external_id": str(cand.user.external_id),
+            "name": p.name if p else None,
+            "cpf": p.cpf if p else None,
+        },
+        "selfie": _selfie_dict(cand),
+        # "em revisão" = o que a IA mandou pra fila (TTL ou dúvida). Se NÃO está em REVIEW,
+        # o detalhe existe mas o coordenador não tem o que decidir (front avisa).
+        "in_review": cand.selfie_status == _selfie.REVIEW,
+    }
