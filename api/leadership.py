@@ -19,6 +19,7 @@ from ninja.errors import HttpError
 
 from api.auth import require_roles
 from api.base import build_group
+from api.schemas import MaterialIn, MaterialUpdateIn
 from users.auth import interface as auth_iface
 from users.auth.jwt import service as jwt_service
 from users.auth.models import User
@@ -47,7 +48,7 @@ def _coordinator(request) -> User:
         external_id=request.auth.external_id, is_active=True
     ).first()
     if user is None:
-        raise HttpError(403, "Coordenador não encontrado.")
+        raise Forbidden("Coordenador não encontrado.", code="FORBIDDEN_ROLE")
     return user
 
 
@@ -338,15 +339,12 @@ def decide_enrollment_selfie(request, external_id: str, payload: SelfieDecideIn)
 def decide_candidate_selfie(request, external_id: str, payload: SelfieDecideIn):
     """Coordenador decide a selfie de um candidato que a IA mandou pra REVISÃO."""
     coordinator = _coordinator(request)
-    try:
-        cand = candidate_iface.decide_selfie(
-            candidate_external_id=external_id,
-            coordinator=coordinator,
-            approve=payload.approve,
-            reason=payload.reason,
-        )
-    except candidate_iface.CandidateError as exc:
-        raise HttpError(422, str(exc)) from exc
+    cand = candidate_iface.decide_selfie(
+        candidate_external_id=external_id,
+        coordinator=coordinator,
+        approve=payload.approve,
+        reason=payload.reason,
+    )
     return {
         "external_id": str(cand.external_id),
         "selfie_status": cand.selfie_status,
@@ -466,21 +464,15 @@ def issue_diploma(request, external_id: str):
 
 
 # ── funil do colaborador: autoria de matéria (coordenador também — Victor) ──
-class MaterialIn(Schema):
-    title: str
-    text_content: str
-    question: str
-    expected_answer: str
-    order: int = 0
-
-
-class MaterialUpdateIn(Schema):
-    title: str | None = None
-    text_content: str | None = None
-    question: str | None = None
-    expected_answer: str | None = None
-    order: int | None = None
-    active: bool | None = None
+# MaterialIn/MaterialUpdateIn vêm do módulo compartilhado (plan/15 A7; mesmo contrato do staff).
+@api.get("/training/materials", tags=["training"])
+def list_materials(request):
+    """Lista todas as matérias COM gabarito (visão de autoria — o coordenador também autora)."""
+    _coordinator(request)
+    return [
+        training_iface.material_to_dict(m, include_answer=True)
+        for m in training_iface.list_materials(active_only=False)
+    ]
 
 
 @api.post("/training/materials", tags=["training"])
@@ -493,10 +485,7 @@ def create_material(request, payload: MaterialIn):
 @api.put("/training/materials/{external_id}", tags=["training"])
 def update_material(request, external_id: str, payload: MaterialUpdateIn):
     _coordinator(request)
-    try:
-        m = training_iface.update_material(external_id, **payload.dict())
-    except training_iface.TrainingError as exc:
-        raise HttpError(404, str(exc)) from exc
+    m = training_iface.update_material(external_id, **payload.dict())
     return training_iface.material_to_dict(m, include_answer=True)
 
 
@@ -509,12 +498,9 @@ class RejectIn(Schema):
 def approve_trainee(request, external_id: str):
     """Aprova a entrevista do trainee do seu polo → promove a promotor."""
     coordinator = _coordinator(request)
-    try:
-        t = training_iface.approve_interview(
-            trainee_external_id=external_id, coordinator=coordinator
-        )
-    except training_iface.TrainingError as exc:
-        raise HttpError(422, str(exc)) from exc
+    t = training_iface.approve_interview(
+        trainee_external_id=external_id, coordinator=coordinator
+    )
     return training_iface.trainee_to_dict(t)
 
 
@@ -522,12 +508,9 @@ def approve_trainee(request, external_id: str):
 def reject_trainee(request, external_id: str, payload: RejectIn):
     """Rejeita a entrevista do trainee (com motivo) — não promove."""
     coordinator = _coordinator(request)
-    try:
-        t = training_iface.reject_interview(
-            trainee_external_id=external_id,
-            coordinator=coordinator,
-            reason=payload.reason,
-        )
-    except training_iface.TrainingError as exc:
-        raise HttpError(422, str(exc)) from exc
+    t = training_iface.reject_interview(
+        trainee_external_id=external_id,
+        coordinator=coordinator,
+        reason=payload.reason,
+    )
     return training_iface.trainee_to_dict(t)

@@ -46,7 +46,9 @@ def create_candidate(*, cpf: str, phone: str, email: str, hub=None) -> dict:
     """
     hub_obj = hub_iface.get_by_external_id(hub) if hub else hub_iface.get_default()
     if hub_obj is None:
-        raise CandidateError("no_hub")  # seed_defaults não rodou / hub inexistente
+        raise CandidateError(
+            "Nenhum polo disponível para o cadastro.", code="NO_HUB"
+        )  # seed_defaults não rodou / hub inexistente
 
     reg = auth_iface.register(role="candidate", phone=phone, cpf=cpf, email=email)
     user = User.objects.get(external_id=reg["external_id"])
@@ -56,7 +58,12 @@ def create_candidate(*, cpf: str, phone: str, email: str, hub=None) -> dict:
         external_id=str(candidate.external_id),
         hub=str(hub_obj.external_id),
     )
-    return {"external_id": str(candidate.external_id), "status": candidate.status}
+    return {
+        "external_id": str(candidate.external_id),
+        # external_id do USER — é o que o /auth/login consome (plan/15 A4).
+        "user_external_id": reg["external_id"],
+        "status": candidate.status,
+    }
 
 
 def get_for_user_external_id(user_external_id: str) -> Candidate | None:
@@ -97,6 +104,61 @@ def to_dict(cand: Candidate) -> dict:
     }
 
 
+# campos essenciais do endereço (espelha enrollment._ADDRESS_FIELDS; complement é opcional)
+_ADDRESS_FIELDS = ("street", "number", "neighborhood", "city", "state")
+# perfil do candidato: filiação/naturalidade VÊM da extração do documento (Fatia B, plan/15);
+# estado civil/nacionalidade = o que o documento não traz (Portão 2: a etapa "perfil" coleta só esses).
+_PROFILE_FIELDS = (
+    "mother_name",
+    "father_name",
+    "birthplace",
+    "marital_status",
+    "nationality",
+)
+
+
+def me_dict(cand: Candidate) -> dict:
+    """GET /me RICO do candidato (espelha `enrollment.me_dict`, plan/15): `status` + cada seção já
+    preenchida + `missing_fields` por seção, numa chamada só. Bloco `None`/vazio = seção ainda não
+    preenchida. **Toda mutação devolve este shape** → o front roteia o wizard sem re-fetch."""
+    user_ext = str(cand.user.external_id)
+    p = profiles.get(cand.user)
+
+    profile = None
+    if any(getattr(cand, f) for f in _PROFILE_FIELDS):
+        profile = {
+            "mother_name": cand.mother_name,
+            "father_name": cand.father_name,
+            "birthplace": cand.birthplace,
+            "marital_status": cand.marital_status,
+            "nationality": cand.nationality,
+            # do CPFHub/extração — NÃO editáveis pelo candidato
+            "name": p.name if p else None,
+            "birth_date": p.birth_date.isoformat() if p and p.birth_date else None,
+        }
+
+    address = address_iface.as_public_dict(address_iface.get_by_external_id(user_ext))
+    address["missing_fields"] = [f for f in _ADDRESS_FIELDS if not address.get(f)]
+
+    selfie = {
+        "image": cand.selfie_image,
+        "analysis_status": cand.selfie_status,
+        "analysis_reason": cand.selfie_description,
+        "verified": cand.selfie_verified,
+        # alias DEPRECATED (compat com o nome antigo) — front migra p/ analysis_*
+        "status": cand.selfie_status,
+        "description": cand.selfie_description,
+    }
+
+    return {
+        **to_dict(cand),
+        "profile": profile,
+        "address": address,
+        "documents": documents_iface.get_by_external_id(user_ext),
+        "selfie": selfie,
+    }
+
+
 # ── funil de coleta (autenticado, role candidate) ───────────────────────────
 
 
@@ -108,7 +170,7 @@ def set_profile(
     marital_status=None,
     birthplace=None,
     nationality=None,
-) -> Candidate:
+) -> dict:
     cand = _require(user_external_id, _S.STARTED, _S.PROFILE)
     for field, value in (
         ("mother_name", mother_name),
@@ -122,15 +184,17 @@ def set_profile(
     cand.save()
     if cand.status == _S.STARTED:
         _set_status(cand, _S.PROFILE)
-    return cand
+    return me_dict(cand)
 
 
 def get_address(*, user_external_id) -> dict:
-    """GET do endereço (o front vê o que está vazio p/ saber o que ainda pode preencher)."""
+    """GET do endereço + `missing_fields` (o front renderiza input só do que falta)."""
     _require(user_external_id)
-    return address_iface.as_public_dict(
+    data = address_iface.as_public_dict(
         address_iface.get_by_external_id(user_external_id)
     )
+    data["missing_fields"] = [f for f in _ADDRESS_FIELDS if not data.get(f)]
+    return data
 
 
 def set_address_cep(*, user_external_id, cep) -> dict:
@@ -138,9 +202,7 @@ def set_address_cep(*, user_external_id, cep) -> dict:
     cand = _require(user_external_id, _S.PROFILE, _S.ADDRESS)
     address_iface.set_by_cep(external_id=user_external_id, cep=cep)
     _advance_address(cand, user_external_id)
-    return address_iface.as_public_dict(
-        address_iface.get_by_external_id(user_external_id)
-    )
+    return me_dict(cand)
 
 
 def set_address_data(*, user_external_id, **fields) -> dict:
@@ -148,9 +210,7 @@ def set_address_data(*, user_external_id, **fields) -> dict:
     cand = _require(user_external_id, _S.PROFILE, _S.ADDRESS)
     address_iface.fill_empty(external_id=user_external_id, **fields)
     _advance_address(cand, user_external_id)
-    return address_iface.as_public_dict(
-        address_iface.get_by_external_id(user_external_id)
-    )
+    return me_dict(cand)
 
 
 def _advance_address(cand: Candidate, user_external_id) -> None:
@@ -166,12 +226,14 @@ def set_documents(*, user_external_id, doc_type: str, **fields) -> dict:
     cand = _require(user_external_id, _S.ADDRESS, _S.DOCUMENTS)
     doc_type = doc_type.strip().lower()
     if doc_type not in ("rg", "cnh"):
-        raise CandidateError("invalid_doc_type")
+        raise CandidateError(
+            "Tipo de documento inválido (use 'rg' ou 'cnh').", code="INVALID_DOC_TYPE"
+        )
     payload = {doc_type: {k: v for k, v in fields.items() if v is not None}}
-    result = documents_iface.update(user_external_id, payload)
+    documents_iface.update(user_external_id, payload)
     if cand.status == _S.ADDRESS:
         _set_status(cand, _S.DOCUMENTS)
-    return result
+    return me_dict(cand)
 
 
 def upload_document_photo(*, user_external_id, slot: str, upload) -> str:
@@ -194,20 +256,26 @@ def upload_document_photo(*, user_external_id, slot: str, upload) -> str:
     return path
 
 
-def set_pix(*, user_external_id, key: str, key_type: str) -> Candidate:
+def set_pix(*, user_external_id, key: str, key_type: str) -> dict:
     """Valida a chave Pix no Asaas/DICT (confere que é do candidato, CPF do Profile) e grava. MEXE R$0,01."""
     from integrations.bank.asaas import pixkey
 
     cand = _require(user_external_id, _S.DOCUMENTS, _S.PIX)
     profile = profiles.find_by_external_id(user_external_id)
     if profile is None or not profile.cpf:
-        raise CandidateError("profile_cpf_missing")
+        raise CandidateError(
+            "CPF do perfil ausente — refaça o cadastro.", code="PROFILE_CPF_MISSING"
+        )
     try:
         pixkey.validate_pix_key(
             key=key, key_type=key_type, expected_document=profile.cpf
         )
     except pixkey.PixKeyError as exc:
-        raise CandidateError(f"pix_invalid: {exc}") from exc
+        raise CandidateError(
+            "Chave Pix inválida ou não é do titular.",
+            code="PIX_INVALID",
+            extra={"reason": str(exc)},
+        ) from exc
 
     profiles.set_pix(
         user_external_id, key.strip()
@@ -219,12 +287,12 @@ def set_pix(*, user_external_id, key: str, key_type: str) -> Candidate:
     if cand.status == _S.DOCUMENTS:
         _set_status(cand, _S.PIX)
     logger.info("candidate.pix_validated", external_id=str(cand.external_id))
-    return cand
+    return me_dict(cand)
 
 
 def set_selfie(
     *, user_external_id, image_bytes: bytes, content_type="image/jpeg"
-) -> Candidate:
+) -> dict:
     """Selfie ("assinar"): valida por IA (3 estados). APROVADA → COMPLETED + promove candidate→training.
     REPROVADA → refazer (avisa o candidato). REVISÃO (IA fora/dúvida) → o coordenador decide o sim/não."""
     from users.roles import _selfie
@@ -249,7 +317,7 @@ def set_selfie(
         cand.status = _S.SELFIE  # avança pra etapa selfie (aguarda veredito)
     cand.save()
     _resolve_selfie(cand)
-    return cand
+    return me_dict(cand)
 
 
 def _save_selfie(cand: Candidate, image_bytes: bytes, content_type: str) -> str:
@@ -301,11 +369,17 @@ def decide_selfie(
         .first()
     )
     if cand is None:
-        raise CandidateError("candidate_not_found")
+        raise CandidateError("Candidato não encontrado.", code="CANDIDATE_NOT_FOUND")
     if cand.hub.coordinator_id != coordinator.id:
-        raise CandidateError("not_hub_coordinator")
+        raise CandidateError(
+            "Você não coordena o polo deste candidato.", code="NOT_HUB_COORDINATOR"
+        )
     if cand.selfie_status != _selfie.REVIEW:
-        raise CandidateError(f"selfie_not_in_review:{cand.selfie_status}")
+        raise CandidateError(
+            "A selfie não está em revisão.",
+            code="SELFIE_NOT_IN_REVIEW",
+            extra={"selfie_status": cand.selfie_status},
+        )
     note = (reason or "").strip() or (
         "aprovada pelo coordenador" if approve else "reprovada pelo coordenador"
     )

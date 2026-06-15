@@ -14,7 +14,7 @@ import structlog
 from django.db import transaction
 from django.utils import timezone
 
-from users.exceptions import Conflict, DomainError
+from users.exceptions import Conflict, DomainError, Forbidden, NotFound
 from users.roles import interface as roles
 from users.roles.training.config import pass_score
 from users.roles.training.models import Material, Submission, Trainee
@@ -49,7 +49,7 @@ def create_material(
 def _material(external_id: str) -> Material:
     m = Material.objects.filter(external_id=external_id).first()
     if m is None:
-        raise TrainingError("material_not_found")
+        raise NotFound("Matéria não encontrada.", code="MATERIAL_NOT_FOUND")
     return m
 
 
@@ -130,15 +130,18 @@ def submit(
 
     user = User.objects.filter(external_id=user_external_id).first()
     if user is None:
-        raise TrainingError("user_not_found")
+        raise NotFound("Usuário não encontrado.", code="USER_NOT_FOUND")
     material = _material(material_external_id)
     if not material.active:
-        raise TrainingError("material_inactive")
+        raise TrainingError("Matéria inativa.", code="MATERIAL_INACTIVE")
     # bloqueia 2ª pending na mesma matéria (não gasta IA em dobro)
     if Submission.objects.filter(
         user=user, material=material, status=Submission.Status.PENDING
     ).exists():
-        raise TrainingError("already_grading")
+        raise Conflict(
+            "Já existe uma resposta em correção para esta matéria.",
+            code="ALREADY_GRADING",
+        )
 
     sub = Submission.objects.create(
         user=user, material=material, answer=answer, status=Submission.Status.PENDING
@@ -170,7 +173,7 @@ def progress(user_external_id: str) -> list[dict]:
 
     user = User.objects.filter(external_id=user_external_id).first()
     if user is None:
-        raise TrainingError("user_not_found")
+        raise NotFound("Usuário não encontrado.", code="USER_NOT_FOUND")
     out = []
     for m in list_materials(active_only=True):
         last = (
@@ -290,12 +293,14 @@ def approve_interview(*, trainee_external_id: str, coordinator) -> Trainee:
         .first()
     )
     if trainee is None:
-        raise TrainingError("trainee_not_found")
+        raise NotFound("Treinando não encontrado.", code="TRAINEE_NOT_FOUND")
     hub = _hub_of_trainee(trainee)
     if hub is None:
-        raise TrainingError("no_hub")
+        raise TrainingError("Treinando sem polo de origem.", code="NO_HUB")
     if hub.coordinator_id != coordinator.id:
-        raise TrainingError("not_hub_coordinator")
+        raise Forbidden(
+            "Você não coordena o polo deste treinando.", code="NOT_HUB_COORDINATOR"
+        )
     if trainee.status != Trainee.Status.AWAITING_INTERVIEW:
         raise Conflict(
             "O treinamento está em outra fase.",
@@ -326,10 +331,12 @@ def reject_interview(*, trainee_external_id: str, coordinator, reason: str) -> T
         .first()
     )
     if trainee is None:
-        raise TrainingError("trainee_not_found")
+        raise NotFound("Treinando não encontrado.", code="TRAINEE_NOT_FOUND")
     hub = _hub_of_trainee(trainee)
     if hub is None or hub.coordinator_id != coordinator.id:
-        raise TrainingError("not_hub_coordinator")
+        raise Forbidden(
+            "Você não coordena o polo deste treinando.", code="NOT_HUB_COORDINATOR"
+        )
     if trainee.status != Trainee.Status.AWAITING_INTERVIEW:
         raise Conflict(
             "O treinamento está em outra fase.",
