@@ -5,10 +5,14 @@ Fina — reexporta a lógica do `service`.
 from users.roles.candidate.service import (
     CandidateError,
     create_candidate,
+    decide_document,
     decide_selfie,
+    list_document_reviews_for_hub,
     list_selfie_reviews_for_hub,
     get_address,
+    get_document_section,
     get_for_user_external_id,
+    patch_document_section,
     set_address_cep,
     set_address_data,
     set_documents,
@@ -19,6 +23,7 @@ from users.roles.candidate.service import (
     to_dict,
     upload_document_photo,
 )
+from users.roles.candidate.tasks import fill_document_data, validate_document
 
 __all__ = [
     "CandidateError",
@@ -31,9 +36,15 @@ __all__ = [
     "set_address_cep",
     "set_address_data",
     "set_documents",
+    "get_document_section",
+    "patch_document_section",
     "upload_document_photo",
     "set_pix",
     "set_selfie",
+    "decide_document",
     "decide_selfie",
+    "list_document_reviews_for_hub",
     "list_selfie_reviews_for_hub",
+    "validate_document",
+    "fill_document_data",
 ]

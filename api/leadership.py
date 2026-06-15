@@ -352,6 +352,23 @@ def decide_candidate_selfie(request, external_id: str, payload: SelfieDecideIn):
     }
 
 
+@api.post("/candidates/{external_id}/document/decide", tags=["candidate"])
+def decide_candidate_document(request, external_id: str, payload: SelfieDecideIn):
+    """Coordenador decide o documento (RG ou CNH) de um candidato que a IA mandou pra REVISÃO
+    (plan/15 B3). Decisão humana é FINAL.
+
+    Aprovou → o candidato é avisado, a biometria roda e a extração best-effort preenche os campos
+    (filiação/naturalidade → candidato; nº/órgão/etc → sub-doc RG/CNH). Reprova → o candidato é
+    avisado pra reenviar a foto (com o motivo)."""
+    coordinator = _coordinator(request)
+    return candidate_iface.decide_document(
+        candidate_external_id=external_id,
+        coordinator=coordinator,
+        approve=payload.approve,
+        reason=payload.reason,
+    )
+
+
 # ── funil do aluno: coordenador conduz student→veteran (§4 item 9) ───────────
 # ⚠️ NÃO TESTADO (nem in-process completo, nem com fluxo real).
 class ExamGradeIn(Schema):

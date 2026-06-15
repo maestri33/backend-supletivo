@@ -279,15 +279,39 @@ def candidate_documents(request, payload: DocumentsIn):
     )
 
 
+@api.get("/candidate/document", tags=["candidate"])
+def candidate_get_document(request):
+    """Seção rica do documento (plan/15 B3): `doc_type` + fotos + validação IA canônica
+    (`analysis_status`/`analysis_reason`/`analysis_started_at`) + campos extraídos + `missing_fields`
+    (o que a IA não trouxe E o candidato precisa digitar). Espelha o `enrollment.get_rg_section`."""
+    ext = _guard(request, "candidate")
+    return candidate_iface.get_document_section(user_external_id=ext)
+
+
+@api.patch("/candidate/document", tags=["candidate"])
+def candidate_patch_document(request, payload: DocumentsIn):
+    """Completa/corrige campos que a extração OCR não trouxe. Aceito em qualquer etapa da coleta
+    (a foto segue sendo a fonte de verdade pra auditoria). Devolve o `me_dict` canônico."""
+    ext = _guard(request, "candidate")
+    fields = payload.dict(exclude_none=True)
+    fields.pop("doc_type", None)  # PATCH não muda o tipo; veio do upload
+    return candidate_iface.patch_document_section(user_external_id=ext, **fields)
+
+
 @api.post("/candidate/documents/photo/{slot}", tags=["candidate"])
 def candidate_document_photo(request, slot: str, file: UploadedFile = File(...)):
-    """Foto do documento (slots `rg_front`/`rg_back`/`cnh_front`/`cnh_back`). Na frente o rosto vira
-    biometria do documento (best-effort)."""
+    """Foto do documento (slots `rg_front`/`rg_back`/`rg_full`/`cnh_front`/`cnh_back`/`cnh_full`).
+    Plan/15 B3: na frente o rosto vira biometria do documento (best-effort) e a foto entra no
+    pipeline de IA (visão+OCR+extração assíncrono). Devolve **ack** pra o front acompanhar
+    (`stored` + `analysis_status`/`poll_after_ms`/`expires_at`).
+
+    O **1º slot** (rg_* OU cnh_*) define o `doc_type` do candidato — imutável depois
+    (`DOC_TYPE_LOCKED`). RG inteiro (`rg_full`) ou CNH inteira (`cnh_full`) cabem numa só foto;
+    frente+verso (2 fotos) também."""
     ext = _guard(request, "candidate")
-    path = candidate_iface.upload_document_photo(
+    return candidate_iface.upload_document_photo(
         user_external_id=ext, slot=slot, upload=file
     )
-    return {"slot": slot, "stored": path}
 
 
 @api.post("/candidate/pix", tags=["candidate"])

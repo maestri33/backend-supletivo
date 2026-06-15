@@ -7,10 +7,11 @@
 > leadership/docs`** e `/api/v1/leadership/openapi.json`.
 >
 > ⚠️ **Esta wiki cobre o grupo inteiro do `leadership`**, mas no **escopo do plan/15** o que
-> **entregou agora** foi só a parte do **colaborador** (decide de candidato+treinando+materiais —
-> ver §3 abaixo). A parte do **aluno** (RG/selfie/fee/conclude/exam/grade — plan/12/13/14) está
-> implementada mas foi escrita antes e fica como **black box** aqui; o Portão 3 com o Victor é que
-> sincroniza a wiki detalhada dela.
+> **entregou agora** foi a parte do **colaborador** (decide de candidato+treinando+materiais — ver
+> §3 abaixo; **plan/15 Fatia B**: `/candidates/{ext}/document/decide` pro RG/CNH em REVIEW). A
+> parte do **aluno** (RG/selfie/fee/conclude/exam/grade — plan/12/13/14) está implementada mas foi
+> escrita antes e fica como **black box** aqui; o Portão 3 com o Victor é que sincroniza a wiki
+> detalhada dela.
 
 ---
 
@@ -69,10 +70,11 @@ Codes: `MATERIAL_NOT_FOUND` (404), `USER_NOT_FOUND` (404), `MATERIAL_INACTIVE` (
 | Método | Path | Descrição |
 |---|---|---|
 | POST | `/candidates/{external_id}/selfie/decide` | `{approve: bool, reason?}` — decide selfie em REVIEW (sim/não) |
-| POST | `/candidates/{external_id}/document/decide` | *(Fatia B — ainda a fazer)* decide doc em REVIEW (sim/não) |
+| POST | `/candidates/{external_id}/document/decide` | `{approve: bool, reason?}` — decide RG/CNH em REVIEW (sim/não FINAL; plan/15 B3). Aprovou → biometria + extração best-effort preenche os campos; reprovou → candidato é avisado pra reenviar. |
 
 Codes: `CANDIDATE_NOT_FOUND` (404), `NOT_HUB_COORDINATOR` (403), `SELFIE_NOT_IN_REVIEW` (422,
-`extra: {selfie_status}`), `WRONG_STATUS` (409).
+`extra: {selfie_status}`), `DOC_NOT_IN_REVIEW` (422, `extra: {validation_status}`), `DOC_TYPE_NOT_SET`
+(422), `WRONG_STATUS` (409).
 
 ---
 

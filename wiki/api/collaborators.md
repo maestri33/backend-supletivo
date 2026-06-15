@@ -56,7 +56,9 @@ e o backend decide a **etapa atual** (`status`) que o wizard renderiza. **Toda m
 | POST | `/candidate/address` | `{cep}` → ViaCEP preenche; se cidade de CEP único, `missing_fields` lista o que falta |
 | PATCH | `/candidate/address` | demais campos (street/number/neighborhood/city/state) — **só preenche vazios**, não sobrescreve o CEP |
 | POST | `/candidate/documents` | `{doc_type, number, issuing_agency?, ...}` (etapa `documents`; `doc_type` ∈ `rg`\|`cnh`) |
-| POST | `/candidate/documents/photo/{slot}` | `slot` ∈ `rg_front`\|`rg_back`\|`cnh_front`\|`cnh_back` (multipart) — salva foto, matricula biometria do doc |
+| GET | `/candidate/document` | Seção rica do doc: `doc_type` + fotos + `analysis_status`/`reason` (canônico) + campos extraídos + `missing_fields` |
+| PATCH | `/candidate/document` | Completa/corrige campos que o OCR não trouxe (RG ou CNH, conforme `doc_type`); aceito em qualquer etapa da coleta |
+| POST | `/candidate/documents/photo/{slot}` | `slot` ∈ `rg_front`\|`rg_back`\|`rg_full`\|`cnh_front`\|`cnh_back`\|`cnh_full` (multipart) — salva foto, enfileira IA async; devolve **ack** (`{stored, analysis_status, poll_after_ms, expires_at}`) |
 | POST | `/candidate/pix` | `{key, key_type}` — valida no Asaas/DICT (R$0,01 REAL; confere CPF do titular) |
 | POST | `/candidate/selfie` | (multipart) — IA liveness + face-match vs documento (3 estados) |
 
@@ -64,6 +66,27 @@ e o backend decide a **etapa atual** (`status`) que o wizard renderiza. **Toda m
 > (estado civil, nacionalidade). Filiação/naturalidade/nascimento virão da **extração do documento**
 > (Fatia B). O front pode mandar esses campos no `POST /candidate/profile` mas a IA do documento é
 > a fonte da verdade.
+
+### Documento (RG **ou** CNH) — pipeline IA (plan/15 Fatia B)
+
+O candidato escolhe **RG ou CNH** no 1º upload (`POST /candidate/documents/photo/{slot}` infere o
+tipo do prefixo do slot). O `doc_type` é **imutável** depois do 1º upload (tentar enviar do outro
+tipo → **422 `DOC_TYPE_LOCKED`**). Slots:
+
+- **RG inteiro** (`rg_full`): frente+verso numa foto só (PDF de 1-2 páginas vira JPEG empilhado)
+- **RG frente+verso** (`rg_front` + `rg_back`): 2 fotos separadas
+- **CNH inteira** (`cnh_full`): idem
+- **CNH frente+verso** (`cnh_front` + `cnh_back`): idem
+
+A 1ª foto retorna ack `{stored, analysis_status:"pending", poll_after_ms, expires_at}`. O front
+acompanha pelo `GET /candidate/document` até virar `approved`/`rejected`/`review`. TTL: pending
+estourado (default 120s) → vira `review` (coordenador decide) na próxima leitura.
+
+- `approved` → biometria do documento + extração preenche os campos (filiação/naturalidade no
+  candidato, nº/órgão/etc no sub-doc RG/CNH) → wizard avança pra `PIX` automaticamente.
+- `rejected` → motivo da IA no WhatsApp; candidato reenvia a foto pelo app.
+- `review` → coordenador do polo decide em `POST /leadership/candidates/{ext}/document/decide`
+  (`{approve: bool, reason?}`).
 
 ### Máquina de status (Candidate)
 

@@ -42,6 +42,12 @@ class Candidate(ExternalIdModel):
         default=Status.STARTED,
         db_index=True,
     )
+    # tipo de documento escolhido pelo candidato (plan/15 B). `rg` ou `cnh`. Definido quando ele
+    # sobe a 1ª foto do documento (`upload_document_photo`); a validação IA + extração
+    # miram o tipo escolhido.
+    doc_type = models.CharField(
+        max_length=4, null=True, blank=True, db_index=True
+    )  # ∈ {"rg","cnh"}
     # dados pessoais extras (etapa profile) — porte do legado. «PENDÊNCIA» (igual enrollment): destino/conjunto.
     mother_name = models.CharField(max_length=255, null=True, blank=True)
     father_name = models.CharField(max_length=255, null=True, blank=True)

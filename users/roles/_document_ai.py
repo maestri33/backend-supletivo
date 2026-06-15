@@ -1,10 +1,10 @@
-"""Validação de documento de identidade por IA — visão + OCR + extração JSON (plan/12).
+"""Validação de documento de identidade por IA — visão + OCR + extração JSON (plan/12 + plan/15 B1).
 
-Compartilhada: nasce no `enrollment` (RG) e foi desenhada pra ser reusada pelo `candidate`
-(RG/CNH) num ciclo futuro — uma implementação só (CONVENTION §12). Mesma régua de 3 estados
-do student/selfie (plan/9): **approved** · **rejected** (motivo SEMPRE) · **review** (IA fora
-do ar OU em dúvida → o coordenador decide). Quem orquestra (status no model, notifies, avanço
-do wizard) é o serviço do funil; aqui moram só as chamadas de IA.
+Compartilhada: nasce no `enrollment` (RG) e atende **dois tipos** de documento — `rg` e `cnh` —
+(plan/15 B1: promotor pode usar RG **ou** CNH). Uma implementação só (CONVENTION §12). Mesma
+régua de 3 estados do student/selfie (plan/9): **approved** · **rejected** (motivo SEMPRE) ·
+**review** (IA fora do ar OU em dúvida → o coordenador decide). Quem orquestra (status no model,
+notifies, avanço do wizard) é o serviço do funil; aqui moram só as chamadas de IA.
 
 Os valores de status espelham `RG.Validation` (pending/approved/rejected/review) — strings
 compartilhadas, sem import do model (evita ciclo documents↔roles).
@@ -23,8 +23,13 @@ REVIEW = "review"
 
 _AI_DOWN = "IA indisponível no momento — enviado para revisão manual do coordenador."
 
-# lado esperado da foto (CONTEXTO no prompt — não é critério rígido de reprovação; o aluno pode
-# trocar os lados e o conteúdo se resolve na extração/biometria). front/back = par; full = inteiro.
+# Tipos de documento suportados (plan/15 B1).
+DOC_RG = "rg"
+DOC_CNH = "cnh"
+DOC_TYPES = (DOC_RG, DOC_CNH)
+
+# lado esperado da foto (CONTEXTO no prompt — não é critério rígido de reprovação; o candidato
+# pode trocar os lados e o conteúdo se resolve na extração/biometria). front/back = par; full = inteiro.
 _SIDE_DESC = {
     "front": (
         "a FRENTE da carteira — o lado com a FOTO do titular, a impressão digital, a assinatura "
@@ -38,19 +43,27 @@ _SIDE_DESC = {
     "full": "a carteira INTEIRA (frente e verso na mesma imagem)",
 }
 
-# Campos que a extração devolve (todos podem vir null — a IA NÃO inventa).
-EXTRACT_FIELDS = (
-    "number",
-    "issuing_agency",
-    "issue_date",
-    "name",
-    "birth_date",
-    "mother_name",
-    "father_name",
-    "birthplace",
-)
+# Por `doc_type`: como o prompt descreve o documento esperado e o que **NÃO** confundir.
+# CNH-e do Victor (CNH Digital.pdf na raiz) = app gov.br: card renderizado + QR + MRZ ICAO.
+_DOC_TYPE_HINT = {
+    DOC_RG: (
+        "uma CARTEIRA DE IDENTIDADE brasileira (RG ou a nova CIN), de qualquer modelo — inclusive "
+        "o ANTIGO (cartão verde), que É um RG válido. NÃO confunda com CNH: a CNH tem elementos "
+        "de HABILITAÇÃO (categoria A/B/C/D, validade, 'PERMISSÃO PARA DIRIGIR') — só trate como "
+        "CNH se vir ESSES elementos."
+    ),
+    DOC_CNH: (
+        "uma CARTEIRA NACIONAL DE HABILITAÇÃO (CNH), em qualquer modelo — inclusive a CNH-e "
+        "DIGITAL (a do app gov.br: card renderizado, QR Code de validação e MRZ ICAO no rodapé). "
+        "Deve ter ELEMENTOS de HABILITAÇÃO: nome do titular, nº de registro, CATEGORIA (A/B/C/D/"
+        "E/ACC), VALIDADE, DATA DE NASCIMENTO, FILIAÇÃO. NÃO confunda com RG/CIN (esse não tem "
+        "categoria nem validade)."
+    ),
+}
 
-_EXTRACT_SCHEMA = (
+# Schema de extração POR TIPO (plan/15 B1). RG: campos do legado (port/12). CNH: nº/registro,
+# categoria, registro nacional, validade, data de nascimento, nome, filiação.
+_EXTRACT_SCHEMA_RG = (
     "{"
     '"number": "número do RG (registro geral), string ou null", '
     '"issuing_agency": "órgão emissor com UF (ex.: SSP/SP), string ou null", '
@@ -65,29 +78,70 @@ _EXTRACT_SCHEMA = (
     "}"
 )
 
+_EXTRACT_SCHEMA_CNH = (
+    "{"
+    '"number": "número de registro da CNH (mesmo que aparece no campo REGISTRO), string ou null", '
+    '"category": "categoria da CNH (ex.: B, ACC, AB), string ou null", '
+    '"national_register": "nº do registro nacional (RENACH) se visível, string ou null", '
+    '"expires_on": "data de validade no formato AAAA-MM-DD ou null", '
+    '"name": "nome completo do titular ou null", '
+    '"birth_date": "data de nascimento no formato AAAA-MM-DD ou null", '
+    '"mother_name": "nome da mãe (filiação) ou null", '
+    '"father_name": "nome do pai (filiação) ou null", '
+    '"name_match": "sim | nao | duvida", '
+    '"name_reason": "explicação curta da comparação dos nomes"'
+    "}"
+)
+
+_EXTRACT_SCHEMAS = {DOC_RG: _EXTRACT_SCHEMA_RG, DOC_CNH: _EXTRACT_SCHEMA_CNH}
+
+# Campos que a extração RG devolve (reusado por quem precisar). CNH tem o seu próprio (em extract_document).
+EXTRACT_FIELDS_RG = (
+    "number",
+    "issuing_agency",
+    "issue_date",
+    "name",
+    "birth_date",
+    "mother_name",
+    "father_name",
+    "birthplace",
+)
+EXTRACT_FIELDS_CNH = (
+    "number",
+    "category",
+    "national_register",
+    "expires_on",
+    "name",
+    "birth_date",
+    "mother_name",
+    "father_name",
+)
+
 
 def check_photo(
     image_bytes: bytes,
     *,
     side: str,
+    doc_type: str = DOC_RG,
     mime_type: str = "image/jpeg",
     caller: str,
 ) -> tuple[str, str]:
-    """Visão: a foto é mesmo o lado `side` de um RG e está legível? → (status, motivo).
+    """Visão: a foto é mesmo o lado `side` de um `doc_type` (`rg` ou `cnh`) e está legível?
+    → (status, motivo). Plan/15 B1 generalizou por `doc_type`.
 
     Veredito direto (padrão `_selfie`): APROVADO/REPROVADO no começo da resposta; ambíguo ou
     IA fora do ar → REVIEW (humano decide). O motivo SEMPRE volta (plan/9)."""
+    if doc_type not in DOC_TYPES:
+        raise ValueError(f"doc_type inválido: {doc_type!r} (use um de {DOC_TYPES})")
     from integrations.ai import service as ai
 
+    doc_hint = _DOC_TYPE_HINT[doc_type]
     prompt = (
-        f"Esta imagem deve mostrar {_SIDE_DESC[side]} de uma CARTEIRA DE IDENTIDADE brasileira "
-        "(RG ou a nova CIN), de qualquer modelo — inclusive o ANTIGO (cartão verde), que É um RG "
-        "válido. NÃO confunda com CNH: a CNH tem elementos de HABILITAÇÃO (categoria A/B/C, "
-        "validade, 'PERMISSÃO PARA DIRIGIR') — só trate como CNH se vir ESSES elementos. "
+        f"Esta imagem deve mostrar {_SIDE_DESC[side]} de {doc_hint} "
         "A imagem pode ter sido endireitada automaticamente; NÃO reprove por orientação/rotação. "
         "Documento plastificado costuma ter brilho/reflexo — só é problema se ESCONDER os dados. "
-        "Reprove APENAS se: (a) não for uma carteira de identidade (RG/CIN) — ex.: CNH, QR code, "
-        "selfie, outro papel; ou (b) os dados estiverem genuinamente ilegíveis (muito "
+        f"Reprove APENAS se: (a) não for {doc_type.upper()} válido (outro documento, QR code, "
+        "selfie, outro papel) — ou (b) os dados estiverem genuinamente ilegíveis (muito "
         "desfocado/escuro ou cortado escondendo informação). NÃO reprove só porque parece ser o "
         "outro lado da carteira. Responda em português começando OBRIGATORIAMENTE com APROVADO "
         "ou REPROVADO, seguida de um motivo curto e claro."
@@ -151,17 +205,48 @@ def ocr_images(images: list[bytes], *, caller: str) -> str:
 
 
 def extract_rg(ocr_text: str, *, holder_name: str | None, caller: str) -> dict:
-    """1 chamada LLM (JSON): extrai os campos do RG + confere o nome do titular.
+    """Wrapper de retrocompatibilidade (plan/12) — delega pra `extract_document(..., doc_type="rg")`.
+    Mantido pra não quebrar callers existentes; novos callers devem usar `extract_document`."""
+    return extract_document(
+        ocr_text, doc_type=DOC_RG, holder_name=holder_name, caller=caller
+    )
+
+
+def extract_document(
+    ocr_text: str,
+    *,
+    doc_type: str,
+    holder_name: str | None,
+    caller: str,
+) -> dict:
+    """1 chamada LLM (JSON): extrai os campos do documento (`rg` ou `cnh`) + confere o nome do
+    titular. Plan/15 B1 — generalizou `extract_rg` por `doc_type`.
 
     `name_match`: 'sim' = mesmo titular (variação por CASAMENTO — sobrenome acrescentado/
     alterado — ou abreviação conta como 'sim'); 'nao' = claramente OUTRA pessoa; 'duvida' =
     ilegível/incompleto. A IA não inventa: campo ausente no OCR = null. Erro de IA sobe
     (o orquestrador decide o que fazer — em regra, REVIEW)."""
+    if doc_type not in DOC_TYPES:
+        raise ValueError(f"doc_type inválido: {doc_type!r} (use um de {DOC_TYPES})")
     from integrations.ai import service as ai
 
     expected = holder_name or "(nome não informado)"
+    schema = _EXTRACT_SCHEMAS[doc_type]
+    if doc_type == DOC_CNH:
+        doc_label = "carteira nacional de habilitação (CNH)"
+        instruction = (
+            "Você extrai dados da Carteira Nacional de Habilitação brasileira (CNH, inclusive "
+            "a CNH-e digital do app gov.br: card + QR + MRZ) a partir de texto OCR. "
+            "Responda APENAS o JSON pedido."
+        )
+    else:
+        doc_label = "carteira de identidade brasileira (RG/CIN)"
+        instruction = (
+            "Você extrai dados de carteiras de identidade brasileiras (RG/CIN) a partir de "
+            "texto OCR. Responda APENAS o JSON pedido."
+        )
     prompt = (
-        f"Texto OCR de uma carteira de identidade brasileira (RG/CIN):\n\n{ocr_text}\n\n"
+        f"Texto OCR de uma {doc_label}:\n\n{ocr_text}\n\n"
         f"O titular esperado desta conta é: {expected}.\n"
         "Compare o nome impresso no documento com o esperado: variações por CASAMENTO "
         "(sobrenome acrescentado, removido ou alterado) ou abreviações contam como 'sim', "
@@ -172,11 +257,8 @@ def extract_rg(ocr_text: str, *, holder_name: str | None, caller: str) -> dict:
     data = ai.generate_json(
         prompt,
         caller=caller,
-        instruction=(
-            "Você extrai dados de carteiras de identidade brasileiras (RG/CIN) a partir de "
-            "texto OCR. Responda APENAS o JSON pedido."
-        ),
-        schema_description=_EXTRACT_SCHEMA,
+        instruction=instruction,
+        schema_description=schema,
     )
     if not isinstance(data, dict):
         data = {}

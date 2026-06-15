@@ -40,6 +40,7 @@ _PHOTO_SLOTS = {
     "rg_full": ("rg", "full_photo"),  # RG inteiro (frente+verso numa imagem) — plan/12
     "cnh_front": ("cnh", "front_photo"),
     "cnh_back": ("cnh", "back_photo"),
+    "cnh_full": ("cnh", "full_photo"),  # CNH inteira (frente+verso) — plan/15 B2
     "certificate_photo": ("certificate", "photo"),
     "military_photo": ("military", "photo"),
 }
@@ -118,7 +119,9 @@ def as_dict(document: Document) -> dict:
             else None,
             "expires_on": cnh.expires_on.isoformat() if cnh.expires_on else None,
             "national_register": cnh.national_register,
-            **_photo(cnh, "front_photo", "back_photo"),
+            **_photo(cnh, "front_photo", "back_photo", "full_photo"),
+            "validation_status": cnh.validation_status,
+            "validation_reason": (cnh.validation_result or {}).get("reason"),
         },
         "certificate": {
             "kind": cert.kind,
@@ -147,6 +150,21 @@ def get_by_external_id(external_id: str) -> dict:
 def get_rg(external_id: str) -> RG | None:
     """A instância RG do usuário (pro orquestrador da validação IA — enrollment, plan/12)."""
     return RG.objects.filter(document__user__external_id=external_id).first()
+
+
+def get_cnh(external_id: str) -> CNH | None:
+    """A instância CNH do usuário (plan/15 B2 — espelho do `get_rg`)."""
+    return CNH.objects.filter(document__user__external_id=external_id).first()
+
+
+def get_doc_sub(external_id: str, doc_type: str):
+    """Devolve a instância do sub-doc pelo tipo (`rg` ou `cnh`). Helper do orquestrador de IA
+    do funil (plan/15 B3) — espelha `get_rg` mas sem acoplar num tipo só."""
+    if doc_type == "rg":
+        return get_rg(external_id)
+    if doc_type == "cnh":
+        return get_cnh(external_id)
+    raise ValueError(f"doc_type inválido: {doc_type!r}")
 
 
 def update(external_id: str, payload: dict) -> dict:

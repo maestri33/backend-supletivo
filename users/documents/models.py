@@ -82,7 +82,16 @@ class RG(models.Model):
 
 
 class CNH(models.Model):
-    """Carteira de habilitação (CNH) — porte do conjunto do legado (palavra do dono)."""
+    """Carteira de habilitação (CNH) — porte do conjunto do legado (palavra do dono).
+
+    Plan/15 B2 — `validation_status`/`validation_result`/`validated_at`/`full_photo` (espelho do RG;
+    mesma máquina de 4 estados + aceite de CNH inteira numa foto só)."""
+
+    class Validation(models.TextChoices):
+        PENDING = "pending", "aguardando IA"
+        APPROVED = "approved", "aprovado"
+        REJECTED = "rejected", "reprovado (refazer)"
+        REVIEW = "review", "em revisão (coordenador decide)"
 
     document = models.OneToOneField(
         Document, on_delete=models.CASCADE, related_name="cnh"
@@ -96,6 +105,20 @@ class CNH(models.Model):
     )
     front_photo = models.CharField("foto frente", max_length=500, null=True, blank=True)
     back_photo = models.CharField("foto verso", max_length=500, null=True, blank=True)
+    # CNH inteira (frente+verso numa imagem só) — alternativa ao par front/back (plan/15 B2,
+    # espelhando `rg_full`).
+    full_photo = models.CharField("foto inteira", max_length=500, null=True, blank=True)
+    validation_status = models.CharField(
+        "validação IA",
+        max_length=20,
+        choices=Validation.choices,
+        default=Validation.PENDING,
+        db_index=True,
+    )
+    validation_result = models.JSONField(
+        "resultado da validação", null=True, blank=True
+    )
+    validated_at = models.DateTimeField("validado em", null=True, blank=True)
 
     class Meta:
         app_label = "users"

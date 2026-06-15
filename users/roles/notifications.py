@@ -134,6 +134,19 @@ _MESSAGES: dict[str, str] = {
         "{name}, a selfie de um candidato precisa da sua análise — a IA ficou em dúvida. "
         "Aprove ou reprove no painel, {name}."
     ),
+    # Documento do CANDIDATO (plan/15 B) — espelho do aluno; mesmo catálogo, chaves próprias.
+    "candidate.document_rejected": (
+        "{name}, precisamos de uma nova foto do seu documento: {detail} "
+        "Reenvie pelo aplicativo, {name} — é rapidinho. 📄"
+    ),
+    "candidate.document_in_review": (
+        "{name}, o documento de um candidato precisa da sua análise — a IA ficou em dúvida. "
+        "Aprove ou reprove no painel, {name}."
+    ),
+    "candidate.document_approved": (
+        "Boa notícia, {name}! ✅ Seu documento foi aprovado e o cadastro segue em frente. "
+        "Continue o preenchimento, {name}."
+    ),
     "training.awaiting_interview": (
         "{name}, um candidato concluiu o treino e aguarda a sua entrevista de aprovação. "
         "Dê uma olhada quando puder, {name}."

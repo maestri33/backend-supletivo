@@ -231,29 +231,757 @@ def set_documents(*, user_external_id, doc_type: str, **fields) -> dict:
         )
     payload = {doc_type: {k: v for k, v in fields.items() if v is not None}}
     documents_iface.update(user_external_id, payload)
+    # plan/15 B3: o tipo escolhido é persistido no Candidate (espelha o RG do aluno ser 1-1
+    # com User — aqui o candidato escolhe RG OU CNH). Imutável após a 1ª foto: re-upload de
+    # outro tipo exigiria reset (não implementado; tratamos como erro no orquestrador).
+    if cand.doc_type in (None, "", doc_type):
+        cand.doc_type = doc_type
+        cand.save(update_fields=["doc_type", "updated_at"])
     if cand.status == _S.ADDRESS:
         _set_status(cand, _S.DOCUMENTS)
     return me_dict(cand)
 
 
-def upload_document_photo(*, user_external_id, slot: str, upload) -> str:
-    """Foto do documento (slots `rg_front`/`rg_back`/`cnh_front`/`cnh_back`).
+def get_document_section(*, user_external_id) -> dict:
+    """GET da seção documento do candidato (plan/15 B3) — fotos + validação IA + TODOS os campos
+    extraídos (ou digitados) + `missing_fields` (o que ainda precisa completar). Espelha o
+    `enrollment.get_rg_section` (plan/13). Tipo do documento = `cand.doc_type`."""
+    cand = _require(user_external_id)
+    _reconcile_stale_analyses(cand)
+    return _doc_section_dict(cand)
 
-    Na FRENTE (rg_front/cnh_front) o rosto vira biometria do documento, salva no perfil (best-effort —
-    não quebra o upload; rosto ruim cai em review na selfie). Candidato aceita RG OU CNH (Victor)."""
+
+def patch_document_section(*, user_external_id, **fields) -> dict:
+    """PATCH da seção documento (plan/15 B3): completa/corrige o que a extração não trouxe.
+    Aceito em qualquer etapa da coleta (a foto segue sendo a fonte de verdade pra auditoria)."""
+    cand = _require(user_external_id, _S.DOCUMENTS, _S.PIX, _S.SELFIE)
+    doc_type = cand.doc_type
+    if not doc_type:
+        raise CandidateError(
+            "Tipo de documento ainda não definido. Envie a primeira foto do RG ou CNH.",
+            code="DOC_TYPE_NOT_SET",
+        )
+    doc_payload = {k: fields[k] for k in _DOC_DOC_FIELDS if fields.get(k) is not None}
+    if doc_payload:
+        documents_iface.update(user_external_id, {doc_type: doc_payload})
+    profile_payload = {
+        k: fields[k] for k in _DOC_PROFILE_FIELDS if fields.get(k) is not None
+    }
+    if profile_payload:
+        for k, v in profile_payload.items():
+            setattr(cand, k, v)
+        cand.save(update_fields=[*profile_payload.keys(), "updated_at"])
+    _advance_documents(cand, user_external_id)
+    return me_dict(cand)  # resposta canônica
+
+
+def upload_document_photo(*, user_external_id, slot: str, upload) -> dict:
+    """Foto do documento (slots `rg_front`/`rg_back`/`rg_full`/`cnh_front`/`cnh_back`/`cnh_full`).
+    Plan/15 B3: na FRENTE o rosto vira biometria (best-effort) e a foto entra no pipeline de IA
+    (visão+OCR+extração assíncrono) — devolve **ack** (análise começou) pra o front acompanhar."""
     from pathlib import Path
 
-    from integrations.tools.biometric import service as biometric
+    from users.roles import _analysis
 
     cand = _require(user_external_id, _S.DOCUMENTS, _S.PIX)
+    # Define o `doc_type` do candidato a partir do 1º slot (rg_* ou cnh_*). Imutável depois.
+    inferred = (
+        "rg" if slot.startswith("rg_") else ("cnh" if slot.startswith("cnh_") else None)
+    )
+    if inferred is None:
+        raise CandidateError(
+            f"Slot de documento inválido: {slot}.", code="SLOT_INVALID"
+        )
+    if cand.doc_type in (None, ""):
+        cand.doc_type = inferred
+        cand.save(update_fields=["doc_type", "updated_at"])
+    elif cand.doc_type != inferred:
+        raise CandidateError(
+            f"Você já escolheu {cand.doc_type.upper()}. Para trocar, recomece o cadastro.",
+            code="DOC_TYPE_LOCKED",
+        )
     path = documents_iface.upload_photo(user_external_id, slot, upload)
+    # biometria do documento (best-effort; rosto ruim → cai em review na selfie)
+    from integrations.tools.biometric import service as biometric
+
     biometric.try_enroll_document(
         user=cand.user,
         slot=slot,
         image_path=str(Path(settings.MEDIA_ROOT) / path),
         caller="candidate.document",
     )
-    return path
+    # pipeline IA async (visão → OCR → extração → biometria) — plan/12+15 B3
+    _reset_doc_validation(user_external_id, cand.doc_type, slot)
+    from django_q.tasks import async_task
+
+    async_task("users.roles.candidate.tasks.validate_document", cand.id, slot)
+    sub = documents_iface.get_doc_sub(user_external_id, cand.doc_type)
+    return {"stored": path, **_analysis.ack(_analysis.PENDING, _doc_started_at(sub))}
+
+
+# ── validação do documento por IA (plan/12+15 B3) ───────────────────────────
+# Espelha `enrollment.run_rg_validation` mas GENERALIZADO por `doc_type` (rg|cnh) — uma
+# implementação só, alimentada pela `_document_ai` que já é polimórfica (B1). Roda na task
+# Django-Q (`tasks.validate_document`); aqui é a orquestração (status no sub-doc, notifies,
+# avanço do wizard).
+
+_DOC_SLOT_FIELD = {
+    "rg_front": "front_photo",
+    "rg_back": "back_photo",
+    "rg_full": "full_photo",
+    "cnh_front": "front_photo",
+    "cnh_back": "back_photo",
+    "cnh_full": "full_photo",
+}
+_DOC_SLOT_SIDE = {
+    "rg_front": "front",
+    "rg_back": "back",
+    "rg_full": "full",
+    "cnh_front": "front",
+    "cnh_back": "back",
+    "cnh_full": "full",
+}
+_MIME_BY_EXT = {
+    "jpg": "image/jpeg",
+    "jpeg": "image/jpeg",
+    "png": "image/png",
+    "webp": "image/webp",
+}
+# Campos textuais que o PATCH do doc aceita (pro candidate = os do RG + os da CNH; o `update` da
+# documents service filtra pelo sub-doc). O front manda o que tem; o resto fica null.
+_DOC_DOC_FIELDS = (
+    "number",
+    "issuing_agency",
+    "issue_date",
+    "category",
+    "national_register",
+    "date_of_birth",
+    "expires_on",
+)
+# Campos do PERFIL do candidato que a extração do documento pode preencher (Portão 2 do plan/15).
+_DOC_PROFILE_FIELDS = (
+    "mother_name",
+    "father_name",
+    "birthplace",
+    "marital_status",
+    "nationality",
+)
+
+
+def _doc_started_at(sub) -> str | None:
+    started = (sub.validation_result or {}).get("analysis_started_at") if sub else None
+    return (
+        started  # ISO string; _analysis.ack parseia se vier datetime; string é tolerada
+    )
+
+
+def _reconcile_stale_analyses(cand: Candidate) -> None:
+    """TTL guard (proposta #2): `pending` estourado → `review` na próxima leitura (espelha o
+    enrollment; só aplica se o doc já tem uma análise rolando)."""
+    from users.roles import _analysis
+
+    if not cand.doc_type:
+        return
+    sub = documents_iface.get_doc_sub(str(cand.user.external_id), cand.doc_type)
+    if sub is None or not sub.validation_result:
+        return
+    started_raw = (sub.validation_result or {}).get("analysis_started_at")
+    if not started_raw:
+        return
+    from datetime import datetime
+
+    from django.utils import timezone
+
+    try:
+        started = datetime.fromisoformat(started_raw)
+    except (TypeError, ValueError):
+        return
+    if started.tzinfo is None:
+        started = started.replace(tzinfo=timezone.utc)
+    if sub.validation_status == _analysis.PENDING and _analysis.is_stale(
+        _analysis.PENDING, started
+    ):
+        sub.validation_status = _analysis.REVIEW
+        sub.save(update_fields=["validation_status"])
+
+
+def _doc_section_dict(cand: Candidate) -> dict:
+    """Seção rica do doc: bloco `doc_type` (rg|cnh) com sub-bloco do tipo + fotos+validação
+    + campos extraídos + `missing_fields` (o que a IA não trouxe E o candidato precisa digitar)."""
+    from users.roles import _analysis
+
+    docs = documents_iface.get_by_external_id(str(cand.user.external_id))
+    doc_type = cand.doc_type
+    section = {"doc_type": doc_type}
+    if not doc_type:
+        section["missing_fields"] = ["doc_type"]
+        return section
+    sub = docs.get(doc_type) or {}
+    section.update(
+        sub
+    )  # number/issuing_agency/category/... + photos + validation_status/reason
+    # `analysis_status`/`analysis_reason` canônicos (espelha proposal #2 do front)
+    section["analysis_status"] = sub.get("validation_status") or _analysis.PENDING
+    section["analysis_reason"] = sub.get("validation_reason")
+    # extraídos pela IA (se houver) — fica no validation_result
+    extracted = (
+        ((sub.get("validation_result") or {}).get("extracted") or {})
+        if isinstance(sub.get("validation_result"), dict)
+        else {}
+    )
+    section["extracted"] = extracted
+    # missing_fields: o que a IA não trouxe (extraídos vazios) E o usuário ainda não digitou
+    # (sub-doc). Considera os campos que o funil exige pra avançar.
+    required = _required_doc_fields(doc_type)
+    section["missing_fields"] = [f for f in required if not _doc_value_present(sub, f)]
+    return section
+
+
+def _required_doc_fields(doc_type: str) -> tuple[str, ...]:
+    if doc_type == "cnh":
+        return (
+            "number",
+        )  # CNH exige só o número pra avançar; resto é melhor-ter-que-não-ter
+    return ("number",)  # RG idem
+
+
+def _doc_value_present(sub: dict, field: str) -> bool:
+    """O sub-doc tem valor não-vazio pro campo?"""
+    val = sub.get(field)
+    if val is None:
+        return False
+    if isinstance(val, str):
+        return bool(val.strip())
+    return True
+
+
+def _reset_doc_validation(user_external_id: str, doc_type: str, slot: str) -> None:
+    """Re-upload de um slot re-zera o veredito daquela foto + a extração (re-analisa tudo)."""
+    from django.utils import timezone
+
+    from users.roles import _document_ai as doc_ai
+
+    sub = documents_iface.get_doc_sub(user_external_id, doc_type)
+    if sub is None:
+        return
+    result = sub.validation_result or {}
+    photos = dict(result.get("photos") or {})
+    photos.pop(slot, None)
+    for key in ("extracted", "name_match", "reason", "human"):
+        result.pop(key, None)
+    result["photos"] = photos
+    result["analysis_started_at"] = timezone.now().isoformat()
+    sub.validation_status = doc_ai.PENDING
+    sub.validation_result = result
+    sub.validated_at = None
+    sub.save(update_fields=["validation_status", "validation_result", "validated_at"])
+
+
+def _advance_documents(cand: Candidate, user_external_id: str) -> None:
+    """Avança DOCUMENTS→PIX (ordem plan/15) quando: validação IA APROVADA (frente+verso OU inteira
+    do tipo escolhido) + `number` presente (extraído pelo OCR ou digitado no PATCH)."""
+    from users.roles import _document_ai as doc_ai
+
+    if cand.status != _S.DOCUMENTS or not cand.doc_type:
+        return
+    sub = documents_iface.get_doc_sub(user_external_id, cand.doc_type)
+    if (
+        sub is not None
+        and sub.validation_status == doc_ai.APPROVED
+        and getattr(sub, "number", None)
+    ):
+        _set_status(cand, _S.PIX)
+
+
+def run_document_validation(candidate_id: int, slot: str) -> None:
+    """Pipeline da task (plan/15 B3). Idempotente: só age com validação `pending`. Mesma
+    sequência do `run_rg_validation` do enrollment:
+      a) visão na foto do `slot` (é rg/cnh? lado certo? legível?) → reprovou/dúvida = notifica;
+      b) seção completa (inteira aprovada OU frente+verso aprovadas) → OCR + extração (1 LLM);
+      c) nome de outra pessoa → reprova; dúvida → review; ok → povoa campos VAZIOS →
+         biometria → avança o wizard."""
+    from pathlib import Path
+
+    from users.roles import _document_ai as doc_ai
+
+    cand = (
+        Candidate.objects.select_related("user", "hub", "hub__coordinator")
+        .filter(id=candidate_id)
+        .first()
+    )
+    if cand is None or not cand.doc_type:
+        return
+    user_ext = str(cand.user.external_id)
+    sub = documents_iface.get_doc_sub(user_ext, cand.doc_type)
+    if sub is None or sub.validation_status != doc_ai.PENDING:
+        return
+
+    result = sub.validation_result or {}
+    photos = dict(result.get("photos") or {})
+
+    field = _DOC_SLOT_FIELD.get(slot)
+    path = getattr(sub, field, None) if field else None
+    if path and (photos.get(slot) or {}).get("status") != doc_ai.APPROVED:
+        fp = Path(settings.MEDIA_ROOT) / path
+        if not fp.exists():
+            return
+        mime = _MIME_BY_EXT.get(fp.suffix.lstrip(".").lower(), "image/jpeg")
+        doc_ai.fix_orientation(str(fp), mime_type=mime, caller="candidate.document")
+        status, reason = doc_ai.check_photo(
+            fp.read_bytes(),
+            side=_DOC_SLOT_SIDE[slot],
+            doc_type=cand.doc_type,
+            mime_type=mime,
+            caller="candidate.document",
+        )
+        # merge FRESCO (visão 10-60s; frente+verso em 2 workers paralelos — não perder o outro)
+        sub.refresh_from_db()
+        if sub.validation_status != doc_ai.PENDING:
+            return
+        result = sub.validation_result or {}
+        photos = dict(result.get("photos") or {})
+        photos[slot] = {"status": status, "reason": reason}
+        result["photos"] = photos
+        if status != doc_ai.APPROVED:
+            _finish_doc(cand, sub, status, reason, result)
+            return
+
+    images = _doc_approved_images(sub, photos, cand.doc_type)
+    if images is None:
+        sub.validation_result = result
+        sub.save(update_fields=["validation_result"])
+        return
+    _doc_extract_and_finish(cand, sub, result, images)
+
+
+def _doc_approved_images(sub, photos: dict, doc_type: str) -> list | None:
+    """Imagens da seção completa e aprovada (inteira OU frente+verso), ou None se falta."""
+    from pathlib import Path
+
+    from users.roles import _document_ai as doc_ai
+
+    prefix = f"{doc_type}_"
+
+    def ok(slot: str) -> bool:
+        return (photos.get(slot) or {}).get("status") == doc_ai.APPROVED
+
+    full = getattr(sub, "full_photo", None)
+    if full and ok(f"{prefix}full"):
+        return [Path(settings.MEDIA_ROOT) / full]
+    if (
+        getattr(sub, "front_photo", None)
+        and getattr(sub, "back_photo", None)
+        and ok(f"{prefix}front")
+        and ok(f"{prefix}back")
+    ):
+        return [
+            Path(settings.MEDIA_ROOT) / sub.front_photo,
+            Path(settings.MEDIA_ROOT) / sub.back_photo,
+        ]
+    return None
+
+
+def _doc_extract_and_finish(cand: Candidate, sub, result: dict, images: list) -> None:
+    """OCR + extração (1 LLM, plan/15 B3): confere o nome e povoa os campos do sub-doc + perfil."""
+    from users.roles import _document_ai as doc_ai
+
+    p = profiles.get(cand.user)
+    try:
+        ocr_text = doc_ai.ocr_images(
+            [fp.read_bytes() for fp in images], caller="candidate.document"
+        )
+        data = doc_ai.extract_document(
+            ocr_text,
+            doc_type=cand.doc_type,
+            holder_name=(p.name if p else None),
+            caller="candidate.document",
+        )
+    except Exception as exc:  # noqa: BLE001 — IA fora do ar → review
+        logger.warning(
+            "candidate.doc_extract_failed",
+            candidate=str(cand.external_id),
+            error=str(exc)[:200],
+        )
+        _finish_doc(
+            cand,
+            sub,
+            doc_ai.REVIEW,
+            "IA indisponível na extração dos dados — enviado para revisão manual do coordenador.",
+            result,
+        )
+        return
+    result["extracted"] = data
+    match = str(data.get("name_match") or "").strip().lower()
+    name_reason = (data.get("name_reason") or "").strip()
+    if match in ("nao", "não", "no"):
+        _finish_doc(
+            cand,
+            sub,
+            doc_ai.REJECTED,
+            f"O nome no documento não confere com o do cadastro. {name_reason}".strip(),
+            result,
+        )
+        return
+    if match not in ("sim", "yes"):
+        _finish_doc(
+            cand,
+            sub,
+            doc_ai.REVIEW,
+            f"Não deu pra confirmar o nome do titular. {name_reason}".strip(),
+            result,
+        )
+        return
+    _apply_doc_extracted(cand, sub, data)
+    _finish_doc(
+        cand, sub, doc_ai.APPROVED, name_reason or "Documento validado.", result
+    )
+    _notify_doc_approved(cand)  # notify também no aprovado automático (espelha plan/13)
+    _doc_post_approval(cand, sub)
+
+
+def _apply_doc_extracted(cand: Candidate, sub, data: dict) -> None:
+    """Povoa SÓ campos vazios (Victor: não sobrescrever). RG/CNH compartilhados por sub-doc;
+    aqui o que vale é o tipo."""
+    from datetime import date
+
+    def _clean(value, limit: int):
+        s = str(value).strip()
+        return s[:limit] if s else None
+
+    def _date(value):
+        try:
+            return date.fromisoformat(str(value)) if value else None
+        except ValueError:
+            return None
+
+    sub_changed = []
+    # RG-specific
+    if cand.doc_type == "rg":
+        if not sub.number and data.get("number"):
+            sub.number = _clean(data["number"], 30)
+            sub_changed.append("number")
+        if not sub.issuing_agency and data.get("issuing_agency"):
+            sub.issuing_agency = _clean(data["issuing_agency"], 50)
+            sub_changed.append("issuing_agency")
+        if not sub.issue_date:
+            d = _date(data.get("issue_date"))
+            if d:
+                sub.issue_date = d
+                sub_changed.append("issue_date")
+    # CNH-specific
+    elif cand.doc_type == "cnh":
+        if not sub.number and data.get("number"):
+            sub.number = _clean(data["number"], 30)
+            sub_changed.append("number")
+        if not sub.category and data.get("category"):
+            sub.category = _clean(data["category"], 5)
+            sub_changed.append("category")
+        if not sub.national_register and data.get("national_register"):
+            sub.national_register = _clean(data["national_register"], 30)
+            sub_changed.append("national_register")
+        if not sub.expires_on:
+            d = _date(data.get("expires_on"))
+            if d:
+                sub.expires_on = d
+                sub_changed.append("expires_on")
+        if not sub.date_of_birth:
+            d = _date(data.get("birth_date"))
+            if d:
+                sub.date_of_birth = d
+                sub_changed.append("date_of_birth")
+    # perfil do candidato (campos compartilhados com o RG)
+    if not sub.date_of_birth and cand.doc_type == "rg":
+        d = _date(data.get("birth_date"))
+        if d:
+            sub.date_of_birth = d
+            sub_changed.append("date_of_birth")
+    if sub_changed:
+        sub.save(update_fields=sub_changed)
+
+    cand_changed = []
+    for field, limit in (
+        ("mother_name", 255),
+        ("father_name", 255),
+        ("birthplace", 128),
+    ):
+        if not getattr(cand, field) and data.get(field):
+            setattr(cand, field, _clean(data[field], limit))
+            cand_changed.append(field)
+    if cand_changed:
+        cand.save(update_fields=[*cand_changed, "updated_at"])
+
+    # Profile.birth_date (espelho do enrollment)
+    p = profiles.get(cand.user)
+    if p and not p.birth_date and data.get("birth_date"):
+        bd = _date(data["birth_date"])
+        if bd:
+            p.birth_date = bd
+            p.save(update_fields=["birth_date"])
+
+
+def _finish_doc(
+    cand: Candidate, sub, status: str, reason: str | None, result: dict
+) -> None:
+    """Grava o veredito (justificativa SEMPRE — plan/9) + dispara o notify do estado."""
+    from django.utils import timezone
+
+    from users.roles import _document_ai as doc_ai
+
+    result["reason"] = reason
+    sub.validation_status = status
+    sub.validation_result = result
+    sub.validated_at = timezone.now()
+    sub.save(update_fields=["validation_status", "validation_result", "validated_at"])
+    logger.info(
+        "candidate.doc_validated",
+        candidate=str(cand.external_id),
+        doc_type=cand.doc_type,
+        status=status,
+    )
+    if status == doc_ai.REJECTED:
+        _notify_doc_rejected(cand, reason)
+    elif status == doc_ai.REVIEW:
+        _notify_doc_review(cand, reason)
+
+
+def _doc_post_approval(cand: Candidate, sub) -> None:
+    """Aprovado → biometria (best-effort) + tenta avançar o wizard. Espelha `_rg_post_approval`."""
+    from pathlib import Path
+
+    from integrations.tools.biometric import service as biometric
+
+    from users.roles import _document_ai as doc_ai
+
+    face_path = sub.front_photo or sub.full_photo
+    face_slot = f"{cand.doc_type}_front"
+    if face_path:
+        full = Path(settings.MEDIA_ROOT) / face_path
+        enrolled = biometric.try_enroll_document(
+            user=cand.user,
+            slot=face_slot,
+            image_path=str(full),
+            caller="candidate.document",
+        )
+        if enrolled is None and full.exists():
+            cropped = doc_ai.crop_face(full.read_bytes(), caller="candidate.document")
+            if cropped:
+                crop_path = full.with_name(f"{cand.doc_type}_face_crop.jpg")
+                crop_path.write_bytes(cropped)
+                biometric.try_enroll_document(
+                    user=cand.user,
+                    slot=face_slot,
+                    image_path=str(crop_path),
+                    caller="candidate.document_crop",
+                )
+    _advance_documents(cand, str(cand.user.external_id))
+
+
+def run_document_fill(candidate_id: int) -> None:
+    """Pós-aprovação do coordenador: OCR+extração best-effort SÓ pra preencher campos vazios.
+    A aprovação humana é FINAL — aqui não há veto (o `name_match` fica só registrado)."""
+    from users.roles import _document_ai as doc_ai
+
+    cand = (
+        Candidate.objects.select_related("user", "hub").filter(id=candidate_id).first()
+    )
+    if cand is None or not cand.doc_type:
+        return
+    user_ext = str(cand.user.external_id)
+    sub = documents_iface.get_doc_sub(user_ext, cand.doc_type)
+    if sub is None or sub.validation_status != doc_ai.APPROVED:
+        return
+    # já tem extração? só repopula o que ficou faltando
+    result = sub.validation_result or {}
+    if result.get("extracted"):
+        _apply_doc_extracted(cand, sub, result["extracted"])
+        return
+    # sem extração anterior: roda OCR+extração best-effort
+    images = _doc_approved_images(sub, result.get("photos") or {}, cand.doc_type)
+    if not images:
+        return
+    p = profiles.get(cand.user)
+    try:
+        ocr_text = doc_ai.ocr_images(
+            [fp.read_bytes() for fp in images], caller="candidate.document_fill"
+        )
+        data = doc_ai.extract_document(
+            ocr_text,
+            doc_type=cand.doc_type,
+            holder_name=(p.name if p else None),
+            caller="candidate.document_fill",
+        )
+    except Exception as exc:  # noqa: BLE001 — best-effort; falha = aluno digita
+        logger.warning(
+            "candidate.doc_fill_failed",
+            candidate=str(cand.external_id),
+            error=str(exc)[:200],
+        )
+        return
+    result["extracted"] = data
+    sub.validation_result = result
+    sub.save(update_fields=["validation_result"])
+    _apply_doc_extracted(cand, sub, data)
+
+
+def decide_document(
+    *,
+    candidate_external_id: str,
+    coordinator,
+    approve: bool,
+    reason: str | None = None,
+) -> dict:
+    """Coordenador do hub decide o documento do candidato em REVISÃO. Espelha `decide_rg`."""
+    from users.roles import _document_ai as doc_ai
+
+    cand = (
+        Candidate.objects.filter(external_id=candidate_external_id)
+        .select_related("hub", "user")
+        .first()
+    )
+    if cand is None:
+        raise CandidateError("Candidato não encontrado.", code="CANDIDATE_NOT_FOUND")
+    if cand.hub.coordinator_id != coordinator.id:
+        raise CandidateError(
+            "Você não coordena o polo deste candidato.", code="NOT_HUB_COORDINATOR"
+        )
+    if not cand.doc_type:
+        raise CandidateError("Documento ainda não enviado.", code="DOC_TYPE_NOT_SET")
+    sub = documents_iface.get_doc_sub(str(cand.user.external_id), cand.doc_type)
+    if sub is None or sub.validation_status != doc_ai.REVIEW:
+        raise CandidateError(
+            "O documento não está em revisão.",
+            code="DOC_NOT_IN_REVIEW",
+            extra={"validation_status": sub.validation_status if sub else None},
+        )
+    note = (reason or "").strip() or (
+        "aprovado pelo coordenador" if approve else "reprovado pelo coordenador"
+    )
+    result = sub.validation_result or {}
+    result["human"] = {
+        "approve": approve,
+        "reason": note,
+        "by": str(coordinator.external_id),
+    }
+    if not approve:
+        _finish_doc(cand, sub, doc_ai.REJECTED, note, result)
+        return {
+            "external_id": str(cand.external_id),
+            "status": cand.status,
+            "doc_type": cand.doc_type,
+            "validation_status": sub.validation_status,
+        }
+    # aprovação humana: as fotos presentes valem como aprovadas
+    photos = dict(result.get("photos") or {})
+    for slot, field in _DOC_SLOT_FIELD.items():
+        if getattr(sub, field, None):
+            photos[slot] = {"status": doc_ai.APPROVED, "reason": note}
+    result["photos"] = photos
+    _finish_doc(cand, sub, doc_ai.APPROVED, note, result)
+    _notify_doc_approved(cand)
+    if result.get("extracted"):
+        _apply_doc_extracted(cand, sub, result["extracted"])
+    else:
+        from django_q.tasks import async_task
+
+        async_task("users.roles.candidate.tasks.fill_document_data", cand.id)
+    _doc_post_approval(cand, sub)
+    return {
+        "external_id": str(cand.external_id),
+        "status": cand.status,
+        "doc_type": cand.doc_type,
+        "validation_status": sub.validation_status,
+    }
+
+
+def _notify_doc_rejected(cand: Candidate, reason: str | None) -> None:
+    from notify.interface.send import send
+    from users.roles import notifications as msgs
+
+    p = profiles.get(cand.user)
+    text = msgs.text(
+        "candidate.document_rejected",
+        name=msgs.first_name(p.name if p else None),
+        detail=reason or "Tire outra foto mostrando o documento com nitidez.",
+    )
+    try:
+        send(
+            text=text,
+            caller="candidate.document_rejected",
+            phone=p.phone if p else None,
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("candidate.notify_doc_rejected_failed", error=str(exc))
+
+
+def _notify_doc_review(cand: Candidate, reason: str | None) -> None:
+    from notify.interface.send import send
+    from users.roles import notifications as msgs
+
+    coord = cand.hub.coordinator
+    if coord is None:
+        return
+    cp = profiles.get(coord)
+    try:
+        send(
+            text=msgs.text(
+                "candidate.document_in_review",
+                name=msgs.first_name(cp.name if cp else None),
+                detail=reason or "",
+            ),
+            caller="candidate.document_in_review",
+            phone=cp.phone if cp else None,
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("candidate.notify_doc_review_failed", error=str(exc))
+
+
+def _notify_doc_approved(cand: Candidate) -> None:
+    from notify.interface.send import send
+    from users.roles import notifications as msgs
+
+    p = profiles.get(cand.user)
+    try:
+        send(
+            text=msgs.text(
+                "candidate.document_approved",
+                name=msgs.first_name(p.name if p else None),
+            ),
+            caller="candidate.document_approved",
+            phone=p.phone if p else None,
+            email=p.email if p else None,
+            email_channel=bool(p and p.email),
+            subject="Seu cadastro — documento aprovado",
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("candidate.notify_doc_approved_failed", error=str(exc))
+
+
+def list_document_reviews_for_hub(*, hub) -> list[dict]:
+    """Candidatos do polo com o documento parado em REVISÃO (decisão do coordenador — plan/15 B3).
+    Cada item aponta pro POST de decisão que existe."""
+    from users.roles import _document_ai as doc_ai
+
+    out = []
+    qs = (
+        Candidate.objects.filter(hub=hub, doc_type__isnull=False)
+        .exclude(doc_type="")
+        .select_related("user")
+        .order_by("updated_at")
+    )
+    for cand in qs:
+        sub = documents_iface.get_doc_sub(str(cand.user.external_id), cand.doc_type)
+        if sub is None or sub.validation_status != doc_ai.REVIEW:
+            continue
+        p = profiles.get(cand.user)
+        out.append(
+            {
+                "external_id": str(cand.external_id),
+                "name": p.name if p else None,
+                "doc_type": cand.doc_type,
+                "since": cand.updated_at.isoformat(),
+            }
+        )
+    return out
 
 
 def set_pix(*, user_external_id, key: str, key_type: str) -> dict:
