@@ -1039,6 +1039,11 @@ def set_selfie(
     cand.selfie_status = _selfie.SelfieStatus.PENDING
     cand.selfie_verified = False
     cand.selfie_description = None
+    # BUG-4 (M2c FE-painel, 2026-06-16): worker exige `status==SELFIE` (`run_selfie_validation`
+    # linha 1120) — se não avançar, bail-out silencioso e o pending vira review via TTL reconcile.
+    # Espelha o `enrollment.set_selfie` (gate em `_S.SELFIE`, advance feito no `set_education`).
+    if cand.status == _S.PIX:
+        _set_status(cand, _S.SELFIE)
     cand.save()
     from django_q.tasks import async_task
 
