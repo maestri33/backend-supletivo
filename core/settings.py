@@ -431,8 +431,10 @@ OTP_ACTIVE = env.bool("OTP_ACTIVE", default=True)
 
 # ── ROLES (users.roles): catálogo de transições no .env, NÃO em DB (§9). JSON: lista de
 # {from_role, to_role, mode: add|replace, requires_role?, forbids_role?, blocking?}. A tabela
-# users.UserRole guarda só quem tem qual role agora + histórico. Default = cadeia confirmada
-# pelo Victor (com training: candidate→training→promoter). Catálogo inválido derruba o boot.
+# users.UserRole guarda só quem tem qual role agora + histórico. Catálogo inválido derruba o boot.
+# Mudança Victor 2026-06-16: o candidato vira PROMOTOR direto (o coordenador aprova) — `training`
+# deixou de ser etapa-da-cadeia e virou ROLE OVERLAY (add+blocking): adicionada/removida ao promotor
+# enquanto houver matéria obrigatória pendente (a trava é lida do /me, não do JWT).
 ROLE_RULES = env.json(
     "ROLE_RULES",
     default=[
@@ -446,8 +448,14 @@ ROLE_RULES = env.json(
             "requires_role": "student",
         },
         {"from_role": None, "to_role": "candidate", "mode": "add"},
-        {"from_role": "candidate", "to_role": "training", "mode": "replace"},
-        {"from_role": "training", "to_role": "promoter", "mode": "replace"},
+        {"from_role": "candidate", "to_role": "promoter", "mode": "replace"},
+        {
+            "from_role": None,
+            "to_role": "training",
+            "mode": "add",
+            "requires_role": "promoter",
+            "blocking": True,
+        },
         {
             "from_role": None,
             "to_role": "coordinator",

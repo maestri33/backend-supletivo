@@ -25,7 +25,8 @@ _TTS_EVENTS = frozenset(
         "lead.captured",  # boas-vindas ao novo lead
         "lead.paid",  # parabéns: matrícula começou (o recibo vai à parte, em texto)
         "enrollment.released",  # virou aluno
-        "training.approved",  # virou promotor
+        "training.approved",  # virou promotor (sem treino obrigatório pendente — já pode captar)
+        "training.cleared",  # concluiu o treino obrigatório → painel liberado (já pode captar)
         "student.exam_passed",  # passou na prova
         "student.veteran",  # formou / virou veterano
     }
@@ -122,13 +123,13 @@ _MESSAGES: dict[str, str] = {
         "{name}, deu problema na taxa de {student_name}: {detail} "
         "Confira no painel, {name}, e tente de novo se for o caso."
     ),
-    # ── CANDIDATE → TRAINING → PROMOTER (funil do colaborador) ────────────────
-    "candidate.training_started": (
-        "Cadastro concluído, {name}! 🎓 Seu treinamento começou — acesse para estudar e responder "
-        "as atividades, {name}."
-    ),
+    # ── CANDIDATE → PROMOTER → (treino overlay) (funil do colaborador, Victor 2026-06-16) ──
     "candidate.selfie_rejected": (
         "{name}, sua selfie não pôde ser confirmada. Envie uma nova foto, nítida e mostrando o rosto, {name}."
+    ),
+    "candidate.rejected": (
+        "{name}, seu cadastro de colaborador não foi aprovado neste momento. "
+        "Fale com o coordenador do seu polo para entender os próximos passos, {name}."
     ),
     "candidate.selfie_approved": (
         "Boa notícia, {name}! ✅ Sua selfie foi aprovada e o cadastro segue em frente. "
@@ -151,13 +152,30 @@ _MESSAGES: dict[str, str] = {
         "Boa notícia, {name}! ✅ Seu documento foi aprovado e o cadastro segue em frente. "
         "Continue o preenchimento, {name}."
     ),
-    "training.awaiting_interview": (
-        "{name}, um candidato concluiu o treino e aguarda a sua entrevista de aprovação. "
-        "Dê uma olhada quando puder, {name}."
+    # candidato concluiu a coleta e aguarda a APROVAÇÃO do coordenador (vira promotor). → coordenador.
+    "candidate.awaiting_approval": (
+        "{name}, um candidato concluiu o cadastro e aguarda a sua aprovação para virar promotor. "
+        "Confira no painel, {name}."
     ),
+    # coordenador aprovou → virou PROMOTOR e NÃO há treino obrigatório pendente (já pode captar). TTS.
     "training.approved": (
         "Parabéns, {name}! 🎉 Você foi aprovado e agora é PROMOTOR. "
         "{name}, seu link de captação já está ativo — comece a indicar e a ganhar!"
+    ),
+    # virou promotor MAS há treino obrigatório pendente → painel travado até concluir. Sem TTS.
+    "training.must_train": (
+        "Parabéns, {name}! Você foi aprovado e agora é PROMOTOR. Antes de liberar seu painel, {name}, "
+        "conclua o treinamento obrigatório no aplicativo — assim que terminar, tudo é liberado."
+    ),
+    # concluiu TODAS as matérias obrigatórias → painel liberado (já pode captar). TTS.
+    "training.cleared": (
+        "Treinamento concluído, {name}! 🎉 Seu painel está liberado e seu link de captação ativo. "
+        "Agora é com você, {name} — comece a indicar e a ganhar!"
+    ),
+    # staff publicou uma nova matéria obrigatória → o promotor é re-travado até concluí-la. Sem TTS.
+    "training.new_material": (
+        "{name}, há um novo treinamento obrigatório no aplicativo. "
+        "Conclua a atividade para continuar usando o painel, {name}."
     ),
     # ── STUDENT → VETERAN ────────────────────────────────────────────────────
     "student.document_rejected": (

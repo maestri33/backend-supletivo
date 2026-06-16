@@ -1,9 +1,17 @@
-"""Training — o LMS do funil do colaborador (candidato em treino → promotor).
+"""Training — o LMS do funil do colaborador, agora como TRAVA pós-promotor (Victor 2026-06-16).
 
-3 models: `Material` (matéria: texto+questão+gabarito, +vídeo/foto; autoria staff+coordenador) · `Submission`
-(resposta do aluno → IA corrige: nota 0-10 + justificativa; `pending→approved|rejected`; reenvio sem limite) ·
-`Trainee` (estado global: `training→awaiting_interview→approved|rejected`). Todas as matérias aprovadas →
-aguarda entrevista → coordenador aprova → promove a **promotor**. Sub-pacote de `users` (app_label `users`).
+Modelo novo: o candidato vira **promotor** quando o coordenador aprova (não há mais entrevista/Trainee).
+Aí o treino vira uma **trava do painel**: enquanto o promotor tiver matéria OBRIGATÓRIA pendente, ele
+ganha a role overlay `training` (blocking) e o front trava. Matérias:
+
+- `kind` **fixa**: toda matéria fixa ativa é atribuída a TODO promotor ao ser aprovado (onboarding).
+- `kind` **transitória**: o staff PUBLICA → atribui só aos promotores JÁ existentes naquele momento.
+- `blocking`: obrigatória trava o painel; opcional (não-blocking) não trava.
+- `ephemeral`: descartável (o staff pode deletar; não deixa peso histórico).
+
+3 models: `Material` (a matéria + conteúdo rico) · `MaterialAssignment` (atribuição user↔matéria =
+FONTE DA VERDADE da trava: pending/approved) · `Submission` (resposta → IA corrige). Sub-pacote de
+`users` (app_label `users`).
 """
 
 from __future__ import annotations
@@ -15,14 +23,33 @@ from core.models import ExternalIdModel
 
 
 class Material(ExternalIdModel):
-    """Uma matéria do treino: 1 texto + 1 questão + 1 gabarito (+ vídeo/foto opcionais)."""
+    """Uma matéria do treino: conteúdo (texto/vídeo/foto/blocos) + 1 questão + 1 gabarito (a IA corrige)."""
+
+    class Kind(models.TextChoices):
+        FIXED = "fixed", "fixa (todo promotor novo recebe)"
+        TRANSITORY = "transitory", "transitória (só os promotores já existentes ao publicar)"
 
     title = models.CharField(max_length=255)
-    text_content = models.TextField()
+    text_content = models.TextField(blank=True, default="")
+    # conteúdo rico extra além do texto: lista de blocos {type: text|image|video|file, value, caption?}.
+    # O staff preenche (URLs/paths de mídia); o front renderiza em ordem. "texto, imagem e outros" (Victor).
+    content_blocks = models.JSONField(default=list, blank=True)
     question = models.TextField()
     expected_answer = models.TextField()  # gabarito (a IA compara a resposta com isto)
     video = models.CharField(max_length=255, null=True, blank=True)  # media/training/
     photo = models.CharField(max_length=255, null=True, blank=True)
+    kind = models.CharField(
+        max_length=12,
+        choices=Kind.choices,
+        default=Kind.FIXED,
+        db_index=True,
+    )
+    blocking = models.BooleanField(
+        default=True, db_index=True
+    )  # obrigatória = trava o painel até aprovar
+    ephemeral = models.BooleanField(
+        default=False
+    )  # descartável (staff pode deletar)
     order = models.PositiveIntegerField(default=0, db_index=True)
     active = models.BooleanField(default=True, db_index=True)
     created_at = models.DateTimeField("criado em", auto_now_add=True)
@@ -39,47 +66,59 @@ class Material(ExternalIdModel):
         return f"material<{self.external_id}:{self.title}>"
 
 
-class Trainee(ExternalIdModel):
-    """Estado global do candidato no treino (1-1 com o User). Criado na transição candidate→training."""
+class MaterialAssignment(ExternalIdModel):
+    """Atribuição de uma matéria a um colaborador — FONTE DA VERDADE da trava do treino.
+
+    Criada quando: (a) o promotor é aprovado (todas as matérias FIXAS ativas) ou (b) o staff PUBLICA
+    uma matéria transitória (todos os promotores existentes). `pending` enquanto não aprovada; vira
+    `approved` quando uma `Submission` é aprovada OU o coordenador aprova a matéria em aberto. O
+    promotor está TRAVADO sse existir alguma assignment `pending` de matéria `blocking` ativa."""
 
     class Status(models.TextChoices):
-        TRAINING = "training", "em treino"
-        AWAITING_INTERVIEW = "awaiting_interview", "aguardando entrevista"
-        APPROVED = "approved", "aprovado"
-        REJECTED = "rejected", "rejeitado"
+        PENDING = "pending", "pendente"
+        APPROVED = "approved", "aprovada"
 
-    user = models.OneToOneField(
+    user = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,
-        related_name="trainee",
+        related_name="material_assignments",
+    )
+    material = models.ForeignKey(
+        Material,
+        on_delete=models.CASCADE,
+        related_name="assignments",
     )
     status = models.CharField(
-        max_length=20,
+        max_length=10,
         choices=Status.choices,
-        default=Status.TRAINING,
+        default=Status.PENDING,
         db_index=True,
     )
-    coordinator = models.ForeignKey(
+    # quando o coordenador aprova a matéria em aberto (sem submissão), fica registrado quem decidiu.
+    decided_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.SET_NULL,
         null=True,
         blank=True,
-        related_name="trainees_decided",
+        related_name="+",
     )
-    awaiting_interview_at = models.DateTimeField(null=True, blank=True)
-    decision_at = models.DateTimeField(null=True, blank=True)
-    rejection_reason = models.CharField(max_length=255, null=True, blank=True)
+    approved_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField("criado em", auto_now_add=True)
     updated_at = models.DateTimeField("atualizado em", auto_now=True)
 
     class Meta:
         app_label = "users"
-        db_table = "users_trainee"
-        verbose_name = "trainee"
-        verbose_name_plural = "trainees"
+        db_table = "users_training_assignment"
+        verbose_name = "atribuição de matéria"
+        verbose_name_plural = "atribuições de matéria"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["user", "material"], name="uniq_material_per_user"
+            )
+        ]
 
     def __str__(self) -> str:
-        return f"trainee<{self.external_id}:{self.status}>"
+        return f"assignment<{self.external_id}:{self.status}>"
 
 
 class Submission(ExternalIdModel):

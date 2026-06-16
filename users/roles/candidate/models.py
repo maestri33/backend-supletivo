@@ -24,7 +24,9 @@ class Candidate(ExternalIdModel):
         DOCUMENTS = "documents", "documentos"
         PIX = "pix", "chave pix"
         SELFIE = "selfie", "selfie"
-        COMPLETED = "completed", "concluído"
+        COMPLETED = "completed", "concluído (aguardando aprovação do coordenador)"
+        APPROVED = "approved", "aprovado (virou promotor)"
+        REJECTED = "rejected", "rejeitado pelo coordenador"
 
     user = models.OneToOneField(
         settings.AUTH_USER_MODEL,

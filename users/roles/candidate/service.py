@@ -2,7 +2,7 @@
 
 Espelho do lead+enrollment: `create_candidate` reusa o `register` (role `candidate`) + cria o `Candidate`
 ligado a um HUB. Funil autenticado: perfil → endereço(ViaCEP) → RG/CNH → **Pix (validada no Asaas/DICT)** →
-selfie(IA) → `COMPLETED` + promove `candidate→training` + cria o `Trainee`. ⚠️ o passo Pix MEXE DINHEIRO REAL.
+selfie(IA) → `COMPLETED` (aguarda o coordenador aprovar → vira PROMOTOR). ⚠️ o passo Pix MEXE DINHEIRO REAL.
 """
 
 from __future__ import annotations
@@ -16,7 +16,7 @@ from users.address import interface as address_iface
 from users.auth import interface as auth_iface
 from users.auth.models import User
 from users.documents import interface as documents_iface
-from users.exceptions import Conflict, DomainError, NotFound
+from users.exceptions import Conflict, DomainError, Forbidden, NotFound
 from users.profiles import interface as profiles
 from users.roles import interface as roles
 from users.roles.candidate.models import Candidate
@@ -1183,7 +1183,7 @@ def _resolve_selfie(cand: Candidate) -> None:
 
     if cand.selfie_status == _selfie.APPROVED:
         _notify_selfie_approved(cand)
-        _promote_to_training(cand)
+        _complete_candidate(cand)
     elif cand.selfie_status == _selfie.REJECTED:
         _notify_selfie_rejected(cand)
     elif cand.selfie_status == _selfie.REVIEW:
@@ -1212,18 +1212,13 @@ def _notify_selfie_approved(cand: Candidate) -> None:
         logger.warning("candidate.notify_selfie_approved_failed", error=str(exc))
 
 
-def _promote_to_training(cand: Candidate) -> None:
-    """Selfie aprovada → COMPLETED + promove candidate→training + cria Trainee. Idempotente (só em SELFIE)."""
+def _complete_candidate(cand: Candidate) -> None:
+    """Selfie aprovada → COMPLETED = aguardando a APROVAÇÃO do coordenador. NÃO promove (Victor 2026-06-16):
+    quem promove candidate→PROMOTOR é o coordenador (`approve_candidate`). Idempotente (só em SELFIE)."""
     if cand.status != _S.SELFIE:
         return
-    from users.roles.training import interface as training_iface
-
-    with transaction.atomic():
-        _set_status(cand, _S.COMPLETED)
-        if "training" not in roles.active_roles(cand.user):
-            roles.promote(cand.user, "training")
-        training_iface.create_trainee(user=cand.user)
-    _notify_training_started(cand)
+    _set_status(cand, _S.COMPLETED)
+    _notify_awaiting_approval(cand)
 
 
 def decide_selfie(
@@ -1264,7 +1259,7 @@ def decide_selfie(
         ]
     )
     if approve:
-        _promote_to_training(cand)
+        _complete_candidate(cand)
     else:
         _notify_selfie_rejected(cand)
     return cand
@@ -1308,7 +1303,119 @@ def _notify_selfie_review(cand: Candidate) -> None:
         logger.warning("candidate.notify_selfie_review_failed", error=str(exc))
 
 
-def _notify_training_started(cand: Candidate) -> None:
+def _notify_awaiting_approval(cand: Candidate) -> None:
+    """Candidato concluiu a coleta → avisa o COORDENADOR que há candidato aguardando aprovação."""
+    from notify.interface.send import send
+    from users.roles import notifications as msgs
+
+    coord = cand.hub.coordinator
+    if coord is None:
+        return
+    cp = profiles.get(coord)
+    try:
+        send(
+            text=msgs.text(
+                "candidate.awaiting_approval",
+                name=msgs.first_name(cp.name if cp else None),
+            ),
+            caller="candidate.awaiting_approval",
+            phone=cp.phone if cp else None,
+            idempotency_key=f"candidate_awaiting_{cand.external_id}",
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("candidate.notify_awaiting_failed", error=str(exc))
+
+
+# ── aprovação do candidato → PROMOTOR (coordenador, grupo leadership) ────────
+
+
+def approve_candidate(*, candidate_external_id: str, coordinator) -> Candidate:
+    """Coordenador do polo APROVA o candidato → promove candidate→PROMOTOR + cria Promoter + atribui
+    as matérias FIXAS (treino). Se houver matéria obrigatória pendente, o promotor nasce TRAVADO
+    (role overlay `training`; a trava é lida do /me, não do JWT). Victor 2026-06-16."""
+    from users.roles.promoter import interface as promoter_iface
+    from users.roles.training import interface as training_iface
+
+    cand = (
+        Candidate.objects.filter(external_id=candidate_external_id)
+        .select_related("hub", "user")
+        .first()
+    )
+    if cand is None:
+        raise CandidateError("Candidato não encontrado.", code="CANDIDATE_NOT_FOUND")
+    if cand.hub.coordinator_id != coordinator.id:
+        raise Forbidden(
+            "Você não coordena o polo deste candidato.", code="NOT_HUB_COORDINATOR"
+        )
+    if cand.status != _S.COMPLETED:
+        raise Conflict(
+            "O candidato não está aguardando aprovação.",
+            code="WRONG_STATUS",
+            extra={"expected_status": _S.COMPLETED},
+        )
+
+    with transaction.atomic():
+        if "promoter" not in roles.active_roles(cand.user):
+            roles.promote(cand.user, "promoter")
+        promoter_iface.create_promoter(user=cand.user, hub=cand.hub)
+        _set_status(cand, _S.APPROVED)
+        locked = training_iface.on_became_promoter(cand.user)
+
+    _notify_became_promoter(cand, locked=locked)
+    logger.info("candidate.approved", external_id=str(cand.external_id), locked=locked)
+    return cand
+
+
+def reject_candidate(
+    *, candidate_external_id: str, coordinator, reason: str | None = None
+) -> Candidate:
+    """Coordenador do polo REJEITA o candidato aguardando aprovação. Não promove; avisa o candidato."""
+    cand = (
+        Candidate.objects.filter(external_id=candidate_external_id)
+        .select_related("hub", "user")
+        .first()
+    )
+    if cand is None:
+        raise CandidateError("Candidato não encontrado.", code="CANDIDATE_NOT_FOUND")
+    if cand.hub.coordinator_id != coordinator.id:
+        raise Forbidden(
+            "Você não coordena o polo deste candidato.", code="NOT_HUB_COORDINATOR"
+        )
+    if cand.status != _S.COMPLETED:
+        raise Conflict(
+            "O candidato não está aguardando aprovação.",
+            code="WRONG_STATUS",
+            extra={"expected_status": _S.COMPLETED},
+        )
+    _set_status(cand, _S.REJECTED)
+    _notify_candidate_rejected(cand)
+    logger.info("candidate.rejected", external_id=str(cand.external_id))
+    return cand
+
+
+def _notify_became_promoter(cand: Candidate, *, locked: bool) -> None:
+    """Virou promotor: travado → `training.must_train` (texto); liberado → `training.approved` (TTS)."""
+    from notify.interface.send import send
+    from users.roles import notifications as msgs
+
+    event = "training.must_train" if locked else "training.approved"
+    p = profiles.get(cand.user)
+    try:
+        send(
+            text=msgs.text(event, name=msgs.first_name(p.name if p else None)),
+            caller=event,
+            phone=p.phone if p else None,
+            email=p.email if p else None,
+            email_channel=bool(p and p.email),
+            tts=msgs.is_tts(event),
+            gender=p.gender if (p and msgs.is_tts(event)) else None,
+            idempotency_key=f"candidate_promoted_{cand.external_id}",
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("candidate.notify_promoted_failed", error=str(exc))
+
+
+def _notify_candidate_rejected(cand: Candidate) -> None:
     from notify.interface.send import send
     from users.roles import notifications as msgs
 
@@ -1316,17 +1423,74 @@ def _notify_training_started(cand: Candidate) -> None:
     try:
         send(
             text=msgs.text(
-                "candidate.training_started",
-                name=msgs.first_name(p.name if p else None),
+                "candidate.rejected", name=msgs.first_name(p.name if p else None)
             ),
-            caller="candidate.training_started",
+            caller="candidate.rejected",
             phone=p.phone if p else None,
-            email=p.email if p else None,
-            email_channel=bool(p and p.email),
-            idempotency_key=f"candidate_done_{cand.external_id}",
+            idempotency_key=f"candidate_rejected_{cand.external_id}",
         )
     except Exception as exc:  # noqa: BLE001
-        logger.warning("candidate.notify_failed", error=str(exc))
+        logger.warning("candidate.notify_rejected_failed", error=str(exc))
+
+
+def candidate_detail_for_coordinator(*, candidate_external_id: str, coordinator) -> dict:
+    """Detalhe do candidato aguardando aprovação — pro coordenador decidir VENDO (perfil + coleta).
+    Gate: ser o coordenador do polo do candidato."""
+    cand = (
+        Candidate.objects.filter(external_id=candidate_external_id)
+        .select_related("hub", "user")
+        .first()
+    )
+    if cand is None:
+        raise CandidateError("Candidato não encontrado.", code="CANDIDATE_NOT_FOUND")
+    if cand.hub.coordinator_id != coordinator.id:
+        raise Forbidden(
+            "Você não coordena o polo deste candidato.", code="NOT_HUB_COORDINATOR"
+        )
+    p = profiles.get(cand.user)
+    return {
+        "external_id": str(cand.external_id),
+        "status": cand.status,
+        "user": {
+            "external_id": str(cand.user.external_id),
+            "name": p.name if p else None,
+            "cpf": p.cpf if p else None,
+            "phone": p.phone if p else None,
+            "email": p.email if p else None,
+        },
+        "doc_type": cand.doc_type,
+        "mother_name": cand.mother_name,
+        "father_name": cand.father_name,
+        "marital_status": cand.marital_status,
+        "birthplace": cand.birthplace,
+        "nationality": cand.nationality,
+        "pix_key": cand.pix_key,
+        "pix_key_type": cand.pix_key_type,
+        "pix_validated": cand.pix_validated,
+        "selfie_status": cand.selfie_status,
+        "selfie_image": cand.selfie_image,
+        "selfie_description": cand.selfie_description,
+    }
+
+
+def list_awaiting_approval_for_hub(*, hub) -> list[dict]:
+    """Candidatos do polo aguardando a APROVAÇÃO do coordenador (status COMPLETED). Pro inbox/fila."""
+    out = []
+    qs = (
+        Candidate.objects.filter(hub=hub, status=_S.COMPLETED)
+        .select_related("user")
+        .order_by("updated_at")
+    )
+    for cand in qs:
+        p = profiles.get(cand.user)
+        out.append(
+            {
+                "external_id": str(cand.external_id),
+                "name": p.name if p else None,
+                "since": cand.updated_at.isoformat() if cand.updated_at else None,
+            }
+        )
+    return out
 
 
 def list_selfie_reviews_for_hub(*, hub) -> list[dict]:

@@ -9,7 +9,8 @@ sobre o `hub/` (plan/14, Victor 2026-06-12).
 - **Funil do aluno**: a fase da TAXA em 2 parcelas (`fee/pay` à vista + `fee/schedule` pro
   vencimento do QR) → `conclude` (credenciais da plataforma → promove a student). O aluno NUNCA
   sabe da taxa (política interna do polo).
-- **Funil do colaborador**: autoria de matéria do treino + entrevista (aprovar/rejeitar trainee).
+- **Funil do colaborador**: aprovar/rejeitar candidato (concluiu a coleta → vira PROMOTOR), autoria
+  de matéria do treino e aprovar matéria em aberto de um promotor travado no treino.
 """
 
 from __future__ import annotations
@@ -208,8 +209,9 @@ def get_hub_enrollment(request, external_id: str):
 @api.get("/reviews", tags=["review"])
 def list_reviews(request):
     """TUDO que espera análise/decisão do coordenador no polo, num lugar só (plan/14): RG e selfie
-    de matrículas em revisão, selfie de candidatos, documentos de students e entrevistas de
-    trainees. Cada item aponta pro POST de decisão correspondente (que já existe)."""
+    de matrículas em revisão, selfie de candidatos, documentos de students, candidatos aguardando
+    aprovação (→ promotor) e promotores travados no treino (matéria em aberto a aprovar). Cada item
+    aponta pro POST de decisão correspondente."""
     coordinator = _coordinator(request)
     hub = _coordinator_hub(coordinator)
     enrollment_reviews = enrollment_iface.list_reviews_for_hub(hub=hub)
@@ -218,9 +220,10 @@ def list_reviews(request):
         "enrollment_selfie": enrollment_reviews["selfie"],
         "candidate_selfie": candidate_iface.list_selfie_reviews_for_hub(hub=hub),
         "student_documents": student_iface.list_document_reviews_for_hub(hub=hub),
-        "trainees_awaiting_interview": training_iface.list_awaiting_interview_for_hub(
+        "candidates_awaiting_approval": candidate_iface.list_awaiting_approval_for_hub(
             hub=hub
         ),
+        "locked_promoters": training_iface.list_locked_promoters_for_hub(hub=hub),
     }
 
 
@@ -517,40 +520,62 @@ def update_material(request, external_id: str, payload: MaterialUpdateIn):
     return training_iface.material_to_dict(m, include_answer=True)
 
 
-# ── funil do colaborador: entrevista (aprovar/rejeitar trainee → promotor) ──
+# ── funil do colaborador: aprovar candidato → PROMOTOR (Victor 2026-06-16) ──
+# A entrevista/Trainee saiu: o coordenador aprova o candidato (que concluiu a coleta) e ele vira
+# PROMOTOR direto. O treino passou a ser uma trava pós-promotor por matérias.
 class RejectIn(Schema):
     reason: str
 
 
-@api.post("/trainees/{external_id}/approve", tags=["training"])
-def approve_trainee(request, external_id: str):
-    """Aprova a entrevista do trainee do seu polo → promove a promotor."""
+@api.get("/candidates", tags=["candidate"])
+def list_candidates_awaiting(request):
+    """Fila de candidatos do polo que concluíram a coleta e aguardam a APROVAÇÃO do coordenador."""
     coordinator = _coordinator(request)
-    t = training_iface.approve_interview(
-        trainee_external_id=external_id, coordinator=coordinator
-    )
-    return training_iface.trainee_to_dict(t)
+    hub = _coordinator_hub(coordinator)
+    return candidate_iface.list_awaiting_approval_for_hub(hub=hub)
 
 
-@api.get("/trainees/{external_id}", response=dict, tags=["training"])
-def get_trainee_for_coordinator(request, external_id: str):
-    """Tela de DETALHE do trainee pro coordenador decidir a entrevista (plan/15 D1): dados do
-    User (perfil) + cada `Submission` (matéria, resposta do candidato, nota da IA, justificativa).
-    O coordenador decide VENDO, não às cegas (antes só tinha o nome na fila). Gate: o coord
-    precisa ser o do polo do candidato de origem."""
+@api.get("/candidates/{external_id}", response=dict, tags=["candidate"])
+def get_candidate_for_coordinator(request, external_id: str):
+    """Detalhe do candidato (perfil + coleta) pro coordenador decidir VENDO antes de aprovar."""
     coordinator = _coordinator(request)
-    return training_iface.trainee_detail_for_coordinator(
-        trainee_external_id=external_id, coordinator=coordinator
+    return candidate_iface.candidate_detail_for_coordinator(
+        candidate_external_id=external_id, coordinator=coordinator
     )
 
 
-@api.post("/trainees/{external_id}/reject", tags=["training"])
-def reject_trainee(request, external_id: str, payload: RejectIn):
-    """Rejeita a entrevista do trainee (com motivo) — não promove."""
+@api.post("/candidates/{external_id}/approve", tags=["candidate"])
+def approve_candidate(request, external_id: str):
+    """Aprova o candidato do seu polo → promove a PROMOTOR (e atribui o treino obrigatório)."""
     coordinator = _coordinator(request)
-    t = training_iface.reject_interview(
-        trainee_external_id=external_id,
+    cand = candidate_iface.approve_candidate(
+        candidate_external_id=external_id, coordinator=coordinator
+    )
+    return {"external_id": str(cand.external_id), "status": cand.status}
+
+
+@api.post("/candidates/{external_id}/reject", tags=["candidate"])
+def reject_candidate(request, external_id: str, payload: RejectIn):
+    """Rejeita o candidato aguardando aprovação (com motivo) — não promove."""
+    coordinator = _coordinator(request)
+    cand = candidate_iface.reject_candidate(
+        candidate_external_id=external_id,
         coordinator=coordinator,
         reason=payload.reason,
     )
-    return training_iface.trainee_to_dict(t)
+    return {"external_id": str(cand.external_id), "status": cand.status}
+
+
+@api.post(
+    "/promoters/{external_id}/materials/{material_external_id}/approve",
+    tags=["training"],
+)
+def approve_open_material(request, external_id: str, material_external_id: str):
+    """Coordenador aprova uma matéria EM ABERTO de um promotor preso (destrava quem não tem prática
+    digital). `external_id` = do promotor; `material_external_id` = da matéria."""
+    coordinator = _coordinator(request)
+    return training_iface.coordinator_approve_material(
+        promoter_external_id=external_id,
+        material_external_id=material_external_id,
+        coordinator=coordinator,
+    )

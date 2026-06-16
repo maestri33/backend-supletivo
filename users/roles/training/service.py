@@ -1,9 +1,18 @@
-"""Lógica do training (LMS): autoria de matéria (staff+coordenador), submissão+correção por IA, entrevista.
+"""Lógica do training (LMS) — agora a TRAVA pós-promotor (Victor 2026-06-16).
 
-Fluxo: o candidato vira `Trainee(TRAINING)` (criado pela transição candidate→training). Ele responde as
-matérias → cada `Submission` é corrigida pela IA (Django-Q `tasks.grade_submission` → `ai.grade`) → ≥ nota
-de corte aprova. Aprovou TODAS as matérias ativas → `Trainee` vira `awaiting_interview` (notifica o
-coordenador). O coordenador aprova → promove `training→promoter` + cria o `Promoter`.
+Não há mais entrevista/Trainee. O candidato vira **promotor** quando o coordenador o aprova
+(`candidate.approve_candidate`). Aí entra o treino:
+
+- `on_became_promoter(user)`: atribui as matérias FIXAS ativas (`MaterialAssignment` pending) e, se
+  houver alguma obrigatória pendente, dá a role overlay `training` (trava). Devolve `locked`.
+- `publish_transitory(material)`: o staff publica uma matéria transitória → atribui só aos promotores
+  JÁ existentes + re-trava + notifica.
+- `submit`/`apply_grade`: a IA corrige; aprovou → marca a `MaterialAssignment` approved → re-checa a
+  trava (zerou as obrigatórias → tira a role `training` + notifica "painel liberado").
+- `coordinator_approve_material`: o coordenador aprova uma matéria EM ABERTO (sem submissão).
+
+A trava é lida do banco (assignments pending obrigatórias) e exposta no `/promoter/me` — NÃO depende
+do JWT (a role overlay não dá bump de token; o promotor não leva OTP ao travar/destravar).
 """
 
 from __future__ import annotations
@@ -17,13 +26,15 @@ from django.utils import timezone
 from users.exceptions import Conflict, DomainError, Forbidden, NotFound
 from users.roles import interface as roles
 from users.roles.training.config import pass_score
-from users.roles.training.models import Material, Submission, Trainee
+from users.roles.training.models import Material, MaterialAssignment, Submission
 
 logger = structlog.get_logger()
 
+_TRAINING_ROLE = "training"
+
 
 class TrainingError(DomainError):
-    """Erro de borda do training (matéria/trainee não encontrado, etapa fora de ordem, gate).
+    """Erro de borda do training (matéria/atribuição não encontrada, etapa fora de ordem, gate).
 
     É `DomainError` (422): o handler central da API converte em JSON `{detail, code, …extra}`."""
 
@@ -34,13 +45,34 @@ class TrainingError(DomainError):
 
 
 def create_material(
-    *, title, text_content, question, expected_answer, order=0
+    *,
+    title,
+    question,
+    expected_answer,
+    text_content="",
+    content_blocks=None,
+    order=0,
+    kind=Material.Kind.FIXED,
+    blocking=True,
+    ephemeral=False,
+    video=None,
+    photo=None,
 ) -> Material:
+    """Cria uma matéria. `kind` fixa (todo promotor novo recebe) ou transitória (publicar p/ existentes).
+    `blocking` = obrigatória (trava o painel). `content_blocks` = conteúdo rico (texto/imagem/etc)."""
+    if kind not in Material.Kind.values:
+        raise TrainingError("Tipo de matéria inválido.", code="INVALID_MATERIAL_KIND")
     return Material.objects.create(
         title=title,
-        text_content=text_content,
+        text_content=text_content or "",
+        content_blocks=content_blocks or [],
         question=question,
         expected_answer=expected_answer,
+        video=video,
+        photo=photo,
+        kind=kind,
+        blocking=bool(blocking),
+        ephemeral=bool(ephemeral),
         order=order,
         active=True,
     )
@@ -58,18 +90,34 @@ def update_material(external_id: str, **fields) -> Material:
     allowed = {
         "title",
         "text_content",
+        "content_blocks",
         "question",
         "expected_answer",
         "order",
         "active",
         "video",
         "photo",
+        "kind",
+        "blocking",
+        "ephemeral",
     }
     for key, value in fields.items():
         if key in allowed and value is not None:
             setattr(m, key, value)
     m.save()
     return m
+
+
+def delete_material(external_id: str) -> None:
+    """Descarta uma matéria EFÊMERA (descartável). Não-efêmera → use `active=False` (preserva histórico)."""
+    m = _material(external_id)
+    if not m.ephemeral:
+        raise TrainingError(
+            "Só matérias efêmeras podem ser deletadas; desative as demais (active=False).",
+            code="MATERIAL_NOT_EPHEMERAL",
+        )
+    m.delete()
+    logger.info("training.material_deleted", external_id=external_id)
 
 
 def list_materials(*, active_only: bool = True) -> list[Material]:
@@ -84,109 +132,195 @@ def material_to_dict(m: Material, *, include_answer: bool = False) -> dict:
         "external_id": str(m.external_id),
         "title": m.title,
         "text_content": m.text_content,
+        "content_blocks": m.content_blocks or [],
         "question": m.question,
         "video": m.video,
         "photo": m.photo,
+        "kind": m.kind,
+        "blocking": m.blocking,
+        "ephemeral": m.ephemeral,
         "order": m.order,
         "active": m.active,
     }
-    if include_answer:  # só pra autoria (staff/coordenador), nunca pro trainee
+    if include_answer:  # só pra autoria (staff/coordenador), nunca pro promotor
         data["expected_answer"] = m.expected_answer
     return data
 
 
-# ── trainee ─────────────────────────────────────────────────────────────────
+# ── atribuição + trava (o coração do modelo novo) ───────────────────────────
 
 
-def create_trainee(*, user) -> Trainee:
-    """Cria o Trainee(TRAINING). Chamado pela transição candidate→training. Idempotente."""
-    existing = Trainee.objects.filter(user=user).first()
+def _assignment(user, material) -> MaterialAssignment | None:
+    return MaterialAssignment.objects.filter(user=user, material=material).first()
+
+
+def assign_material(user, material) -> MaterialAssignment:
+    """Cria a atribuição (pending) de uma matéria a um colaborador. Idempotente."""
+    existing = _assignment(user, material)
     if existing is not None:
         return existing
-    trainee = Trainee.objects.create(user=user, status=Trainee.Status.TRAINING)
-    logger.info("training.trainee_created", external_id=str(trainee.external_id))
-    return trainee
+    return MaterialAssignment.objects.create(user=user, material=material)
 
 
-def get_trainee_for_user_external_id(external_id: str) -> Trainee | None:
-    return (
-        Trainee.objects.filter(user__external_id=external_id)
-        .select_related("user")
-        .first()
-    )
+def pending_blocking_count(user) -> int:
+    """Quantas matérias OBRIGATÓRIAS (blocking, ativas) o user ainda tem pendentes = a trava."""
+    return MaterialAssignment.objects.filter(
+        user=user,
+        status=MaterialAssignment.Status.PENDING,
+        material__blocking=True,
+        material__active=True,
+    ).count()
 
 
-def trainee_to_dict(t: Trainee) -> dict:
-    return {"external_id": str(t.external_id), "status": t.status}
+def is_locked(user) -> bool:
+    """True se o promotor está TRAVADO (tem matéria obrigatória pendente). Lido do banco (não do JWT)."""
+    return pending_blocking_count(user) > 0
 
 
-def trainee_detail_for_coordinator(*, trainee_external_id: str, coordinator) -> dict:
-    """Tela de DETALHE do trainee pro coordenador decidir a entrevista (plan/15 D1).
-
-    Junta num lugar só: dados do trainee + do User (perfil) + de cada `Submission` (matéria,
-    resposta do candidato, nota da IA, justificativa). O coordenador decide VENDO, não às
-    cegas (antes só tinha o nome na fila). Gate: o coordenador tem que ser o do polo do
-    candidato de origem (mesma régua do `approve_interview`)."""
-    from users.profiles import interface as profiles
-
-    trainee = (
-        Trainee.objects.filter(external_id=trainee_external_id)
-        .select_related(
-            "user", "user__candidate", "user__candidate__hub", "coordinator"
+def pending_materials(user) -> list[dict]:
+    """Matérias ainda PENDENTES do user (pro `/promoter/me`: o front sabe o que falta)."""
+    qs = (
+        MaterialAssignment.objects.filter(
+            user=user,
+            status=MaterialAssignment.Status.PENDING,
+            material__active=True,
         )
-        .first()
-    )
-    if trainee is None:
-        raise NotFound("Treinando não encontrado.", code="TRAINEE_NOT_FOUND")
-    hub = getattr(getattr(trainee.user, "candidate", None), "hub", None)
-    if hub is None or hub.coordinator_id != coordinator.id:
-        raise TrainingError(
-            "Você não coordena o polo deste treinando.", code="NOT_HUB_COORDINATOR"
-        )
-    user = trainee.user
-    p = profiles.get(user)
-    submissions = (
-        Submission.objects.filter(user=user)
         .select_related("material")
-        .order_by("created_at")
+        .order_by("material__order", "material__id")
     )
-    return {
-        "external_id": str(trainee.external_id),
-        "status": trainee.status,
-        "awaiting_interview_at": trainee.awaiting_interview_at.isoformat()
-        if trainee.awaiting_interview_at
-        else None,
-        "decision_at": trainee.decision_at.isoformat() if trainee.decision_at else None,
-        "rejection_reason": trainee.rejection_reason,
-        "user": {
-            "external_id": str(user.external_id),
-            "name": p.name if p else None,
-            "cpf": p.cpf if p else None,
-            "phone": p.phone if p else None,
-            "email": p.email if p else None,
-        },
-        "submissions": [
-            {
-                "external_id": str(s.external_id),
-                "material_external_id": str(s.material.external_id),
-                "material_title": s.material.title,
-                "answer": s.answer,
-                "grade": str(s.grade) if s.grade is not None else None,
-                "justification": s.justification,
-                "status": s.status,
-                "submitted_at": s.created_at.isoformat(),
-            }
-            for s in submissions
-        ],
-    }
+    return [
+        {
+            "material_external_id": str(a.material.external_id),
+            "title": a.material.title,
+            "blocking": a.material.blocking,
+            "kind": a.material.kind,
+        }
+        for a in qs
+    ]
 
 
-# ── submissão (autenticado, role training) ──────────────────────────────────
+def assigned_materials(user_external_id: str, *, include_content: bool = True) -> list[dict]:
+    """Matérias ATRIBUÍDAS ao colaborador (não todas as ativas) + status + última submissão.
+
+    É o que o promotor em treino vê (`GET /training/materials`): conteúdo da matéria (sem gabarito) +
+    se já passou. Só as atribuídas a ELE (fixas do onboarding + transitórias publicadas pra ele)."""
+    from users.auth.models import User
+
+    user = User.objects.filter(external_id=user_external_id).first()
+    if user is None:
+        raise NotFound("Usuário não encontrado.", code="USER_NOT_FOUND")
+    qs = (
+        MaterialAssignment.objects.filter(user=user, material__active=True)
+        .select_related("material")
+        .order_by("material__order", "material__id")
+    )
+    out = []
+    for a in qs:
+        last = (
+            Submission.objects.filter(user=user, material=a.material)
+            .order_by("-created_at")
+            .first()
+        )
+        item = {
+            "material_external_id": str(a.material.external_id),
+            "title": a.material.title,
+            "blocking": a.material.blocking,
+            "kind": a.material.kind,
+            "assignment_status": a.status,
+            "submission_status": last.status if last else "not_started",
+            "grade": str(last.grade) if last and last.grade is not None else None,
+            "justification": last.justification if last else None,
+        }
+        if include_content:
+            item["text_content"] = a.material.text_content
+            item["content_blocks"] = a.material.content_blocks or []
+            item["question"] = a.material.question
+            item["video"] = a.material.video
+            item["photo"] = a.material.photo
+        out.append(item)
+    return out
 
 
-def submit(
-    *, user_external_id: str, material_external_id: str, answer: str
-) -> Submission:
+def progress(user_external_id: str) -> list[dict]:
+    """Resumo de status por matéria atribuída (sem o conteúdo). Atalho do `assigned_materials`."""
+    return assigned_materials(user_external_id, include_content=False)
+
+
+def on_became_promoter(user) -> bool:
+    """Chamado quando o candidato vira promotor: atribui as matérias FIXAS ativas e, se houver
+    obrigatória pendente, dá a role overlay `training` (trava). Devolve `locked` (pro caller notificar)."""
+    with transaction.atomic():
+        for material in Material.objects.filter(
+            active=True, kind=Material.Kind.FIXED
+        ):
+            assign_material(user, material)
+        locked = is_locked(user)
+        if locked and _TRAINING_ROLE not in roles.active_roles(user):
+            roles.grant(user, _TRAINING_ROLE)  # overlay, sem bump de token
+    return locked
+
+
+def publish_transitory(material_external_id: str) -> dict:
+    """Staff PUBLICA uma matéria transitória → atribui só aos PROMOTORES JÁ existentes + re-trava +
+    notifica. Matérias fixas NÃO usam isto (são atribuídas no promote de cada novo promotor)."""
+    material = _material(material_external_id)
+    if material.kind != Material.Kind.TRANSITORY:
+        raise TrainingError(
+            "Só matérias transitórias são publicadas; as fixas já entram em cada novo promotor.",
+            code="MATERIAL_NOT_TRANSITORY",
+        )
+    if not material.active:
+        raise TrainingError("Matéria inativa.", code="MATERIAL_INACTIVE")
+    promoters = roles.users_with_role("promoter")
+    assigned = 0
+    for user in promoters:
+        if _assignment(user, material) is not None:
+            continue
+        with transaction.atomic():
+            assign_material(user, material)
+            if material.blocking and _TRAINING_ROLE not in roles.active_roles(user):
+                roles.grant(user, _TRAINING_ROLE)
+        assigned += 1
+        if material.blocking:
+            _notify_new_material(user, str(material.external_id))
+    logger.info(
+        "training.published",
+        external_id=str(material.external_id),
+        assigned=assigned,
+    )
+    return {"external_id": str(material.external_id), "assigned": assigned}
+
+
+def _mark_assignment_approved(user, material, *, decided_by=None) -> None:
+    """Marca a atribuição (user, material) como approved + re-checa a trava — ATÔMICO: a role overlay
+    `training` e a contagem de pendências ficam em lockstep (nunca role órfã). Idempotente."""
+    with transaction.atomic():
+        a = _assignment(user, material)
+        if a is None:
+            # matéria não atribuída a este user (ex.: respondeu uma opcional não atribuída) → nada a fechar
+            return
+        if a.status != MaterialAssignment.Status.APPROVED:
+            a.status = MaterialAssignment.Status.APPROVED
+            a.decided_by = decided_by
+            a.approved_at = timezone.now()
+            a.save(update_fields=["status", "decided_by", "approved_at", "updated_at"])
+        _recheck_lock(user, trigger=material)
+
+
+def _recheck_lock(user, *, trigger=None) -> None:
+    """Se NÃO há mais matéria obrigatória pendente → tira a role overlay `training` + notifica liberado.
+    `trigger` = a matéria que fechou a trava (entra na chave de idempotência estável do notify)."""
+    if is_locked(user):
+        return
+    if _TRAINING_ROLE in roles.active_roles(user):
+        roles.revoke(user, _TRAINING_ROLE)  # overlay, sem bump
+        _notify_cleared(user, trigger)
+
+
+# ── submissão (autenticado, role promoter) ──────────────────────────────────
+
+
+def submit(*, user_external_id: str, material_external_id: str, answer: str) -> Submission:
     from users.auth.models import User
 
     user = User.objects.filter(external_id=user_external_id).first()
@@ -195,6 +329,10 @@ def submit(
     material = _material(material_external_id)
     if not material.active:
         raise TrainingError("Matéria inativa.", code="MATERIAL_INACTIVE")
+    if _assignment(user, material) is None:
+        raise TrainingError(
+            "Esta matéria não está atribuída a você.", code="MATERIAL_NOT_ASSIGNED"
+        )
     # bloqueia 2ª pending na mesma matéria (não gasta IA em dobro)
     if Submission.objects.filter(
         user=user, material=material, status=Submission.Status.PENDING
@@ -228,32 +366,6 @@ def submission_to_dict(s: Submission) -> dict:
     }
 
 
-def progress(user_external_id: str) -> list[dict]:
-    """Por matéria ativa: última submissão (status/nota/justificativa) ou `not_started`."""
-    from users.auth.models import User
-
-    user = User.objects.filter(external_id=user_external_id).first()
-    if user is None:
-        raise NotFound("Usuário não encontrado.", code="USER_NOT_FOUND")
-    out = []
-    for m in list_materials(active_only=True):
-        last = (
-            Submission.objects.filter(user=user, material=m)
-            .order_by("-created_at")
-            .first()
-        )
-        out.append(
-            {
-                "material_external_id": str(m.external_id),
-                "title": m.title,
-                "status": last.status if last else "not_started",
-                "grade": str(last.grade) if last and last.grade is not None else None,
-                "justification": last.justification if last else None,
-            }
-        )
-    return out
-
-
 # ── correção (chamada pela task Django-Q após a IA) ─────────────────────────
 
 
@@ -280,195 +392,115 @@ def apply_grade(submission_id: int, grade_value, justification: str) -> None:
         status=sub.status,
     )
     if sub.status == Submission.Status.APPROVED:
-        _maybe_awaiting_interview(sub.user)
+        _mark_assignment_approved(sub.user, sub.material)
 
 
-def _maybe_awaiting_interview(user) -> None:
-    """Aprovou TODAS as matérias ativas → Trainee vira awaiting_interview + notifica o coordenador."""
-    active_ids = set(Material.objects.filter(active=True).values_list("id", flat=True))
-    if not active_ids:
-        return
-    approved_ids = set(
-        Submission.objects.filter(
-            user=user, status=Submission.Status.APPROVED
-        ).values_list("material_id", flat=True)
+# ── aprovar matéria EM ABERTO (coordenador, grupo leadership) ───────────────
+
+
+def coordinator_approve_material(
+    *, promoter_external_id: str, material_external_id: str, coordinator
+) -> dict:
+    """Coordenador aprova uma matéria EM ABERTO de um promotor preso (sem submissão) — destrava quem
+    não tem prática digital (Victor 2026-06-16). Gate: ser o coordenador do polo do promotor."""
+    from users.auth.models import User
+    from users.roles.promoter.models import Promoter
+
+    user = User.objects.filter(external_id=promoter_external_id).first()
+    if user is None:
+        raise NotFound("Promotor não encontrado.", code="PROMOTER_NOT_FOUND")
+    promoter = (
+        Promoter.objects.filter(user=user).select_related("hub").first()
     )
-    if not active_ids.issubset(approved_ids):
-        return
-    trainee = Trainee.objects.filter(user=user).first()
-    if trainee is None or trainee.status != Trainee.Status.TRAINING:
-        return
-    trainee.status = Trainee.Status.AWAITING_INTERVIEW
-    trainee.awaiting_interview_at = timezone.now()
-    trainee.save(update_fields=["status", "awaiting_interview_at", "updated_at"])
-    _notify_coordinator_interview(trainee)
-
-
-def _hub_of_trainee(trainee: Trainee):
-    """O hub do candidato que virou trainee (origem da herança pro promoter)."""
-    from users.roles.candidate.models import Candidate
-
-    cand = (
-        Candidate.objects.filter(user=trainee.user)
-        .select_related("hub", "hub__coordinator")
-        .first()
-    )
-    return cand.hub if cand else None
-
-
-def _notify_coordinator_interview(trainee: Trainee) -> None:
-    from notify.interface.send import send
-    from users.profiles import interface as profiles
-
-    hub = _hub_of_trainee(trainee)
-    coord = hub.coordinator if hub else None
-    if coord is None:
-        return
-    cp = profiles.get(coord)
-    from users.roles import notifications as msgs
-
-    try:
-        send(
-            text=msgs.text(
-                "training.awaiting_interview",
-                name=msgs.first_name(cp.name if cp else None),
-            ),
-            caller="training.awaiting_interview",
-            phone=cp.phone if cp else None,
-            idempotency_key=f"trainee_interview_{trainee.external_id}",
-        )
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("training.notify_coord_failed", error=str(exc))
-
-
-# ── entrevista (coordenador, grupo leadership) ──────────────────────────────
-
-
-def approve_interview(*, trainee_external_id: str, coordinator) -> Trainee:
-    """Coordenador do hub aprova → promove `training→promoter` + cria o `Promoter` (hub herdado)."""
-    from users.roles.promoter import interface as promoter_iface
-
-    trainee = (
-        Trainee.objects.filter(external_id=trainee_external_id)
-        .select_related("user")
-        .first()
-    )
-    if trainee is None:
-        raise NotFound("Treinando não encontrado.", code="TRAINEE_NOT_FOUND")
-    hub = _hub_of_trainee(trainee)
-    if hub is None:
-        raise TrainingError("Treinando sem polo de origem.", code="NO_HUB")
-    if hub.coordinator_id != coordinator.id:
+    if promoter is None:
+        raise NotFound("Promotor não encontrado.", code="PROMOTER_NOT_FOUND")
+    if promoter.hub.coordinator_id != coordinator.id:
         raise Forbidden(
-            "Você não coordena o polo deste treinando.", code="NOT_HUB_COORDINATOR"
+            "Você não coordena o polo deste promotor.", code="NOT_HUB_COORDINATOR"
         )
-    if trainee.status != Trainee.Status.AWAITING_INTERVIEW:
-        raise Conflict(
-            "O treinamento está em outra fase.",
-            code="WRONG_STATUS",
-            extra={"expected_status": trainee.status},
+    material = _material(material_external_id)
+    if _assignment(user, material) is None:
+        raise TrainingError(
+            "Esta matéria não está atribuída a este promotor.",
+            code="MATERIAL_NOT_ASSIGNED",
         )
-
-    with transaction.atomic():
-        if "promoter" not in roles.active_roles(trainee.user):
-            roles.promote(trainee.user, "promoter")
-        promoter_iface.create_promoter(user=trainee.user, hub=hub)
-        trainee.status = Trainee.Status.APPROVED
-        trainee.coordinator = coordinator
-        trainee.decision_at = timezone.now()
-        trainee.save(
-            update_fields=["status", "coordinator", "decision_at", "updated_at"]
-        )
-
-    _notify_approved(trainee)
-    logger.info("training.approved", external_id=str(trainee.external_id))
-    return trainee
-
-
-def reject_interview(*, trainee_external_id: str, coordinator, reason: str) -> Trainee:
-    trainee = (
-        Trainee.objects.filter(external_id=trainee_external_id)
-        .select_related("user")
-        .first()
+    _mark_assignment_approved(user, material, decided_by=coordinator)
+    logger.info(
+        "training.material_approved_by_coordinator",
+        promoter=promoter_external_id,
+        material=material_external_id,
     )
-    if trainee is None:
-        raise NotFound("Treinando não encontrado.", code="TRAINEE_NOT_FOUND")
-    hub = _hub_of_trainee(trainee)
-    if hub is None or hub.coordinator_id != coordinator.id:
-        raise Forbidden(
-            "Você não coordena o polo deste treinando.", code="NOT_HUB_COORDINATOR"
-        )
-    if trainee.status != Trainee.Status.AWAITING_INTERVIEW:
-        raise Conflict(
-            "O treinamento está em outra fase.",
-            code="WRONG_STATUS",
-            extra={"expected_status": trainee.status},
-        )
-    trainee.status = Trainee.Status.REJECTED
-    trainee.coordinator = coordinator
-    trainee.decision_at = timezone.now()
-    trainee.rejection_reason = (reason or "")[:255]
-    trainee.save(
-        update_fields=[
-            "status",
-            "coordinator",
-            "decision_at",
-            "rejection_reason",
-            "updated_at",
-        ]
-    )
-    logger.info("training.rejected", external_id=str(trainee.external_id))
-    return trainee
+    return {
+        "promoter_external_id": promoter_external_id,
+        "material_external_id": material_external_id,
+        "locked": is_locked(user),
+    }
 
 
-def _notify_approved(trainee: Trainee) -> None:
-    from notify.interface.send import send
+def list_locked_promoters_for_hub(*, hub) -> list[dict]:
+    """Promotores do polo TRAVADOS (com matéria obrigatória pendente) — pro inbox do coordenador
+    (`/reviews`): ele pode aprovar a matéria em aberto de quem não tem prática digital."""
     from users.profiles import interface as profiles
-    from users.roles import notifications as msgs
-
-    p = profiles.get(trainee.user)
-    try:
-        send(
-            text=msgs.text(
-                "training.approved", name=msgs.first_name(p.name if p else None)
-            ),
-            caller="training.approved",
-            phone=p.phone if p else None,
-            email=p.email if p else None,
-            email_channel=bool(p and p.email),
-            tts=msgs.is_tts(
-                "training.approved"
-            ),  # virou promotor = momento especial (voz)
-            gender=p.gender if p else None,
-            idempotency_key=f"trainee_approved_{trainee.external_id}",
-        )
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("training.notify_approved_failed", error=str(exc))
-
-
-def list_awaiting_interview_for_hub(*, hub) -> list[dict]:
-    """Trainees do polo aguardando a ENTREVISTA do coordenador (plan/14). O hub do trainee é o do
-    candidato de origem — a MESMA régua do `approve_interview` (`_hub_of_trainee`).
-
-    Cada item aponta pros POSTs que já existem (`/trainees/{ext}/approve` | `/reject`)."""
-    from users.profiles import interface as profiles
+    from users.roles.promoter.models import Promoter
 
     out = []
-    qs = (
-        Trainee.objects.filter(
-            status=Trainee.Status.AWAITING_INTERVIEW, user__candidate__hub=hub
-        )
-        .select_related("user")
-        .order_by("awaiting_interview_at")
+    promoters = (
+        Promoter.objects.filter(hub=hub).select_related("user").order_by("created_at")
     )
-    for trainee in qs:
-        p = profiles.get(trainee.user)
-        since = trainee.awaiting_interview_at or trainee.updated_at
+    for promoter in promoters:
+        pending = pending_materials(promoter.user)
+        if not any(p["blocking"] for p in pending):
+            continue
+        p = profiles.get(promoter.user)
         out.append(
             {
-                "external_id": str(trainee.external_id),
+                "promoter_external_id": str(promoter.user.external_id),
                 "name": p.name if p else None,
-                "since": since.isoformat() if since else None,
+                "pending_materials": pending,
             }
         )
     return out
+
+
+# ── notify ───────────────────────────────────────────────────────────────────
+
+
+def _notify(user, event: str, *, key: str, tts: bool = False) -> None:
+    from notify.interface.send import send
+    from users.profiles import interface as profiles
+    from users.roles import notifications as msgs
+
+    p = profiles.get(user)
+    try:
+        send(
+            text=msgs.text(event, name=msgs.first_name(p.name if p else None)),
+            caller=event,
+            phone=p.phone if p else None,
+            email=p.email if p else None,
+            email_channel=bool(p and p.email),
+            tts=tts,
+            gender=p.gender if (p and tts) else None,
+            idempotency_key=key,
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("training.notify_failed", event=event, error=str(exc))
+
+
+def _notify_cleared(user, trigger=None) -> None:
+    # chave estável POR matéria que fechou a trava: cada liberação distinta tem chave própria (o dedup
+    # do notify é permanente — uma chave só por user suprimiria liberações de ciclos futuros).
+    suffix = str(trigger.external_id) if trigger is not None else "all"
+    _notify(
+        user,
+        "training.cleared",  # painel liberado = momento especial (voz)
+        key=f"training_cleared_{user.external_id}_{suffix}",
+        tts=True,
+    )
+
+
+def _notify_new_material(user, material_external_id: str) -> None:
+    _notify(
+        user,
+        "training.new_material",
+        key=f"training_new_material_{user.external_id}_{material_external_id}",
+    )

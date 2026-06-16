@@ -8,8 +8,10 @@ from users.roles.catalog import all_rules, find_rule
 from users.roles.service import (
     active_roles,
     assign,
+    grant,
     is_blocked,
     promote,
+    revoke,
     users_with_role,
 )
 
@@ -22,6 +24,8 @@ def is_entry_role(role: str) -> bool:
 __all__ = [
     "assign",
     "promote",
+    "grant",
+    "revoke",
     "active_roles",
     "is_blocked",
     "is_entry_role",

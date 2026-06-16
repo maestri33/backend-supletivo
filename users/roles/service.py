@@ -6,7 +6,7 @@ qual role agora + histórico (ativa = `revoked_at` nulo). Referência por FK ao 
 
 from __future__ import annotations
 
-from django.db import transaction
+from django.db import IntegrityError, transaction
 from django.utils import timezone
 
 from users.exceptions import Conflict, NotFound, ValidationError
@@ -96,6 +96,30 @@ def promote(user, to_role: str) -> list[str]:
         _active_qs(user).filter(role=from_role).update(revoked_at=timezone.now())
         UserRole.objects.create(user=user, role=to_role)
         _bump_token_version(user)  # role mudou → invalida JWT antigo
+    return active_roles(user)
+
+
+def grant(user, role: str) -> list[str]:
+    """Adiciona uma role de OVERLAY (aditiva — ex.: `training`) SEM bump de token_version.
+
+    Diferente de `assign`/`promote`: NÃO força re-login (Victor 2026-06-16). A trava do treino é lida
+    do `/me` (estado do banco), não do JWT — o promotor não leva OTP toda vez que ganha/perde a role
+    de treino. Idempotente (role já ativa = no-op). Validação de catálogo fica no caller."""
+    if role in active_roles(user):
+        return active_roles(user)
+    try:
+        with transaction.atomic():  # savepoint: IntegrityError não quebra a transação externa
+            UserRole.objects.create(user=user, role=role)
+    except IntegrityError:
+        # corrida: outra transação concedeu a MESMA role ativa (constraint de role ativa única) — no-op.
+        pass
+    return active_roles(user)
+
+
+def revoke(user, role: str) -> list[str]:
+    """Revoga uma role de OVERLAY (ex.: `training`) SEM bump de token_version. Preserva o histórico
+    (revoked_at). Idempotente (role ausente = no-op). Par do `grant`."""
+    _active_qs(user).filter(role=role).update(revoked_at=timezone.now())
     return active_roles(user)
 
 

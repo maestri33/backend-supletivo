@@ -61,7 +61,14 @@ def validate_ref(ref: str):
         .select_related("user")
         .first()
     )
-    return promoter.user if promoter else None
+    if promoter is None:
+        return None
+    # promotor TRAVADO no treino obrigatório ainda NÃO capta (Victor 2026-06-16) — cai no padrão.
+    from users.roles.training import interface as training_iface
+
+    if training_iface.is_locked(promoter.user):
+        return None
+    return promoter.user
 
 
 def ref_url(user) -> str:
@@ -72,11 +79,17 @@ def ref_url(user) -> str:
 
 
 def to_dict(promoter: Promoter) -> dict:
+    """Painel do promotor. `locked` + `pending_materials` = a trava do treino (lida do banco, não do
+    JWT): se travado, o front mostra só o treino. Liberado → painel cheio + captação ativa."""
+    from users.roles.training import interface as training_iface
+
     return {
         "external_id": str(promoter.external_id),
         "status": promoter.status,
         "hub_external_id": str(promoter.hub.external_id),
         "ref_url": ref_url(promoter.user),
+        "locked": training_iface.is_locked(promoter.user),
+        "pending_materials": training_iface.pending_materials(promoter.user),
     }
 
 

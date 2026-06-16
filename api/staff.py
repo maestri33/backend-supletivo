@@ -138,6 +138,22 @@ def list_materials(request):
     ]
 
 
+@api.post("/training/materials/{external_id}/publish", tags=["staff"])
+def publish_material(request, external_id: str):
+    """Publica uma matéria TRANSITÓRIA → atribui aos promotores JÁ existentes + re-trava + notifica.
+    (As FIXAS não precisam: entram em cada novo promotor ao ser aprovado.)"""
+    require_superuser(request.auth)
+    return training_iface.publish_transitory(external_id)
+
+
+@api.delete("/training/materials/{external_id}", tags=["staff"])
+def delete_material(request, external_id: str):
+    """Descarta uma matéria EFÊMERA (descartável). Não-efêmera → desative com update `active=False`."""
+    require_superuser(request.auth)
+    training_iface.delete_material(external_id)
+    return {"deleted": external_id}
+
+
 # ── leads (staff vê TODOS; filtra por polo) ──────────────────────────────────
 @api.get("/leads", tags=["lead"])
 def list_all_leads(request, hub: str | None = None, status: str | None = None):

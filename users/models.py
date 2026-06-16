@@ -22,7 +22,7 @@ from users.roles.student.models import (
     StudentExam,
     StudentPendency,
 )
-from users.roles.training.models import Material, Submission, Trainee
+from users.roles.training.models import Material, MaterialAssignment, Submission
 
 __all__ = [
     "User",
@@ -44,7 +44,7 @@ __all__ = [
     "Candidate",
     "Promoter",
     "Material",
-    "Trainee",
+    "MaterialAssignment",
     "Submission",
     "Student",
     "StudentDocument",

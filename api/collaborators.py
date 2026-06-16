@@ -349,25 +349,27 @@ def get_candidate_selfie(request):
     return candidate_iface.get_selfie(user_external_id=ext)
 
 
-# ── treino (autenticado, role training) ─────────────────────────────────────
+# ── treino (autenticado, role PROMOTER — a trava do painel; Victor 2026-06-16) ──
+# O candidato vira promotor quando o coordenador aprova; se houver matéria obrigatória pendente, o
+# promotor nasce TRAVADO e só vê o treino. As rotas são gated por `promoter` (ele já é promotor); a
+# trava em si é lida do `/promoter/me` (campo `locked`).
 @api.get("/training/materials", tags=["training"])
 def training_materials(request):
-    _guard(request, "training")
-    return [
-        training_iface.material_to_dict(m)  # sem gabarito pro trainee
-        for m in training_iface.list_materials(active_only=True)
-    ]
+    """Matérias ATRIBUÍDAS ao promotor (fixas do onboarding + transitórias publicadas pra ele):
+    conteúdo (sem gabarito) + status de cada. NÃO é a lista global — só o treino dele."""
+    ext = _guard(request, "promoter")
+    return training_iface.assigned_materials(ext)
 
 
 @api.get("/training/progress", tags=["training"])
 def training_progress(request):
-    ext = _guard(request, "training")
+    ext = _guard(request, "promoter")
     return training_iface.progress(ext)
 
 
 @api.post("/training/submissions", tags=["training"])
 def training_submit(request, payload: SubmissionIn):
-    ext = _guard(request, "training")
+    ext = _guard(request, "promoter")
     sub = training_iface.submit(
         user_external_id=ext,
         material_external_id=payload.material_external_id,
