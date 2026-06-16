@@ -162,6 +162,20 @@ def set_coordinator(*, hub_external_id: str, coordinator_external_id: str) -> Hu
     return hub
 
 
+def set_default(external_id: str) -> Hub:
+    """Marca o polo como PADRÃO (fallback de captação; único — desmarca os outros, atômico)."""
+    hub = get_by_external_id(external_id)
+    if hub is None:
+        raise HubError("hub_not_found")
+    with transaction.atomic():
+        Hub.objects.filter(is_default=True).exclude(pk=hub.pk).update(is_default=False)
+        if not hub.is_default:
+            hub.is_default = True
+            hub.save(update_fields=["is_default", "updated_at"])
+    logger.info("hub.set_default", external_id=external_id)
+    return hub
+
+
 def coordinated_by(user):
     """O hub que `user` COORDENA de fato (FK `Hub.coordinator`) — ou None.
 

@@ -802,6 +802,30 @@ def _notify_coordinator(student: Student, *, event: str, key: str, **ctx) -> Non
         logger.warning("student.notify_coord_failed", caller=event, error=str(exc))
 
 
+def list_for_staff(*, hub_external_id=None, status=None, limit=200) -> list[dict]:
+    """Alunos de TODOS os polos (ou de um, se `hub_external_id`) pro painel do staff. Read-only."""
+    from users.profiles import interface as profiles
+
+    qs = Student.objects.select_related("user", "hub").order_by("-id")
+    if hub_external_id:
+        qs = qs.filter(hub__external_id=hub_external_id)
+    if status:
+        qs = qs.filter(status=status)
+    out = []
+    for s in qs[:limit]:
+        p = profiles.get(s.user)
+        out.append(
+            {
+                "external_id": str(s.external_id),
+                "status": s.status,
+                "self_study": s.self_study,
+                "hub_external_id": str(s.hub.external_id),
+                "name": p.name if p else None,
+            }
+        )
+    return out
+
+
 def list_document_reviews_for_hub(*, hub) -> list[dict]:
     """Documentos de students do polo parados em REVISÃO (decisão do coordenador — plan/14).
 

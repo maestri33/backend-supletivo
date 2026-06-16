@@ -1573,6 +1573,30 @@ def _hub_item_dict(enr: Enrollment) -> dict:
     }
 
 
+def list_for_staff(*, hub_external_id=None, status=None, limit=200) -> list[dict]:
+    """Matrículas de TODOS os polos (ou de um, se `hub_external_id`) pro painel do staff. Read-only."""
+    from users.profiles import interface as profiles
+
+    qs = Enrollment.objects.select_related("user", "hub").order_by("-id")
+    if hub_external_id:
+        qs = qs.filter(hub__external_id=hub_external_id)
+    if status:
+        qs = qs.filter(status=status)
+    out = []
+    for enr in qs[:limit]:
+        p = profiles.get(enr.user)
+        out.append(
+            {
+                "external_id": str(enr.external_id),
+                "status": enr.status,
+                "self_study": enr.self_study,
+                "hub_external_id": str(enr.hub.external_id),
+                "name": p.name if p else None,
+            }
+        )
+    return out
+
+
 def list_for_hub(*, hub, status: str | None = None) -> list[dict]:
     """Matrículas do polo (visão do coordenador): status REAL + resumo das 2 parcelas da taxa.
     `?status=awaiting_release` = quem terminou o wizard e espera ação do coordenador."""

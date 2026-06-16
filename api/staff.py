@@ -20,7 +20,9 @@ from integrations import status as integ_status
 from integrations.bank.asaas import onboarding as asaas_onboarding
 from users.profiles import interface as profiles
 from users.roles import interface as roles
+from users.roles.enrollment import interface as enrollment_iface
 from users.roles.lead import interface as lead_iface
+from users.roles.student import interface as student_iface
 from users.roles.training import interface as training_iface
 
 api = build_group(
@@ -108,6 +110,18 @@ def set_coordinator(request, external_id: str, payload: SetCoordinatorIn):
             hub_external_id=external_id,
             coordinator_external_id=payload.coordinator_external_id,
         )
+    except hub_iface.HubError as exc:
+        status = 404 if exc.args and exc.args[0] == "hub_not_found" else 422
+        raise HttpError(status, str(exc)) from exc
+    return _hub_out(hub)
+
+
+@api.put("/hubs/{external_id}/default", response=HubOut, tags=["staff"])
+def set_default_hub(request, external_id: str):
+    """Marca um polo como PADRÃO (fallback de captação; único — desmarca os outros)."""
+    require_superuser(request.auth)
+    try:
+        hub = hub_iface.set_default(external_id)
     except hub_iface.HubError as exc:
         status = 404 if exc.args and exc.args[0] == "hub_not_found" else 422
         raise HttpError(status, str(exc)) from exc
@@ -344,3 +358,18 @@ def logs_checks(request, scope: str | None = None, limit: int = 100):
         }
         for c in qs[:limit]
     ]
+
+
+# ── visão global (todos os polos) — WP6-D ────────────────────────────────────
+@api.get("/enrollments", tags=["enrollment"])
+def list_all_enrollments(request, hub: str | None = None, status: str | None = None):
+    """Matrículas de TODOS os polos (filtros: `hub` external_id, `status`)."""
+    require_superuser(request.auth)
+    return enrollment_iface.list_for_staff(hub_external_id=hub, status=status)
+
+
+@api.get("/students", tags=["student"])
+def list_all_students(request, hub: str | None = None, status: str | None = None):
+    """Alunos de TODOS os polos (filtros: `hub` external_id, `status`)."""
+    require_superuser(request.auth)
+    return student_iface.list_for_staff(hub_external_id=hub, status=status)

@@ -17,6 +17,7 @@ from users.roles.enrollment.service import (
     get_rg_section,
     get_selfie,
     list_for_hub,
+    list_for_staff,
     list_reviews_for_hub,
     me_dict,
     patch_rg_section,
@@ -57,6 +58,7 @@ __all__ = [
     "conclude",
     "coordinated_user_ext",
     "list_for_hub",
+    "list_for_staff",
     "detail_for_hub",
     "list_reviews_for_hub",
 ]
