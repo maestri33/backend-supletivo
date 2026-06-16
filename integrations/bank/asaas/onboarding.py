@@ -215,6 +215,25 @@ async def register_webhook(*, force: bool = False) -> tuple[dict, str]:
         return created, ("recreated" if existing else "created")
 
 
+def account_balance() -> dict:
+    """Saldo da conta Asaas (read-only, wrapper sync) — pro painel financeiro do staff (WP6).
+
+    Roda na thread do request (runserver/gunicorn), onde `asyncio.run` é seguro. Sem mutar nada."""
+
+    async def _b():
+        async with get_client() as c:
+            return await c.get_balance()
+
+    if not settings.ASAAS_API_KEY:
+        return {"error": "ASAAS_API_KEY ausente no .env"}
+    try:
+        return asyncio.run(_b())
+    except AsaasError as e:
+        return {"error": {"status_code": e.status_code, "body": e.body}}
+    except Exception as e:  # noqa: BLE001 — rede/timeout: painel vê erro estruturado, não 500
+        return {"error": {"detail": str(e)}}
+
+
 def setup(*, force: bool = False) -> dict:
     """Bateria + ping REAL da EXTERNAL_URL + auto-cadastro do webhook. Chamado pelo boot e pelo /setup/.
 

@@ -690,4 +690,5 @@ def coord_proxy_selfie(request, external_id: str, file: UploadedFile = File(...)
         image_bytes=file.read(),
         content_type=getattr(file, "content_type", "image/jpeg"),
     )
-    return enrollment_iface.me_dict(enr)
+    # mesmo contrato do wizard do cliente: o coordenador também recebe o ack de análise (poll/TTL).
+    return {**enrollment_iface.me_dict(enr), **enrollment_iface.selfie_ack(enr)}

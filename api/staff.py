@@ -7,13 +7,17 @@ Todas as rotas exigem SUPERUSER (staff = superuser nativo do Django — Victor 2
 
 from __future__ import annotations
 
+from django.conf import settings
 from ninja import Schema
 from ninja.errors import HttpError
 
 from api.auth import require_superuser
 from api.base import build_group
 from api.schemas import MaterialIn, MaterialUpdateIn
+from finance import interface as finance_iface
 from hub import interface as hub_iface
+from integrations import status as integ_status
+from integrations.bank.asaas import onboarding as asaas_onboarding
 from users.profiles import interface as profiles
 from users.roles import interface as roles
 from users.roles.lead import interface as lead_iface
@@ -167,3 +171,176 @@ def list_all_leads(request, hub: str | None = None, status: str | None = None):
             raise HttpError(404, "hub_not_found")
     leads = lead_iface.list_leads(hub=hub_obj, status=status)
     return [lead_iface.lead_to_dict(lead) for lead in leads]
+
+
+# ── financeiro (WP6: saldo Asaas + comissões + fila de payouts + resumo) ─────
+@api.get("/finance/balance", tags=["staff"])
+def finance_balance(request):
+    """Saldo da conta Asaas (read-only — NÃO move dinheiro)."""
+    require_superuser(request.auth)
+    return asaas_onboarding.account_balance()
+
+
+@api.get("/finance/summary", tags=["staff"])
+def finance_summary(request):
+    """Resumo por status (contagem + total em reais) de comissões e da fila de saída."""
+    require_superuser(request.auth)
+    return finance_iface.summary()
+
+
+@api.get("/finance/commissions", tags=["staff"])
+def finance_commissions(request, status: str | None = None):
+    """Comissões (filtro opcional por status: pending/processed/paid/failed)."""
+    require_superuser(request.auth)
+    return finance_iface.list_commissions(status=status)
+
+
+@api.get("/finance/payouts", tags=["staff"])
+def finance_payouts(request, status: str | None = None, kind: str | None = None):
+    """Solicitações de pagamento / payouts (filtros: status; kind=commission|fee)."""
+    require_superuser(request.auth)
+    return finance_iface.list_payment_requests(status=status, kind=kind)
+
+
+# ── integrações (WP6: status/config + fluxo + ações setup/test) ─────────────
+@api.get("/integrations", tags=["staff"])
+def list_integrations(request):
+    """Saúde/config de TODAS as integrações (read-only): env presente + fluxo + último do ledger."""
+    require_superuser(request.auth)
+    return integ_status.list_integrations()
+
+
+@api.get("/integrations/{name}", tags=["staff"])
+def integration_detail(request, name: str):
+    """Detalhe de uma integração (asaas faz run_checks AO VIVO: saldo + webhook)."""
+    require_superuser(request.auth)
+    data = integ_status.integration_detail(name)
+    if data is None:
+        raise HttpError(404, "integration_not_found")
+    return data
+
+
+@api.post("/integrations/{name}/setup", tags=["staff"])
+def integration_setup(request, name: str):
+    """Roda o onboarding da integração (asaas: auto-cadastra o webhook). Idempotente."""
+    require_superuser(request.auth)
+    data = integ_status.run_setup(name)
+    if data is None:
+        raise HttpError(404, "integration_not_found")
+    return data
+
+
+@api.post("/integrations/{name}/test", tags=["staff"])
+def integration_test(request, name: str):
+    """Teste de saúde ao vivo (carimba o ledger; asaas faz a bateria real)."""
+    require_superuser(request.auth)
+    data = integ_status.run_test(name)
+    if data is None:
+        raise HttpError(404, "integration_not_found")
+    return data
+
+
+# ── status do servidor (WP6) ─────────────────────────────────────────────────
+@api.get("/system", tags=["staff"])
+def system_status(request):
+    """Saúde do servidor: DB, migrações pendentes, qcluster (Django-Q) + fila, DEBUG, EXTERNAL_URL."""
+    require_superuser(request.auth)
+    from django.db import connection
+    from django.db.migrations.executor import MigrationExecutor
+
+    db_ok = True
+    try:
+        with connection.cursor() as c:
+            c.execute("SELECT 1")
+    except Exception:  # noqa: BLE001
+        db_ok = False
+    executor = MigrationExecutor(connection)
+    pending = executor.migration_plan(executor.loader.graph.leaf_nodes())
+    clusters: list = []
+    queued = None
+    try:
+        from django_q.models import OrmQ
+        from django_q.status import Stat
+
+        clusters = [s.cluster_id for s in Stat.get_all()]
+        queued = OrmQ.objects.count()
+    except Exception:  # noqa: BLE001
+        pass
+    return {
+        "db_ok": db_ok,
+        "migrations_pending": [f"{m.app_label}.{m.name}" for m, _ in pending],
+        "qcluster_alive": bool(clusters),
+        "qcluster_count": len(clusters),
+        "queued_tasks": queued,
+        "debug": settings.DEBUG,
+        "external_url": settings.EXTERNAL_URL,
+    }
+
+
+# ── logs / ledgers (WP6) ─────────────────────────────────────────────────────
+@api.get("/logs/unrouted", tags=["staff"])
+def logs_unrouted(request, resolved: bool | None = None, limit: int = 100):
+    """Eventos que chegaram mas não tinham consumidor (fallback rastreável do core)."""
+    require_superuser(request.auth)
+    from core.models import UnroutedEvent
+
+    qs = UnroutedEvent.objects.order_by("-received_at")
+    if resolved is not None:
+        qs = qs.filter(resolved=resolved)
+    return [
+        {
+            "source": e.source,
+            "event": e.event,
+            "reason": e.reason,
+            "resolved": e.resolved,
+            "received_at": e.received_at.isoformat(),
+        }
+        for e in qs[:limit]
+    ]
+
+
+@api.get("/logs/ai-calls", tags=["staff"])
+def logs_ai_calls(request, status: str | None = None, limit: int = 100):
+    """Chamadas de IA (provider/modelo/operação/custo/erro/latência) — o ledger `AiCall`."""
+    require_superuser(request.auth)
+    from integrations.ai.models import AiCall
+
+    qs = AiCall.objects.order_by("-created_at")
+    if status:
+        qs = qs.filter(status=status)
+    return [
+        {
+            "provider": a.provider,
+            "model": a.model,
+            "operation": a.operation,
+            "caller": a.caller,
+            "status": a.status,
+            "cost": str(a.cost) if a.cost is not None else None,
+            "latency_ms": a.latency_ms,
+            "error": a.error,
+            "created_at": a.created_at.isoformat(),
+        }
+        for a in qs[:limit]
+    ]
+
+
+@api.get("/logs/checks", tags=["staff"])
+def logs_checks(request, scope: str | None = None, limit: int = 100):
+    """Histórico do ledger de validação (`ValidationCheck` — testes carimbados)."""
+    require_superuser(request.auth)
+    from core.models import ValidationCheck
+
+    qs = ValidationCheck.objects.order_by("-checked_at")
+    if scope:
+        qs = qs.filter(scope=scope)
+    return [
+        {
+            "scope": c.scope,
+            "name": c.name,
+            "passed": c.passed,
+            "mode": c.mode,
+            "detail": c.detail,
+            "checked_at": c.checked_at.isoformat(),
+        }
+        for c in qs[:limit]
+    ]
