@@ -1586,6 +1586,13 @@ def list_for_hub(*, hub, status: str | None = None) -> list[dict]:
     return [_hub_item_dict(enr) for enr in qs]
 
 
+def coordinated_user_ext(*, enrollment_external_id: str, coordinator) -> str:
+    """Gate (coordenar o hub da matrícula) → external_id do USER, pra o coordenador AGIR NO LUGAR de
+    um cliente sem prática digital (WP5). Reusa o gate do `_enrollment_for_coordinator`."""
+    enr = _enrollment_for_coordinator(enrollment_external_id, coordinator)
+    return str(enr.user.external_id)
+
+
 def detail_for_hub(*, enrollment_external_id: str, coordinator) -> dict:
     """Detalhe COMPLETO de uma matrícula pro coordenador: a visão rica do /me (todas as seções)
     + status REAL (sem máscara) + fatos da taxa."""

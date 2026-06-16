@@ -15,8 +15,10 @@ sobre o `hub/` (plan/14, Victor 2026-06-12).
 
 from __future__ import annotations
 
-from ninja import Field, Router, Schema
+import structlog
+from ninja import Field, File, Router, Schema
 from ninja.errors import HttpError
+from ninja.files import UploadedFile
 
 from api.auth import require_roles
 from api.base import build_group
@@ -29,12 +31,15 @@ from hub import interface as hub_iface
 from users.roles.candidate import interface as candidate_iface
 from users.roles.enrollment import interface as enrollment_iface
 from users.roles.lead import interface as lead_iface
+from users.roles.promoter import interface as promoter_iface
 from users.roles.student import interface as student_iface
 from users.roles.training import interface as training_iface
 
 api = build_group(
     "leadership", "Coordenador do polo (hub): aprovações, acesso, taxas, diploma."
 )
+
+logger = structlog.get_logger()
 
 _NOT_COORDINATOR_DETAIL = (
     "Você não pode entrar como coordenador: não coordena nenhum polo. "
@@ -579,3 +584,110 @@ def approve_open_material(request, external_id: str, material_external_id: str):
         material_external_id=material_external_id,
         coordinator=coordinator,
     )
+
+
+# ── coordenador: PROMOTORES do polo (listar/suspender/reativar) + DETALHE do aluno (WP5) ──
+@api.get("/promoters", tags=["promoter"])
+def list_hub_promoters(request):
+    """Promotores do polo (status + se travados no treino) — pro painel do coordenador."""
+    coordinator = _coordinator(request)
+    hub = _coordinator_hub(coordinator)
+    return promoter_iface.list_for_hub(hub)
+
+
+@api.post("/promoters/{external_id}/suspend", tags=["promoter"])
+def suspend_promoter(request, external_id: str):
+    """Suspende um promotor do polo (não capta nem recebe). `external_id` = do User-promotor."""
+    coordinator = _coordinator(request)
+    p = promoter_iface.suspend(user_external_id=external_id, coordinator=coordinator)
+    return {"external_id": external_id, "status": p.status}
+
+
+@api.post("/promoters/{external_id}/reactivate", tags=["promoter"])
+def reactivate_promoter(request, external_id: str):
+    """Reativa um promotor SUSPENSO do polo (volta a captar) — destrava quem ficou preso."""
+    coordinator = _coordinator(request)
+    p = promoter_iface.reactivate(user_external_id=external_id, coordinator=coordinator)
+    return {"external_id": external_id, "status": p.status}
+
+
+@api.get("/students/{external_id}", response=dict, tags=["student"])
+def get_student_for_coordinator(request, external_id: str):
+    """Detalhe RICO do aluno (docs/pendências/diploma/plataforma/identidade) pro coordenador — antes
+    ele agia no aluno (grade/decide/pendency) mas não tinha um GET completo dele."""
+    coordinator = _coordinator(request)
+    return student_iface.detail_for_coordinator(
+        student_external_id=external_id, coordinator=coordinator
+    )
+
+
+# ── coordenador AGE NO LUGAR do cliente sem prática digital (proxy auditado; Victor 2026-06-16) ──
+# Mesmas ações do wizard do aluno, mas o coordenador posta POR ele (gate: coordenar o hub da matrícula;
+# `acted_by` logado). A IA valida igual; review → cai pros decides que já existem.
+_PROXY_RG_SLOTS = {"front": "rg_front", "back": "rg_back", "full": "rg_full"}
+
+
+class ProxyCepIn(Schema):
+    cep: str
+
+
+def _proxy_user(request, external_id: str):
+    """Gate do proxy: o coordenador coordena o hub da matrícula → devolve (coordinator, user_external_id)."""
+    coordinator = _coordinator(request)
+    user_ext = enrollment_iface.coordinated_user_ext(
+        enrollment_external_id=external_id, coordinator=coordinator
+    )
+    return coordinator, user_ext
+
+
+@api.post("/enrollments/{external_id}/address", tags=["enrollment"])
+def coord_proxy_address(request, external_id: str, payload: ProxyCepIn):
+    """Coordenador grava o ENDEREÇO (por CEP, ViaCEP) NO LUGAR do cliente. Auditado."""
+    coordinator, user_ext = _proxy_user(request, external_id)
+    logger.info(
+        "leadership.acted_for",
+        action="address_cep",
+        enrollment=external_id,
+        by=str(coordinator.external_id),
+    )
+    return enrollment_iface.set_address_cep(user_external_id=user_ext, cep=payload.cep)
+
+
+@api.post("/enrollments/{external_id}/documents/rg/photo/{slot}", tags=["enrollment"])
+def coord_proxy_rg_photo(
+    request, external_id: str, slot: str, file: UploadedFile = File(...)
+):
+    """Coordenador ENVIA a foto do RG (`front`|`back`|`full`) NO LUGAR do cliente. A IA valida normal;
+    se cair em revisão, o coordenador decide pelo `/rg/decide` que já existe. Auditado."""
+    coordinator, user_ext = _proxy_user(request, external_id)
+    real_slot = _PROXY_RG_SLOTS.get(slot)
+    if real_slot is None:
+        raise HttpError(422, "Slot inválido. Aceitos: front, back, full.")
+    logger.info(
+        "leadership.acted_for",
+        action="rg_photo",
+        enrollment=external_id,
+        by=str(coordinator.external_id),
+    )
+    return enrollment_iface.upload_rg_photo(
+        user_external_id=user_ext, slot=real_slot, upload=file
+    )
+
+
+@api.post("/enrollments/{external_id}/selfie", tags=["enrollment"])
+def coord_proxy_selfie(request, external_id: str, file: UploadedFile = File(...)):
+    """Coordenador ENVIA a selfie (assinatura) NO LUGAR do cliente. IA + biometria validam normal;
+    review → decide pelo `/selfie/decide`. Auditado."""
+    coordinator, user_ext = _proxy_user(request, external_id)
+    logger.info(
+        "leadership.acted_for",
+        action="selfie",
+        enrollment=external_id,
+        by=str(coordinator.external_id),
+    )
+    enr = enrollment_iface.set_selfie(
+        user_external_id=user_ext,
+        image_bytes=file.read(),
+        content_type=getattr(file, "content_type", "image/jpeg"),
+    )
+    return enrollment_iface.me_dict(enr)

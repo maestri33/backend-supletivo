@@ -7,8 +7,11 @@ from users.roles.promoter.service import (
     get_by_user_external_id,
     get_for_user,
     list_commissions,
+    list_for_hub,
     list_leads,
+    reactivate,
     ref_url,
+    suspend,
     to_dict,
     validate_ref,
 )
@@ -22,4 +25,7 @@ __all__ = [
     "to_dict",
     "list_leads",
     "list_commissions",
+    "list_for_hub",
+    "suspend",
+    "reactivate",
 ]

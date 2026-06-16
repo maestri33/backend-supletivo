@@ -739,6 +739,25 @@ def _coordinated(student_external_id: str, coordinator) -> Student:
     return student
 
 
+def detail_for_coordinator(*, student_external_id: str, coordinator) -> dict:
+    """Detalhe RICO do student pro coordenador (gate: coordenar o hub do aluno). É o que faltava: o
+    coordenador agia (grade/decide/pendency) mas não tinha um GET completo do aluno."""
+    from users.profiles import interface as profiles
+
+    student = _coordinated(student_external_id, coordinator)
+    p = profiles.get(student.user)
+    data = to_dict(student)
+    data["self_study"] = student.self_study
+    data["user"] = {
+        "external_id": str(student.user.external_id),
+        "name": p.name if p else None,
+        "cpf": p.cpf if p else None,
+        "phone": p.phone if p else None,
+        "email": p.email if p else None,
+    }
+    return data
+
+
 def _notify(student: Student, *, event: str, key: str, **ctx) -> None:
     """Notifica o ALUNO. Teor + regra de TTS vêm do catálogo `notifications` (nome do destinatário 2×)."""
     from notify.interface.send import send

@@ -220,6 +220,15 @@ _MESSAGES: dict[str, str] = {
         "Parabéns, {name}! Você agora é COORDENADOR de um polo. "
         "{name}, acompanhe as matrículas e libere os alunos pelo painel."
     ),
+    # coordenador suspende / reativa um promotor do polo (WP5).
+    "promoter.suspended": (
+        "{name}, sua atuação como promotor foi temporariamente suspensa pelo coordenador do polo. "
+        "Fale com o coordenador para regularizar, {name}."
+    ),
+    "promoter.reactivated": (
+        "Boa notícia, {name}! Sua atuação como promotor foi reativada. "
+        "{name}, seu link de captação está ativo de novo — bora!"
+    ),
 }
 
 

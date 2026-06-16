@@ -5,6 +5,7 @@ grupos `clients`/`leadership` chamam. Fina — reexporta a lógica do `service`.
 from users.roles.enrollment.service import (
     EnrollmentError,
     conclude,
+    coordinated_user_ext,
     create_from_lead,
     decide_rg,
     decide_selfie,
@@ -54,6 +55,7 @@ __all__ = [
     "pay_fee",
     "schedule_fee",
     "conclude",
+    "coordinated_user_ext",
     "list_for_hub",
     "detail_for_hub",
     "list_reviews_for_hub",
