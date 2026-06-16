@@ -208,11 +208,14 @@ def _create_checkout_row(lead: Lead, method: str) -> Checkout:
     chamado pela task async (com retry) ou pelo clique no link curto (lazy)."""
     from users.roles.lead import checkout_links
 
+    self_study = lead.self_study  # auto-matrícula de promotor → preço PRÓPRIO
     if method == "pix":
-        provider, amount = Checkout.Provider.ASAAS, config.price_pix()
+        provider = Checkout.Provider.ASAAS
+        amount = config.promoter_price_pix() if self_study else config.price_pix()
         pay_method = Checkout.Method.PIX
     else:
-        provider, amount = Checkout.Provider.INFINITEPAY, config.price_card()
+        provider = Checkout.Provider.INFINITEPAY
+        amount = config.promoter_price_card() if self_study else config.price_card()
         pay_method = Checkout.Method.CREDIT_CARD
     return Checkout.objects.create(
         lead=lead,
@@ -427,6 +430,57 @@ def pricing() -> dict:
     }
 
 
+def promoter_pricing() -> dict:
+    """Vitrine da auto-matrícula do PROMOTOR (preço próprio; mesma estrutura do `pricing`)."""
+    from decimal import Decimal
+
+    pix = config.promoter_price_pix()
+    total = config.promoter_price_card()
+    installment = (total / config.CARD_INSTALLMENTS).quantize(Decimal("0.01"))
+    return {
+        "pix": f"{pix:.2f}",
+        "card": {
+            "installments": config.CARD_INSTALLMENTS,
+            "installment": f"{installment:.2f}",
+            "total": f"{total:.2f}",
+        },
+    }
+
+
+def create_self_study_lead(*, user, payment_method=None) -> dict:
+    """Auto-matrícula de um PROMOTOR que quer estudar (Victor 2026-06-16): Lead(self_study) + Checkout no
+    PREÇO DE PROMOTOR, SEM comissão a ninguém. NÃO troca role agora (a role lead/enrollment entra no
+    PAGAMENTO) — o promotor segue logado no app dele até pagar. `user` já existe (promotor ATIVO)."""
+    from users.roles.promoter import interface as promoter_iface
+    from users.roles.promoter.models import Promoter
+    from users.roles.training import interface as training_iface
+
+    method = _API_METHODS.get((payment_method or "card").strip().lower())
+    if method is None:
+        raise LeadError("invalid_payment_method")
+
+    promoter = promoter_iface.get_for_user(user)
+    if promoter is None or promoter.status != Promoter.Status.ACTIVE:
+        raise LeadError("not_active_promoter")
+    if training_iface.is_locked(user):
+        raise LeadError("promoter_locked")  # travado no treino → ainda não estuda
+    if Lead.objects.filter(user=user).exists():
+        raise LeadError("lead_already_exists")
+
+    lead = Lead.objects.create(
+        user=user, promoter=user, self_study=True, status=Lead.Status.PENDING
+    )
+    checkout = _create_checkout_row(lead, method)
+    _enqueue_provider_build(checkout)
+    _notify_captured(lead)  # boas-vindas ao próprio promotor (sem "novo lead" a ninguém)
+    logger.info("lead.self_study_created", external_id=str(lead.external_id))
+    return {
+        "external_id": str(lead.external_id),
+        "status": lead.status,
+        "checkout": _checkout_dict(checkout),
+    }
+
+
 # ── pagamento (chamado pelo hook do webhook, CONVENTION §7) ─────────────────
 
 
@@ -468,10 +522,26 @@ def mark_paid(*, provider: str, provider_payment_id: str, receipt_url=None) -> b
 
 
 def _apply_effects(lead: Lead):
-    """Dentro da transação: comissão do promotor + cria enrollment ligado ao hub herdado. Retorna o hub."""
+    """Dentro da transação. Lead normal: comissão do promotor + enrollment no hub herdado. Auto-matrícula
+    de promotor (`self_study`): hub é o DELE (Promoter.hub), **SEM comissão a ninguém** (Victor 2026-06-16).
+    Retorna o hub."""
     from finance.interface import commissions
     from finance.models import Commission
+    from users.roles import interface as roles
     from users.roles.enrollment import interface as enrollment_iface
+
+    if lead.self_study:
+        hub = hub_iface.hub_of(lead.user)  # o próprio polo do promotor
+        if hub is None:
+            raise LeadError("no_hub_for_promoter")
+        # promotor ganha a role lead aqui (não no início — assim ele segue logado no app dele até pagar);
+        # `create_from_lead` promove lead→enrollment em seguida. NÃO credita comissão.
+        if "lead" not in roles.active_roles(lead.user):
+            roles.assign(lead.user, "lead")
+        enrollment_iface.create_from_lead(
+            user=lead.user, promoter=lead.user, hub=hub, self_study=True
+        )
+        return hub
 
     commissions.credit_commission(
         payee=lead.promoter,
@@ -547,18 +617,21 @@ def _notify_paid(lead: Lead, hub, checkout: Checkout | None = None) -> None:
             phone=coord_profile.phone if coord_profile else None,
             idempotency_key=f"lead_paid_coord_{base}",
         )
-    promoter_profile = profiles.get(lead.promoter)
-    _safe(
-        "promoter",
-        text=msgs.text(
-            "lead.paid.promoter", name=msgs.first_name(promoter_profile.name)
+    # auto-matrícula de promotor: NÃO manda "seu indicado pagou / comissão" — o promotor é o próprio
+    # aluno e não há comissão (Victor 2026-06-16).
+    if not lead.self_study:
+        promoter_profile = profiles.get(lead.promoter)
+        _safe(
+            "promoter",
+            text=msgs.text(
+                "lead.paid.promoter", name=msgs.first_name(promoter_profile.name)
+            )
+            if promoter_profile
+            else msgs.text("lead.paid.promoter"),
+            caller="lead.paid.promoter",
+            phone=promoter_profile.phone if promoter_profile else None,
+            idempotency_key=f"lead_paid_promoter_{base}",
         )
-        if promoter_profile
-        else msgs.text("lead.paid.promoter"),
-        caller="lead.paid.promoter",
-        phone=promoter_profile.phone if promoter_profile else None,
-        idempotency_key=f"lead_paid_promoter_{base}",
-    )
 
 
 def get_lead(external_id: str) -> Lead | None:

@@ -30,6 +30,20 @@ def price_pix() -> Decimal:
     return _money("ENROLLMENT_PRICE_PIX", "5")
 
 
+# ── auto-matrícula do PROMOTOR (Victor 2026-06-16): preço PRÓPRIO, fluxo próprio, SEM comissão. ──
+# DEV: default = o preço normal (mini, fallback). PROD: «PENDÊNCIA» — Victor define o valor do promotor.
+def promoter_card_cents() -> int:
+    return int(getattr(settings, "ENROLLMENT_PRICE_PROMOTER_CARD_CENTS", card_cents()))
+
+
+def promoter_price_card() -> Decimal:
+    return (Decimal(promoter_card_cents()) / 100).quantize(Decimal("0.01"))
+
+
+def promoter_price_pix() -> Decimal:
+    return _money("ENROLLMENT_PRICE_PROMOTER_PIX", str(price_pix()))
+
+
 # parcelas do cartão exibidas na vitrine (o front mostra "12x de ..."). É só EXIBIÇÃO — não muda a
 # cobrança: o parcelamento REAL o cliente escolhe na página de checkout do gateway (Victor 2026-06-10).
 CARD_INSTALLMENTS = 12

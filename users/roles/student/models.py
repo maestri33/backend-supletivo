@@ -61,6 +61,8 @@ class Student(ExternalIdModel):
         on_delete=models.PROTECT,
         related_name="students",
     )
+    # auto-matrícula de promotor (herdado do enrollment): coordenador NÃO recebe comissão na formatura.
+    self_study = models.BooleanField(default=False)
     status = models.CharField(
         max_length=40,
         choices=Status.choices,

@@ -23,6 +23,7 @@ from users.auth.models import User
 from users.exceptions import Forbidden, NotFound, Unauthorized
 from users.roles import interface as roles
 from users.roles.candidate import interface as candidate_iface
+from users.roles.lead import interface as lead_iface
 from users.roles.promoter import interface as promoter_iface
 from users.roles.training import interface as training_iface
 
@@ -400,3 +401,27 @@ def promoter_leads(request):
 @api.get("/promoter/me/commissions", tags=["promoter"])
 def promoter_commissions(request):
     return promoter_iface.list_commissions(_promoter(request).user)
+
+
+# ── promotor ESTUDA (entra no funil do aluno por endpoint logado; Victor 2026-06-16) ──
+# Preço PRÓPRIO de promotor, fluxo próprio, SEM comissão a ninguém. Não pelo registro público: aqui,
+# autenticado. Depois de pagar, o promotor segue o wizard do aluno (role enrollment somada no pagamento).
+class StudyStartIn(Schema):
+    payment_method: str | None = None  # "card" (default) | "pix"
+
+
+@api.get("/promoter/study/pricing", tags=["promoter"])
+def promoter_study_pricing(request):
+    """Preço da auto-matrícula do promotor (preço próprio, ≠ vitrine pública do aluno)."""
+    _guard(request, "promoter")
+    return lead_iface.promoter_pricing()
+
+
+@api.post("/promoter/study/start", tags=["promoter"])
+def promoter_study_start(request, payload: StudyStartIn):
+    """Promotor quer estudar: cria a auto-matrícula (preço promotor, SEM comissão) e devolve o checkout.
+    Ele paga pelo link; no pagamento ganha a role de aluno e segue o wizard do aluno (grupo clients)."""
+    promoter = _promoter(request)
+    return lead_iface.create_self_study_lead(
+        user=promoter.user, payment_method=payload.payment_method
+    )

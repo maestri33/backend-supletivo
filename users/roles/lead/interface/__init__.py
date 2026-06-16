@@ -6,6 +6,7 @@ from users.roles.lead.service import (
     LeadError,
     checkout_url_for,
     create_lead,
+    create_self_study_lead,
     get_for_user_external_id,
     get_lead,
     get_lead_for_hub,
@@ -14,12 +15,14 @@ from users.roles.lead.service import (
     list_leads,
     mark_paid,
     pricing,
+    promoter_pricing,
 )
 
 __all__ = [
     "LeadError",
     "checkout_url_for",
     "create_lead",
+    "create_self_study_lead",
     "get_for_user_external_id",
     "get_lead",
     "get_lead_for_hub",
@@ -28,4 +31,5 @@ __all__ = [
     "list_leads",
     "mark_paid",
     "pricing",
+    "promoter_pricing",
 ]

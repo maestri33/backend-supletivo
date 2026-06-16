@@ -46,6 +46,9 @@ class Lead(ExternalIdModel):
         db_index=True,
     )
     failed_reason = models.CharField(max_length=64, null=True, blank=True)
+    # auto-matrícula do PROMOTOR que quis estudar (Victor 2026-06-16): preço próprio, SEM comissão a
+    # ninguém. `promoter` aponta pro próprio user (FK não-nulável); a comissão é barrada por este flag.
+    self_study = models.BooleanField(default=False, db_index=True)
     created_at = models.DateTimeField("criado em", auto_now_add=True)
     updated_at = models.DateTimeField("atualizado em", auto_now=True)
 

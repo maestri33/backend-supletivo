@@ -38,7 +38,7 @@ class EnrollmentError(DomainError):
 # ── 6a: nascimento (chamado pelo hook do lead) ──────────────────────────────
 
 
-def create_from_lead(*, user, promoter, hub) -> Enrollment:
+def create_from_lead(*, user, promoter, hub, self_study=False) -> Enrollment:
     """Cria o Enrollment(RG — documento primeiro, plan/13) ligado ao HUB herdado + promove a role
     `lead→enrollment`. Idempotente.
 
@@ -53,6 +53,7 @@ def create_from_lead(*, user, promoter, hub) -> Enrollment:
         user=user,
         promoter=promoter,
         hub=hub,
+        self_study=self_study,
         status=Enrollment.Status.RG,
     )
     if "enrollment" not in roles.active_roles(user):
@@ -1463,6 +1464,7 @@ def conclude(
         student_iface.create_from_enrollment(
             user=enr.user,
             hub=enr.hub,
+            self_study=enr.self_study,
             platform_url=platform_url,
             platform_login=platform_login,
             platform_password=platform_password,

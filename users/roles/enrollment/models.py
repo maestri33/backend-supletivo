@@ -53,6 +53,8 @@ class Enrollment(ExternalIdModel):
         on_delete=models.PROTECT,
         related_name="enrollments",
     )
+    # auto-matrícula de promotor (herdado do lead): NÃO gera comissão (nem a veteran na formatura).
+    self_study = models.BooleanField(default=False)
     status = models.CharField(
         max_length=20,
         choices=Status.choices,

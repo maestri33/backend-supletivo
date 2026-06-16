@@ -65,6 +65,7 @@ def create_from_enrollment(
     platform_login=None,
     platform_password=None,
     platform_notes=None,
+    self_study=False,
 ) -> Student:
     """Cria o `Student(AWAITING_DOCUMENTS)` na liberação da matrícula. Idempotente (1-1 com o User)."""
     existing = Student.objects.filter(user=user).first()
@@ -73,6 +74,7 @@ def create_from_enrollment(
     student = Student.objects.create(
         user=user,
         hub=hub,
+        self_study=self_study,
         platform_url=platform_url,
         platform_login=platform_login,
         platform_password=platform_password,
@@ -695,6 +697,14 @@ def _credit_coordinator(student: Student, diploma: StudentDiploma) -> None:
 
     Coordenador ausente (None) ou sem profile → levanta `StudentError` (rollback do caller; retryável
     quando o hub tiver coordenador válido). NUNCA descarta a comissão em silêncio."""
+    if student.self_study:
+        # auto-matrícula de promotor: NÃO gera comissão pra ninguém (Victor 2026-06-16). Sai limpo
+        # (sem raise) pra não desfazer a virada a veteran.
+        logger.info(
+            "student.veteran_self_study_no_commission",
+            external_id=str(student.external_id),
+        )
+        return
     if diploma.commission_triggered_at is not None:
         return
     from finance.interface import commissions

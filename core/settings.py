@@ -481,6 +481,14 @@ COMMISSION_CLOSING_HOUR = env.int("COMMISSION_CLOSING_HOUR", default=18)
 # (total; o front mostra 12x). DEV: PIX R$5 / cartão R$1 (=100 centavos). PROD = pedir ao Victor (§8).
 ENROLLMENT_PRICE_CARD_CENTS = env.int("ENROLLMENT_PRICE_CARD_CENTS", default=100)
 ENROLLMENT_PRICE_PIX = env("ENROLLMENT_PRICE_PIX", default="5")
+# Preço da AUTO-MATRÍCULA do promotor (Victor 2026-06-16: preço diferente, fluxo próprio, SEM comissão).
+# DEV: default = o preço normal (mini). PROD: «PENDÊNCIA» — Victor define o valor do promotor no .env.
+ENROLLMENT_PRICE_PROMOTER_CARD_CENTS = env.int(
+    "ENROLLMENT_PRICE_PROMOTER_CARD_CENTS", default=ENROLLMENT_PRICE_CARD_CENTS
+)
+ENROLLMENT_PRICE_PROMOTER_PIX = env(
+    "ENROLLMENT_PRICE_PROMOTER_PIX", default=ENROLLMENT_PRICE_PIX
+)
 ENROLLMENT_DESCRIPTION = env("ENROLLMENT_DESCRIPTION", default="Matrícula Supletivo")
 
 # treino (LMS do funil do colaborador, §4 item 7) — nota de corte (0–10) p/ aprovar uma submissão da IA.
