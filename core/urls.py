@@ -22,7 +22,7 @@ from django.contrib import admin
 from django.views.static import serve as media_serve
 
 # API pública (Django Ninja, in-process) — 4 grupos por público, versionados sob /api/v1/.
-# Nomes = PLACEHOLDER (CONVENTION §1; Victor decide depois). Ver plan/api-ninja-transicao.
+# Nomes FIXADOS (Victor 2026-06-16): clients/collaborators/leadership/staff são definitivos.
 from api.clients import api as clients_api
 from api.collaborators import api as collaborators_api
 from api.leadership import api as leadership_api
@@ -33,13 +33,11 @@ urlpatterns = [
     path("admin/", admin.site.urls),
     # link curto do checkout: /lead/checkout/<token> → 302 pro checkout do gateway (manda por WhatsApp).
     path("lead/checkout/<str:token>", checkout_redirect),
-    # views DMZ das integrações (internas — <servico>.prod)
+    # Webhooks PÚBLICOS dos gateways (chamados de fora por asaas.prod/infinitepay.prod). É a ÚNICA
+    # superfície HTTP fora do Ninja que sobrou: a DMZ sem-auth (users/auth|address|documents +
+    # charge/payout/status/setup) foi FECHADA e migrada pro Ninja autenticado (Victor 2026-06-16).
     path("integrations/asaas/", include("integrations.bank.asaas.urls")),
     path("integrations/infinitepay/", include("integrations.bank.infinitepay.urls")),
-    # users — auth (register/check/recover/login). JWKS removido no swap p/ django-ninja-jwt (sem consumidor externo).
-    path("users/auth/", include("users.auth.urls")),
-    path("users/address/", include("users.address.urls")),
-    path("users/documents/", include("users.documents.urls")),
     # API Ninja versionada — /api/v1/<grupo>/ (cada grupo serve /docs e /openapi.json).
     path("api/v1/clients/", clients_api.urls),
     path("api/v1/collaborators/", collaborators_api.urls),
