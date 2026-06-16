@@ -6,13 +6,22 @@ a flag `is_superuser` no banco — o JWT só carrega `roles`. Casca fina (CONVEN
 `hub/interface` e `users/roles`; zero regra de negócio no router.
 
 ## Rotas (autenticadas + superuser)
-- `POST /hubs` `{brand, coordinator_external_id?}` → cria um polo.
+- `POST /hubs` `{brand, coordinator_external_id?}` → cria um polo (nasce com endereço vazio).
 - `GET  /hubs` → lista todos os polos.
 - `GET  /promoters` → lista os promotores (pra escolher coordenador).
 - `PUT  /hubs/{external_id}/coordinator` `{coordinator_external_id}` → designa/troca o coordenador.
+- `PUT  /hubs/{external_id}/default` → marca o polo PADRÃO (fallback de captação; único).
+- `PATCH /hubs/{external_id}/address` `{cep, number?, complement?}` → preenche o endereço do polo (ViaCEP; CEP inexistente → 422 `CEP_NOT_FOUND`).
 
 Respostas de erro: **401** (sem token), **403** (não-superuser), **422** (marca inválida /
-coordenador não-promotor), **404** (polo inexistente). Doc OpenAPI viva em `/api/v1/staff/docs`.
+coordenador não-promotor / CEP inexistente), **404** (polo inexistente). Doc OpenAPI viva em `/api/v1/staff/docs`.
+
+## Visão global (todos os polos) + usuários
+- `GET /enrollments?hub=&status=` → matrículas de TODOS os polos.
+- `GET /students?hub=&status=` → alunos de TODOS os polos.
+- `GET /leads?hub=&status=` → leads de TODOS (já existia).
+- `GET /users?role=&limit=` → usuários + roles ativas (read-only). **MUTAÇÃO de role pelo staff =
+  «PENDÊNCIA» do Victor** ("dentro do cabível").
 
 > O domínio (entidade, seed, regras de negócio) está em [[wiki/hub/hub]].
 
@@ -84,5 +93,5 @@ leadership importam do mesmo lugar (defs locais removidas).
 | GET | `/logs/ai-calls?status=&limit=` | Chamadas de IA (provider/modelo/operação/custo/erro/latência) |
 | GET | `/logs/checks?scope=&limit=` | Histórico do ledger de validação (`ValidationCheck`) |
 
-> **Fast-follow** (não nesta entrega): preencher o endereço do polo, marcar polo padrão, views globais
-> de enrollment/student, gestão de usuários/roles pelo staff.
+> **Feito** (WP6-D): endereço do polo, polo padrão, views globais de enrollment/student, leitura de
+> usuários. **Falta só**: a MUTAÇÃO de role pelo staff (regra do Victor: "dentro do cabível").
