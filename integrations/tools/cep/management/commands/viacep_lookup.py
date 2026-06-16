@@ -28,7 +28,9 @@ class Command(BaseCommand):
 
         if result is None:
             self.stdout.write(
-                self.style.WARNING(f'CEP "{cep}" não encontrado ou com formato inválido.')
+                self.style.WARNING(
+                    f'CEP "{cep}" não encontrado ou com formato inválido.'
+                )
             )
             return
 

@@ -1,0 +1,38 @@
+name: CI
+# Gate do backend (Django+Ninja). Roda no runner SELF-HOSTED (LXC backend-v7m) reusando o .env
+# REAL — assim os system checks de integração (asaas/mail/whatsapp E001…) acham as keys e não
+# travam, sem precisar de secret dummy nem mascarar drift de Postgres com SQLite. NÃO reinicia
+# nada nem migra: é só verificação. O Deploy só dispara DEPOIS deste workflow passar (workflow_run).
+on:
+  push:
+    branches: [main]
+  pull_request:
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  check:
+    runs-on: [self-hosted, backend-v7m]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: .env real (symlink do deploy dir — não copia, não vaza o secret no workspace)
+        run: ln -sf /opt/dmz-backend-supletivo/.env "$GITHUB_WORKSPACE/.env"
+
+      - name: Dependências (venv isolado do _work, não toca o /opt)
+        run: |
+          /usr/local/bin/uv sync --inexact
+          # psycopg não está no pyproject (dev usa SQLite); o .env real aponta pra Postgres,
+          # e o check carrega o backend postgres no import dos models → precisa do driver.
+          /usr/local/bin/uv pip install -q "psycopg[binary]"
+
+      - name: System checks (offline; integrações acham a key no .env real)
+        run: .venv/bin/python manage.py check
+
+      - name: Migrações sincronizadas com os models
+        run: .venv/bin/python manage.py makemigrations --check --dry-run
+
+      - name: Lint + format (ruff pinado na versão do dev; uvx baixa sob demanda — não está no venv)
+        run: |
+          /usr/local/bin/uvx ruff@0.15.14 check .
+          /usr/local/bin/uvx ruff@0.15.14 format --check .
