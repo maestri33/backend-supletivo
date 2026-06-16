@@ -102,24 +102,29 @@ STARTED → PROFILE → ADDRESS → DOCUMENTS → PIX → SELFIE → COMPLETED
 | `ADDRESS` | CEP via ViaCEP + complemento do número/rua |
 | `DOCUMENTS` | RG **ou** CNH (escolhe o tipo) + número + fotos |
 | `PIX` | chave validada no Asaas/DICT (CPF confere) |
-| `SELFIE` | selfie analisada por IA (liveness + face-match) — APPROVED → promove a `training` |
-| `COMPLETED` | acabou; virou `training` (role) + criou o `Trainee` |
+| `SELFIE` | selfie analisada por IA (liveness + face-match) — APPROVED → `COMPLETED` |
+| `COMPLETED` | coleta concluída; **aguarda o COORDENADOR aprovar** → vira PROMOTOR direto (`/api/v1/leadership/candidates/{ext}/approve`). Não há mais entrevista/Trainee (Victor 2026-06-16). |
 
 Gates: POST em etapa errada → **409 `WRONG_STATUS` + `expected_status`** (o front lê o
 `expected_status` e roteia o wizard pra seção certa).
 
-## Treinamento (autenticado, role `training`)
+## Treinamento (autenticado, role `promoter` — a TRAVA do painel; Victor 2026-06-16)
 
-`/training/*` é o LMS do promotor: ver matérias, submeter respostas, ver progresso.
+Modelo novo: o candidato vira **promotor** quando o coordenador aprova. Se houver matéria
+OBRIGATÓRIA pendente, o promotor nasce **travado** (role overlay `training`) e o front mostra só o
+treino. As rotas `/training/*` são gated por role `promoter`; a trava é lida do `/promoter/me`
+(`locked` + `pending_materials`). Zerou as obrigatórias → destrava (**sem OTP** — a role overlay não
+dá bump de token).
 
 | Método | Path | Descrição |
 |---|---|---|
-| GET | `/training/materials` | Lista as matérias **ativas** (sem gabarito — visão do treinando) |
-| GET | `/training/progress` | Resumo: total / respondidas / nota média / matérias pendentes |
-| POST | `/training/submissions` | `{material_external_id, answer_text}` — enfileira `ai.grade` async (notifica quando sair) |
+| GET | `/training/materials` | Matérias **ATRIBUÍDAS a este promotor** (fixas do onboarding + transitórias publicadas pra ele) — conteúdo (sem gabarito) + status de cada |
+| GET | `/training/progress` | Status por matéria atribuída |
+| POST | `/training/submissions` | `{material_external_id, answer}` — enfileira `ai.grade` async; aprovou a última obrigatória → destrava + notifica |
 
-> Coordenador (grupo `leadership`) tem a visão com gabarito em
-> `GET /leadership/training/materials` — e em `staff` também (autoria).
+> Matéria não atribuída → `MATERIAL_NOT_ASSIGNED` (422). O coordenador pode aprovar matéria EM ABERTO
+> de um promotor preso (`POST /leadership/promoters/{ext}/materials/{mat}/approve`). Autoria da matéria
+> (com gabarito, `kind` fixa/transitória, `blocking`) é do `staff`/`leadership`.
 
 ## Promotor (autenticado, role `promoter`)
 
@@ -127,9 +132,16 @@ Gates: POST em etapa errada → **409 `WRONG_STATUS` + `expected_status`** (o fr
 
 | Método | Path | Descrição |
 |---|---|---|
-| GET | `/promoter/me` | `{external_id, hub_external_id, status (active/suspended), ref_url, pix_key}` |
+| GET | `/promoter/me` | `{external_id, hub_external_id, status (active/suspended), ref_url, locked, pending_materials[]}` — `locked` = travado no treino (front mostra só o treino) |
 | GET | `/promoter/me/leads` | Leads atribuídos a este promotor (link de pagamento + status) |
 | GET | `/promoter/me/commissions` | Comissões do promotor (pagas/pendentes) |
+
+### Promotor que quer ESTUDAR (preço próprio, sem comissão — Victor 2026-06-16)
+
+| Método | Path | Descrição |
+|---|---|---|
+| GET | `/promoter/study/pricing` | Preço da auto-matrícula do promotor (preço PRÓPRIO, ≠ vitrine pública do aluno) |
+| POST | `/promoter/study/start` | `{payment_method?}` — cria a auto-matrícula (preço promotor, **SEM comissão a ninguém**) + devolve o checkout. Ele paga pelo link e segue o wizard do aluno (grupo `clients`; role de aluno somada no pagamento). 2ª tentativa → `LEAD_ALREADY_EXISTS`; promotor travado no treino → bloqueado |
 
 ## Envelope de erro (codes pt-br)
 
@@ -144,10 +156,11 @@ Codes do `collaborators`:
 | `NOT_HUB_COORDINATOR` | 403 | coordenador não é o do polo-alvo |
 | `CANDIDATE_NOT_FOUND` | 404 | candidato inexistente |
 | `MATERIAL_NOT_FOUND` | 404 | matéria inexistente (training) |
-| `TRAINEE_NOT_FOUND` | 404 | treinando inexistente (training) |
+| `PROMOTER_NOT_FOUND` | 404 | promotor inexistente |
 | `USER_NOT_FOUND` | 404 | user inexistente (training) |
 | `WRONG_STATUS` | 409 | mutação fora de etapa — `extra: {expected_status}` |
 | `ALREADY_GRADING` | 409 | já existe submission em correção pra essa matéria |
+| `MATERIAL_NOT_ASSIGNED` | 422 | submeter matéria que não está atribuída ao promotor |
 | `INVALID_DOC_TYPE` | 422 | `doc_type` ∉ {rg, cnh} |
 | `NO_HUB` | 422 | nenhum polo disponível (seed não rodou) |
 | `PROFILE_CPF_MISSING` | 422 | CPF do perfil ausente (cadastro inconsistente) |
@@ -159,13 +172,10 @@ Codes do `collaborators`:
 
 > Codes extras compartilhados com outros grupos vivem em [[wiki/api/clients]] (mesma fábrica).
 
-## O que esta wiki ainda **NÃO cobre** (futuro)
+## Estado de teste
 
-- **Fatia C do plan/15** — ✅ implementado: `POST /candidate/selfie` (ack async) +
-  `GET /candidate/selfie` (seção rica com TTL) + notify `candidate.selfie_approved`. Reusa
-  `_selfie.verify` + `_selfie.add_face_match` + `_analysis` (pipeline async via Django-Q).
-- **Fatia D do plan/15** — ✅ implementado: `GET /leadership/trainees/{ext}` (perfil +
-  respostas + notas da IA pro coordenador decidir entrevista **vendo**, não às cegas) +
-  `GET /leadership/candidates/{ext}/selfie` (foto + motivo da IA em review).
-
-Cada fatia vira item no CHANGELOG desta wiki quando entrar.
+- ✅ provado real (2026-06-16): candidato→promotor pelo path antigo (CNH real + Pix-DICT + selfie +
+  `ai.grade` + promoção). ⚠️ **falta E2E real** do path novo (`candidato concluído → coordenador
+  aprova → promotor → treino-overlay`) com dinheiro/OTP reais, e do `promoter/study/*`.
+- A inversão do treino (Victor 2026-06-16: candidato→promotor direto; treino = trava overlay por
+  matérias fixa/transitória) foi provada por smoke in-process (20/20) + revisão adversarial (0 blocker).

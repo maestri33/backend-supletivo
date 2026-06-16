@@ -52,19 +52,23 @@ Gate de role: o login só dá tokens com a role `coordinator` ativa; coordenar o
 Estas são as rotas que o plan/15 A6 saneou (codes pt-br + envelope via `DomainError`/`TrainingError`/
 `CandidateError` borbulhando; antes estavam achatadas em `ERROR`).
 
-### 3.1. Treinamento (training)
+### 3.1. Colaborador — aprovar candidato → PROMOTOR + treino (Victor 2026-06-16)
+
+A entrevista/Trainee SAIU: o coordenador aprova o candidato (que concluiu a coleta) e ele vira
+**PROMOTOR direto**. O treino virou trava pós-promotor por matérias (fixa/transitória).
 
 | Método | Path | Descrição |
 |---|---|---|
-| POST | `/training/materials` | Cria matéria (texto+questão+gabarito+ordem) — autoria do coord |
-| PUT  | `/training/materials/{external_id}` | Edita campos enviados; `active=False` desativa |
-| GET  | `/trainees/{external_id}` | **Tela de detalhe (plan/15 D1):** perfil do candidato + cada `Submission` (matéria, resposta, **nota da IA, justificativa**). O coord decide a entrevista **vendo**, não às cegas (antes só tinha o nome na fila). |
-| POST | `/trainees/{external_id}/approve` | Aprova entrevista → promove `training → promoter` + cria `Promoter` no hub herdado |
-| POST | `/trainees/{external_id}/reject` | Rejeita entrevista (registra motivo) |
+| GET  | `/candidates` | Fila de candidatos do polo que concluíram a coleta e aguardam aprovação |
+| GET  | `/candidates/{external_id}` | Detalhe (perfil + coleta) pro coord decidir **vendo** antes de aprovar |
+| POST | `/candidates/{external_id}/approve` | Aprova → promove a **PROMOTOR** + atribui as matérias FIXAS (treino-overlay; nasce travado se houver obrigatória) |
+| POST | `/candidates/{external_id}/reject` | `{reason}` — rejeita o candidato aguardando aprovação |
+| POST | `/promoters/{external_id}/materials/{material_external_id}/approve` | Aprova matéria EM ABERTO de um promotor preso (destrava quem não tem prática digital) |
+| GET/POST/PUT | `/training/materials[/{external_id}]` | Autoria de matéria (com gabarito) — o coord também autora; modelo `kind`/`blocking`/`ephemeral` em [[wiki/api/staff]] |
 
-Codes: `MATERIAL_NOT_FOUND` (404), `USER_NOT_FOUND` (404), `MATERIAL_INACTIVE` (422),
-`ALREADY_GRADING` (409), `TRAINEE_NOT_FOUND` (404), `NO_HUB` (422), `NOT_HUB_COORDINATOR` (403),
-`WRONG_STATUS` (409, entrevista já decidida).
+Codes: `CANDIDATE_NOT_FOUND` (404), `PROMOTER_NOT_FOUND` (404), `MATERIAL_NOT_FOUND` (404),
+`MATERIAL_NOT_ASSIGNED` (422), `NOT_HUB_COORDINATOR` (403), `WRONG_STATUS` (409, candidato não está
+aguardando aprovação — `extra: {expected_status}`).
 
 ### 3.2. Candidato (candidate)
 
@@ -78,6 +82,24 @@ Codes: `CANDIDATE_NOT_FOUND` (404), `NOT_HUB_COORDINATOR` (403), `SELFIE_NOT_IN_
 `extra: {selfie_status}`), `DOC_NOT_IN_REVIEW` (422, `extra: {validation_status}`), `DOC_TYPE_NOT_SET`
 (422), `WRONG_STATUS` (409).
 
+### 3.3. Destravar + agir-no-lugar (WP5, Victor 2026-06-16)
+
+Poderes de "destravar": reativar promotor suspenso, ver o aluno por inteiro, e **agir no lugar** de um
+cliente sem prática digital (postar documento/endereço/selfie por ele, auditado).
+
+| Método | Path | Descrição |
+|---|---|---|
+| GET  | `/promoters` | Promotores do polo (status active/suspended + se travados no treino) |
+| POST | `/promoters/{external_id}/suspend` | Suspende o promotor (não capta nem recebe) |
+| POST | `/promoters/{external_id}/reactivate` | Reativa um promotor suspenso (volta a captar) |
+| GET  | `/students/{external_id}` | Detalhe RICO do aluno (docs/pendências/diploma/plataforma/identidade) |
+| POST | `/enrollments/{external_id}/address` | `{cep}` — **age-no-lugar**: posta o endereço (ViaCEP) pelo cliente |
+| POST | `/enrollments/{external_id}/documents/rg/photo/{slot}` | foto do RG (`front`\|`back`\|`full`) pelo cliente — IA valida igual |
+| POST | `/enrollments/{external_id}/selfie` | selfie (assinatura) pelo cliente — IA + biometria validam (review → `/selfie/decide`) |
+
+> "Agir-no-lugar" = mesmas funções do wizard do aluno, mas o coordenador posta POR ele (gate: coordenar
+> o hub da matrícula; `acted_by` logado). Se a IA cair em revisão, cai nos `/decide` que já existem.
+
 ---
 
 ## Codes do `leadership` (subset do envelope central)
@@ -89,7 +111,7 @@ Codes: `CANDIDATE_NOT_FOUND` (404), `NOT_HUB_COORDINATOR` (403), `SELFIE_NOT_IN_
 | `FORBIDDEN_ROLE` | 403 | não-coordenador tentando rota de coord |
 | `NOT_HUB_COORDINATOR` | 403 | coord mas de outro polo |
 | `hub_not_found` | 404 | hub-alvo inexistente |
-| `<recurso>_NOT_FOUND` | 404 | por recurso (LEAD/ENROLLMENT/CANDIDATE/TRAINEE/MATERIAL/USER) |
+| `<recurso>_NOT_FOUND` | 404 | por recurso (LEAD/ENROLLMENT/CANDIDATE/STUDENT/PROMOTER/MATERIAL/USER) |
 | `WRONG_STATUS` | 409 | mutação fora de etapa — `extra: {expected_status}` |
 | `SELFIE_NOT_IN_REVIEW` | 422 | selfie não está em REVIEW (decide) |
 | `MATERIAL_INACTIVE` | 422 | matéria desativada (submit) |
@@ -102,12 +124,15 @@ Codes: `CANDIDATE_NOT_FOUND` (404), `NOT_HUB_COORDINATOR` (403), `SELFIE_NOT_IN_
 
 ---
 
-## O que esta wiki ainda **NÃO cobre** (black box, plano futuro)
+## O que esta wiki ainda **NÃO cobre** (detalhe fica pro Portão 3)
 
-- **`/enrollment/*` decide** — `decide_rg`, `decide_selfie`, `decide_document`, `decide_candidate_selfie`
-  (do aluno), `decide_exam`, `decide_pendency`. Implementado em plan/12/13/14. **Wiki detalhada
-  sincroniza no Portão 3 com o Victor** (o teste real do student→veteran já provou esses decides
-  fim-a-fim em 2026-06-06).
+> Já documentado acima (WP5, Victor 2026-06-16): seção 3.3 — destravar/agir-no-lugar, reativar
+> promotor, detalhe do aluno.
+
+- **`/enrollment/*` decide** — `decide_rg`, `decide_selfie`, `decide_document` (do aluno),
+  `decide_exam`, `decide_pendency`. Implementado em plan/12/13/14. **Wiki detalhada sincroniza no
+  Portão 3 com o Victor** (o teste real do student→veteran já provou esses decides fim-a-fim em
+  2026-06-06).
 - **`/fee/pay` + `/fee/schedule` + `/conclude`** — plan/14 (taxa 2 parcelas + virada enrollment→student
   atômica). **Wiki detalhada sincroniza no Portão 3 com o Victor** (Portão 3 com dinheiro real ainda
   pendente).

@@ -1,10 +1,9 @@
 # api/ — API pública Django Ninja (in-process)
 
-> **Estado: rotas de negócio JÁ escritas** nos 4 grupos (lead/enrollment/student ·
-> candidate/training/promoter · coordenador · staff). O que cada grupo expõe está na **sua
-> própria página**: [[wiki/api/clients]] · [[wiki/api/staff]] · (collaborators e leadership: a
-> documentar). **O estado de TESTE varia por rota** (provado real vs casca não-exercida) — ver a
-> página de cada grupo. Régua: [[CONVENTION]] §1/§3/§5.
+> **Estado: rotas de negócio escritas + documentadas** nos 4 grupos. O que cada grupo expõe está na
+> **sua própria página**: [[wiki/api/clients]] · [[wiki/api/collaborators]] · [[wiki/api/leadership]] ·
+> [[wiki/api/staff]]. **O estado de TESTE varia por rota** (provado real vs casca não-exercida com
+> dinheiro/OTP real) — ver a página de cada grupo. Régua: [[CONVENTION]] §1/§3/§5.
 
 A API pública do MVP **vive dentro do monólito Django**, via **Django Ninja** (in-process —
 sem serviço separado, sem hop HTTP). Decisão do Victor 2026-06-01 (FastAPI/edges descartados).
@@ -19,13 +18,12 @@ Cada grupo é um `NinjaAPI` próprio, montado em [core/urls.py](../../core/urls.
 | Grupo | Público | Funil / papel |
 |---|---|---|
 | `clients` | aluno (**$$ ENTRA**) | lead → enrollment → student → veteran |
-| `collaborators` | promotor | candidate → training → promoter |
-| `leadership` | coordenador do polo | centraliza no `hub/` |
-| `staff` | administração ("boss") | cadastra hub, define coordenador, vê saúde |
+| `collaborators` | promotor | candidate → (coord aprova) → promoter (+ treino-overlay que trava o painel) |
+| `leadership` | coordenador do polo | centraliza no `hub/`: aprova candidato→promotor, destrava/age-no-lugar, taxa→conclui |
+| `staff` | administração ("boss") | hub/coordenador + financeiro + integrações + servidor + logs |
 
-> ⚠️ **Os nomes dos 4 grupos são PLACEHOLDER** — o Victor não bateu o martelo neles
-> («PENDÊNCIA», decidir depois). O que vale é a **lógica** (qual público cada um serve),
-> não o nome. Trocar o nome = trocar a string em `api/<grupo>.py` + `core/urls.py`.
+> Os nomes dos 4 grupos (`clients`/`collaborators`/`leadership`/`staff`) foram **FIXADOS** (Victor
+> 2026-06-16) — são definitivos.
 
 ## Estrutura
 
@@ -64,21 +62,20 @@ versão**; a anterior segue no ar até migrar os consumidores.
 
 ## O que FALTA terminar
 
-As rotas de negócio JÁ existem nos 4 grupos. O que ainda falta:
+As rotas de negócio existem e estão documentadas nos 4 grupos. O que ainda falta:
 
-1. **Documentar `collaborators` e `leadership`** — só `clients` e `staff` têm página de wiki
-   (`wiki/api/`). Cada uma deve passar pela análise + doc pro front ([[WORKFLOW]] Portão 3).
-2. **Provar de verdade o que é casca** — várias rotas existem mas **nunca rodaram** (ex.: todo o
-   `/enrollment/*` no `clients`). O estado real está na página de cada grupo.
-3. **Nome dos 4 grupos** — placeholder; decisão do Victor.
-4. **Reexpor os `/status/` das integrações dentro do Ninja** — hoje `asaas`/`infinitepay`
-   expõem status em `/integrations/.../status/` (views DMZ legadas). Migrar pro grupo `staff`
-   (saúde dos serviços). **Deferido.**
+1. **Provar de verdade o que é casca** — várias rotas existem mas faltam **testes com dinheiro/OTP
+   reais** (E2E dos funis novos: candidato→promotor pelo path novo, promotor-estuda, student→veteran).
+   O estado real está na página de cada grupo.
+2. **Fast-follow do staff** — preencher o endereço do polo, marcar polo padrão, views globais de
+   enrollment/student, gestão de usuários/roles.
 
-> Já feito (não confundir com pendência): o gate de role (`require_roles`), a máquina de status
-> por role, o E2E `register → OTP → login → Bearer` **provado real** (lead cartão/PIX +
-> colaborador), e o **PK do `Address` fora da borda Ninja** (`as_public_dict`, Victor 2026-06-07 —
-> ver [[wiki/api/clients]]). O JWT é `django-ninja-jwt` (swap concluído).
+> Já feito (não confundir com pendência): o gate de role (`require_roles`), a máquina de status por
+> role, o E2E `register → OTP → login → Bearer` **provado real** (lead cartão/PIX + colaborador), o
+> **PK do `Address` fora da borda Ninja** (`as_public_dict`), o JWT `django-ninja-jwt`. **DMZ FECHADA**
+> (Victor 2026-06-16): a superfície HTTP sem-auth (`users/auth|address|documents` + `charge/payout/
+> status/setup` dos gateways) saiu — sobraram só os **webhooks públicos** + o reexpose da **saúde das
+> integrações no grupo `staff`** ([[wiki/api/staff]]).
 
 ## Ver também
 
