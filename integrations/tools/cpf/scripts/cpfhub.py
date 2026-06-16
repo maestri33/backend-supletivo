@@ -78,23 +78,31 @@ async def lookup(cpf: str) -> CpfIdentity | None:
     resp: httpx.Response | None = None
     max_attempts = len(_RETRY_DELAYS) + 1
 
-    async with httpx.AsyncClient(timeout=settings.CPFHUB_TIMEOUT, headers=headers) as client:
+    async with httpx.AsyncClient(
+        timeout=settings.CPFHUB_TIMEOUT, headers=headers
+    ) as client:
         for attempt in range(max_attempts):
             try:
                 resp = await client.get(url)
             except httpx.RequestError as exc:
-                logger.warning("cpfhub.request_error", attempt=attempt, error=type(exc).__name__)
+                logger.warning(
+                    "cpfhub.request_error", attempt=attempt, error=type(exc).__name__
+                )
                 if attempt + 1 < max_attempts:
                     await asyncio.sleep(_RETRY_DELAYS[attempt])
                     continue
                 raise CpfHubError(0, "CPFHub indisponível (rede)") from exc
             if resp.status_code in _RETRY_STATUSES and attempt + 1 < max_attempts:
-                logger.warning("cpfhub.transient", attempt=attempt, status=resp.status_code)
+                logger.warning(
+                    "cpfhub.transient", attempt=attempt, status=resp.status_code
+                )
                 await asyncio.sleep(_RETRY_DELAYS[attempt])
                 continue
             break
 
-    if resp is None:  # nunca deveria ocorrer (o loop retorna ou levanta) — guarda defensiva
+    if (
+        resp is None
+    ):  # nunca deveria ocorrer (o loop retorna ou levanta) — guarda defensiva
         raise CpfHubError(0, "CPFHub sem resposta")
     if resp.status_code == 404:
         logger.info("cpfhub.not_found")
