@@ -176,6 +176,16 @@ def set_default(external_id: str) -> Hub:
     return hub
 
 
+def set_address(*, hub_external_id: str, cep: str, number=None, complement=None) -> Hub:
+    """Preenche o endereço do polo pelo CEP (ViaCEP). O polo nasce com Address vazio (`create_hub`)."""
+    hub = get_by_external_id(hub_external_id)
+    if hub is None:
+        raise HubError("hub_not_found")
+    address_iface.fill_by_cep(hub.address, cep, number=number, complement=complement)
+    logger.info("hub.address_set", external_id=hub_external_id, cep=cep)
+    return hub
+
+
 def coordinated_by(user):
     """O hub que `user` COORDENA de fato (FK `Hub.coordinator`) — ou None.
 

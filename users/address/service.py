@@ -91,6 +91,28 @@ def set_by_cep(*, external_id: str, cep: str) -> Address:
     return address
 
 
+def fill_by_cep(address: Address, cep: str, *, number=None, complement=None) -> Address:
+    """Preenche um Address (OBJETO) pelo CEP (ViaCEP) — uso genérico, ex.: o endereço do POLO, que não
+    é de um user (não tem external_id). Reusa `_viacep`. Levanta `ValidationError` se o CEP não existir."""
+    data = _viacep(cep)
+    if data is None:
+        raise ValidationError("CEP não encontrado ou inválido.", code="CEP_NOT_FOUND")
+    address.zipcode = data["zipcode"]
+    address.street = data["street"]
+    address.neighborhood = data["neighborhood"]
+    address.city = data["city"]
+    address.state = data["state"]
+    if data.get("complement"):
+        address.complement = data["complement"]
+    if number is not None:
+        address.number = number
+    if complement is not None:
+        address.complement = complement
+    address.save()
+    logger.info("address.filled_by_cep", zipcode=data["zipcode"])
+    return address
+
+
 def patch(*, external_id: str, **fields) -> Address:
     """Atualiza os demais dados do endereço (number, complement, ...). Ignora chaves desconhecidas."""
     address = _require_address(external_id)

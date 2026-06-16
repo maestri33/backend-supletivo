@@ -40,6 +40,12 @@ class SetCoordinatorIn(Schema):
     coordinator_external_id: str
 
 
+class HubAddressIn(Schema):
+    cep: str
+    number: str | None = None
+    complement: str | None = None
+
+
 class HubOut(Schema):
     external_id: str
     brand: str
@@ -125,6 +131,23 @@ def set_default_hub(request, external_id: str):
     except hub_iface.HubError as exc:
         status = 404 if exc.args and exc.args[0] == "hub_not_found" else 422
         raise HttpError(status, str(exc)) from exc
+    return _hub_out(hub)
+
+
+@api.patch("/hubs/{external_id}/address", response=HubOut, tags=["staff"])
+def set_hub_address(request, external_id: str, payload: HubAddressIn):
+    """Preenche o endereço do polo pelo CEP (ViaCEP) — o polo nasce com endereço vazio. CEP
+    inexistente → 422 `CEP_NOT_FOUND` (envelope central)."""
+    require_superuser(request.auth)
+    try:
+        hub = hub_iface.set_address(
+            hub_external_id=external_id,
+            cep=payload.cep,
+            number=payload.number,
+            complement=payload.complement,
+        )
+    except hub_iface.HubError as exc:
+        raise HttpError(404, str(exc)) from exc
     return _hub_out(hub)
 
 
@@ -373,3 +396,28 @@ def list_all_students(request, hub: str | None = None, status: str | None = None
     """Alunos de TODOS os polos (filtros: `hub` external_id, `status`)."""
     require_superuser(request.auth)
     return student_iface.list_for_staff(hub_external_id=hub, status=status)
+
+
+# ── usuários da plataforma (read-only; mutação de role = «PENDÊNCIA» Victor) ──
+@api.get("/users", tags=["staff"])
+def list_users(request, role: str | None = None, limit: int = 200):
+    """Usuários + roles ativas (filtro opcional por `role`). Read-only — a mudança de role pelo staff
+    fica pra depois (regra do Victor: "dentro do cabível")."""
+    require_superuser(request.auth)
+    from users.auth.models import User
+
+    base = roles.users_with_role(role) if role else list(User.objects.order_by("-id"))
+    out = []
+    for u in base[:limit]:
+        p = profiles.get(u)
+        out.append(
+            {
+                "external_id": str(u.external_id),
+                "name": p.name if p else None,
+                "cpf": p.cpf if p else None,
+                "phone": p.phone if p else None,
+                "is_superuser": u.is_superuser,
+                "roles": roles.active_roles(u),
+            }
+        )
+    return out

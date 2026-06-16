@@ -9,6 +9,7 @@ from __future__ import annotations
 from users.address.models import Address
 from users.address.service import (
     create_empty,
+    fill_by_cep,
     fill_empty,
     get_by_external_id,
     get_by_id,
@@ -53,6 +54,7 @@ __all__ = [
     "list_all",
     "patch",
     "fill_empty",
+    "fill_by_cep",
     "is_complete",
     "set_by_cep",
     "as_dict",
