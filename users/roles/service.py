@@ -108,7 +108,9 @@ def grant(user, role: str) -> list[str]:
     if role in active_roles(user):
         return active_roles(user)
     try:
-        with transaction.atomic():  # savepoint: IntegrityError não quebra a transação externa
+        with (
+            transaction.atomic()
+        ):  # savepoint: IntegrityError não quebra a transação externa
             UserRole.objects.create(user=user, role=role)
     except IntegrityError:
         # corrida: outra transação concedeu a MESMA role ativa (constraint de role ativa única) — no-op.

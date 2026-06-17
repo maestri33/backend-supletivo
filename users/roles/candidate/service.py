@@ -258,7 +258,9 @@ def patch_document_section(*, user_external_id, **fields) -> dict:
         k: fields[k] for k in _DOC_PROFILE_FIELDS if fields.get(k) is not None
     }
     if profile_payload:
-        profiles.update_identity(cand.user, **profile_payload)  # identidade → Profile (correção)
+        profiles.update_identity(
+            cand.user, **profile_payload
+        )  # identidade → Profile (correção)
     _advance_documents(cand, user_external_id)
     return me_dict(cand)  # resposta canônica
 
@@ -712,8 +714,12 @@ def _apply_doc_extracted(cand: Candidate, sub, data: dict) -> None:
     # (Victor 2026-06-16: a identidade mora SÓ no Profile, nunca espalhada no candidate).
     profiles.fill_identity(
         cand.user,
-        mother_name=_clean(data["mother_name"], 255) if data.get("mother_name") else None,
-        father_name=_clean(data["father_name"], 255) if data.get("father_name") else None,
+        mother_name=_clean(data["mother_name"], 255)
+        if data.get("mother_name")
+        else None,
+        father_name=_clean(data["father_name"], 255)
+        if data.get("father_name")
+        else None,
         birthplace=_clean(data["birthplace"], 128) if data.get("birthplace") else None,
         birth_date=_date(data.get("birth_date")),
     )
@@ -1524,7 +1530,9 @@ def _notify_candidate_rejected(cand: Candidate) -> None:
         logger.warning("candidate.notify_rejected_failed", error=str(exc))
 
 
-def candidate_detail_for_coordinator(*, candidate_external_id: str, coordinator) -> dict:
+def candidate_detail_for_coordinator(
+    *, candidate_external_id: str, coordinator
+) -> dict:
     """Detalhe do candidato aguardando aprovação — pro coordenador decidir VENDO (perfil + coleta).
     Gate: ser o coordenador do polo do candidato."""
     cand = (

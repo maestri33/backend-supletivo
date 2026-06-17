@@ -199,7 +199,9 @@ def pending_materials(user) -> list[dict]:
     ]
 
 
-def assigned_materials(user_external_id: str, *, include_content: bool = True) -> list[dict]:
+def assigned_materials(
+    user_external_id: str, *, include_content: bool = True
+) -> list[dict]:
     """Matérias ATRIBUÍDAS ao colaborador (não todas as ativas) + status + última submissão.
 
     É o que o promotor em treino vê (`GET /training/materials`): conteúdo da matéria (sem gabarito) +
@@ -250,9 +252,7 @@ def on_became_promoter(user) -> bool:
     """Chamado quando o candidato vira promotor: atribui as matérias FIXAS ativas e, se houver
     obrigatória pendente, dá a role overlay `training` (trava). Devolve `locked` (pro caller notificar)."""
     with transaction.atomic():
-        for material in Material.objects.filter(
-            active=True, kind=Material.Kind.FIXED
-        ):
+        for material in Material.objects.filter(active=True, kind=Material.Kind.FIXED):
             assign_material(user, material)
         locked = is_locked(user)
         if locked and _TRAINING_ROLE not in roles.active_roles(user):
@@ -320,7 +320,9 @@ def _recheck_lock(user, *, trigger=None) -> None:
 # ── submissão (autenticado, role promoter) ──────────────────────────────────
 
 
-def submit(*, user_external_id: str, material_external_id: str, answer: str) -> Submission:
+def submit(
+    *, user_external_id: str, material_external_id: str, answer: str
+) -> Submission:
     from users.auth.models import User
 
     user = User.objects.filter(external_id=user_external_id).first()
@@ -409,9 +411,7 @@ def coordinator_approve_material(
     user = User.objects.filter(external_id=promoter_external_id).first()
     if user is None:
         raise NotFound("Promotor não encontrado.", code="PROMOTER_NOT_FOUND")
-    promoter = (
-        Promoter.objects.filter(user=user).select_related("hub").first()
-    )
+    promoter = Promoter.objects.filter(user=user).select_related("hub").first()
     if promoter is None:
         raise NotFound("Promotor não encontrado.", code="PROMOTER_NOT_FOUND")
     if promoter.hub.coordinator_id != coordinator.id:

@@ -55,7 +55,9 @@ def _ensure_coordinator_role(user: User) -> None:
     if "coordinator" in roles.active_roles(user):
         return
     if user.is_superuser:
-        roles.grant(user, "coordinator")  # pula o catálogo + sem bump (overlay de resgate)
+        roles.grant(
+            user, "coordinator"
+        )  # pula o catálogo + sem bump (overlay de resgate)
     else:
         roles.assign(user, "coordinator")
     _notify_coordinator_assigned(user)

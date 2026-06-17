@@ -13,7 +13,12 @@ from core.validation import latest_checks
 
 _REGISTRY: dict[str, dict] = {
     "asaas": {
-        "env": ["ASAAS_API_KEY", "ASAAS_WEBHOOK_SECRET", "ASAAS_BASE_URL", "EXTERNAL_URL"],
+        "env": [
+            "ASAAS_API_KEY",
+            "ASAAS_WEBHOOK_SECRET",
+            "ASAAS_BASE_URL",
+            "EXTERNAL_URL",
+        ],
         "scope": "asaas",
         "flow": "onboarding → auto-cadastro do webhook → self-test (saldo) + transfer-validation",
     },
@@ -28,12 +33,22 @@ _REGISTRY: dict[str, dict] = {
         "flow": "Evolution API (instância 'default'): health + send (texto/mídia/áudio)",
     },
     "mail": {
-        "env": ["MAIL_SMTP_HOST", "MAIL_SMTP_USER", "MAIL_SMTP_PASSWORD", "MAIL_FROM_EMAIL"],
+        "env": [
+            "MAIL_SMTP_HOST",
+            "MAIL_SMTP_USER",
+            "MAIL_SMTP_PASSWORD",
+            "MAIL_FROM_EMAIL",
+        ],
         "scope": "mail",
         "flow": "SMTP STARTTLS:587 (login) → validação MX/RCPT → send (templates)",
     },
     "ai": {
-        "env": ["MINIMAX_API_KEY", "GEMINI_API_KEY", "ELEVENLABS_API_KEY", "GOOGLE_VISION_API_KEY"],
+        "env": [
+            "MINIMAX_API_KEY",
+            "GEMINI_API_KEY",
+            "ELEVENLABS_API_KEY",
+            "GOOGLE_VISION_API_KEY",
+        ],
         "scope": "ai",
         "flow": "LLM (M3→deepseek→gemini) + visão + TTS (MiniMax→ElevenLabs) + OCR (Google Vision)",
     },
@@ -100,7 +115,9 @@ def run_setup(name: str) -> dict | None:
         from integrations.bank.asaas import onboarding
 
         return onboarding.setup()
-    return {"detail": f"'{name}' não tem ação de setup (config via .env; use /test pra checar)."}
+    return {
+        "detail": f"'{name}' não tem ação de setup (config via .env; use /test pra checar)."
+    }
 
 
 def run_test(name: str) -> dict | None:

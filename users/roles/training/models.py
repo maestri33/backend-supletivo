@@ -27,7 +27,10 @@ class Material(ExternalIdModel):
 
     class Kind(models.TextChoices):
         FIXED = "fixed", "fixa (todo promotor novo recebe)"
-        TRANSITORY = "transitory", "transitória (só os promotores já existentes ao publicar)"
+        TRANSITORY = (
+            "transitory",
+            "transitória (só os promotores já existentes ao publicar)",
+        )
 
     title = models.CharField(max_length=255)
     text_content = models.TextField(blank=True, default="")
@@ -47,9 +50,7 @@ class Material(ExternalIdModel):
     blocking = models.BooleanField(
         default=True, db_index=True
     )  # obrigatória = trava o painel até aprovar
-    ephemeral = models.BooleanField(
-        default=False
-    )  # descartável (staff pode deletar)
+    ephemeral = models.BooleanField(default=False)  # descartável (staff pode deletar)
     order = models.PositiveIntegerField(default=0, db_index=True)
     active = models.BooleanField(default=True, db_index=True)
     created_at = models.DateTimeField("criado em", auto_now_add=True)

@@ -65,7 +65,9 @@ def summary() -> dict:
     from django.db.models import Count, Sum
 
     def _by_status(model) -> dict:
-        rows = model.objects.values("status").annotate(n=Count("id"), total=Sum("amount"))
+        rows = model.objects.values("status").annotate(
+            n=Count("id"), total=Sum("amount")
+        )
         return {
             r["status"]: {"count": r["n"], "total": str(r["total"] or 0)} for r in rows
         }

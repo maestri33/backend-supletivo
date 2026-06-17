@@ -1629,17 +1629,27 @@ def detail_for_hub(*, enrollment_external_id: str, coordinator) -> dict:
 
 # campos de identidade DERIVADOS DO DOCUMENTO (OCR) que o coordenador pode corrigir. NÃO inclui
 # `name`/`birth_date` (CPFHub é a fonte autoritativa) nem `pix` (validação própria) — Victor 2026-06-17.
-_COORD_CORRECTABLE = ("mother_name", "father_name", "marital_status", "nationality", "birthplace")
+_COORD_CORRECTABLE = (
+    "mother_name",
+    "father_name",
+    "marital_status",
+    "nationality",
+    "birthplace",
+)
 
 
-def coordinator_correct_identity(*, enrollment_external_id: str, coordinator, **fields) -> dict:
+def coordinator_correct_identity(
+    *, enrollment_external_id: str, coordinator, **fields
+) -> dict:
     """Coordenador corrige campos de identidade do Profile que o OCR extraiu errado (filiação, estado
     civil, naturalidade, nacionalidade) — sem isso uma extração torta fica gravada pra sempre e só um
     db-edit conserta (Victor 2026-06-17: user→coord, sem dev). SOBRESCREVE via `profiles.update_identity`.
 
     NÃO mexe em `name`/`birth_date` (CPFHub manda) nem em `pix`. Gate: coordenar o hub da matrícula."""
     enr = _enrollment_for_coordinator(enrollment_external_id, coordinator)
-    clean = {k: v for k, v in fields.items() if k in _COORD_CORRECTABLE and v is not None}
+    clean = {
+        k: v for k, v in fields.items() if k in _COORD_CORRECTABLE and v is not None
+    }
     if not clean:
         raise DomainError(
             "Nenhum campo de identidade corrigível foi informado.", code="NO_FIELDS"
@@ -1682,7 +1692,9 @@ def _sweep_stale_reviews(hub) -> None:
     )
     # RG: o model não tem `updated_at`; o início vive no JSON (`analysis_started_at`), igual ao flip
     # do /me do aluno (`_rg_started_at`). Loop curto (só os PENDING do polo) — sem referência → não mexe.
-    user_ids = list(Enrollment.objects.filter(hub=hub).values_list("user_id", flat=True))
+    user_ids = list(
+        Enrollment.objects.filter(hub=hub).values_list("user_id", flat=True)
+    )
     for rg in RG.objects.filter(
         document__user_id__in=user_ids, validation_status=_analysis.PENDING
     ):

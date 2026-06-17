@@ -472,7 +472,9 @@ def create_self_study_lead(*, user, payment_method=None) -> dict:
     )
     checkout = _create_checkout_row(lead, method)
     _enqueue_provider_build(checkout)
-    _notify_captured(lead)  # boas-vindas ao próprio promotor (sem "novo lead" a ninguém)
+    _notify_captured(
+        lead
+    )  # boas-vindas ao próprio promotor (sem "novo lead" a ninguém)
     logger.info("lead.self_study_created", external_id=str(lead.external_id))
     return {
         "external_id": str(lead.external_id),

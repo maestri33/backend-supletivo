@@ -4,25 +4,24 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
-        ('users', '0020_material_blocking_material_content_blocks_and_more'),
+        ("users", "0020_material_blocking_material_content_blocks_and_more"),
     ]
 
     operations = [
         migrations.AddField(
-            model_name='enrollment',
-            name='self_study',
+            model_name="enrollment",
+            name="self_study",
             field=models.BooleanField(default=False),
         ),
         migrations.AddField(
-            model_name='lead',
-            name='self_study',
+            model_name="lead",
+            name="self_study",
             field=models.BooleanField(db_index=True, default=False),
         ),
         migrations.AddField(
-            model_name='student',
-            name='self_study',
+            model_name="student",
+            name="self_study",
             field=models.BooleanField(default=False),
         ),
     ]

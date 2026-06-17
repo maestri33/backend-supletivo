@@ -42,32 +42,44 @@ class Migration(migrations.Migration):
         migrations.AddField(
             model_name="profile",
             name="mother_name",
-            field=models.CharField(blank=True, max_length=255, null=True, verbose_name="nome da mãe"),
+            field=models.CharField(
+                blank=True, max_length=255, null=True, verbose_name="nome da mãe"
+            ),
         ),
         migrations.AddField(
             model_name="profile",
             name="father_name",
-            field=models.CharField(blank=True, max_length=255, null=True, verbose_name="nome do pai"),
+            field=models.CharField(
+                blank=True, max_length=255, null=True, verbose_name="nome do pai"
+            ),
         ),
         migrations.AddField(
             model_name="profile",
             name="marital_status",
-            field=models.CharField(blank=True, max_length=32, null=True, verbose_name="estado civil"),
+            field=models.CharField(
+                blank=True, max_length=32, null=True, verbose_name="estado civil"
+            ),
         ),
         migrations.AddField(
             model_name="profile",
             name="nationality",
-            field=models.CharField(blank=True, max_length=64, null=True, verbose_name="nacionalidade"),
+            field=models.CharField(
+                blank=True, max_length=64, null=True, verbose_name="nacionalidade"
+            ),
         ),
         migrations.AddField(
             model_name="profile",
             name="birthplace",
-            field=models.CharField(blank=True, max_length=128, null=True, verbose_name="naturalidade"),
+            field=models.CharField(
+                blank=True, max_length=128, null=True, verbose_name="naturalidade"
+            ),
         ),
         migrations.AddField(
             model_name="profile",
             name="pix_key_type",
-            field=models.CharField(blank=True, max_length=10, null=True, verbose_name="tipo da chave Pix"),
+            field=models.CharField(
+                blank=True, max_length=10, null=True, verbose_name="tipo da chave Pix"
+            ),
         ),
         # 2) copia os dados que estavam espalhados ANTES de remover (não perde nada)
         migrations.RunPython(copy_identity_to_profile, migrations.RunPython.noop),
