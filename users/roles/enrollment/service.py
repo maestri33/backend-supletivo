@@ -699,10 +699,14 @@ def _finish_rg(
 
 
 def _rg_post_approval(enr: Enrollment, rg) -> None:
-    """Aprovado → rosto do documento vira biometria (best-effort) + tenta avançar o wizard.
+    """Aprovado → AVANÇA o wizard PRIMEIRO, biometria best-effort DEPOIS: um crash da biometria
+    (InsightFace/onnxruntime pode matar o worker) NÃO pode perder o avanço (Victor 2026-06-16).
 
     Recorte (plan/13): InsightFace direto (já detecta/recorta); NÃO achou rosto → a visão
     localiza a região da foto do titular, o Pillow recorta e tenta de novo. Nunca trava o fluxo."""
+    # o doc já está aprovado → avança rg→address ANTES de tocar na biometria.
+    _advance_rg(enr, str(enr.user.external_id))
+
     from pathlib import Path
 
     from integrations.tools.biometric import service as biometric
@@ -730,7 +734,6 @@ def _rg_post_approval(enr: Enrollment, rg) -> None:
                     image_path=str(crop_path),
                     caller="enrollment.document_crop",
                 )
-    _advance_rg(enr, str(enr.user.external_id))
 
 
 def run_rg_fill(enrollment_id: int) -> None:

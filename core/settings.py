@@ -377,6 +377,10 @@ Q_CLUSTER = {
     "orm": "default",
     "timeout": 90,
     "retry": 120,
+    # `workers` baixo de propósito: cada worker carrega o modelo InsightFace (~300MB) no 1º uso de
+    # biometria. O default do Django-Q (= nº de CPUs) sobe 14 workers e OOM-ava neste host (16GB,
+    # ~1GB livre) durante o teste real (Victor 2026-06-16). Prod sobe via Q_WORKERS no .env.
+    "workers": env.int("Q_WORKERS", default=2),
 }
 
 

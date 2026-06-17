@@ -275,7 +275,9 @@ def upload_document_photo(*, user_external_id, slot: str, upload) -> dict:
 
     from users.roles import _analysis
 
-    cand = _require(user_external_id, _S.DOCUMENTS, _S.PIX)
+    # FOTO-PRIMEIRO (Victor 2026-06-16): o upload é a ENTRADA da etapa documento — nada de digitar
+    # número/tipo antes (ninguém sabe o nº da CNH; o OCR extrai). Aceito a partir de `address`.
+    cand = _require(user_external_id, _S.ADDRESS, _S.DOCUMENTS, _S.PIX)
     # Define o `doc_type` do candidato a partir do 1º slot (rg_* ou cnh_*). Imutável depois.
     inferred = (
         "rg" if slot.startswith("rg_") else ("cnh" if slot.startswith("cnh_") else None)
@@ -292,6 +294,8 @@ def upload_document_photo(*, user_external_id, slot: str, upload) -> dict:
             f"Você já escolheu {cand.doc_type.upper()}. Para trocar, recomece o cadastro.",
             code="DOC_TYPE_LOCKED",
         )
+    if cand.status == _S.ADDRESS:  # 1ª foto = entra na etapa documento
+        _set_status(cand, _S.DOCUMENTS)
     path = documents_iface.upload_photo(user_external_id, slot, upload)
     # biometria do documento (best-effort; rosto ruim → cai em review na selfie)
     from integrations.tools.biometric import service as biometric
@@ -757,7 +761,11 @@ def _finish_doc(
 
 
 def _doc_post_approval(cand: Candidate, sub) -> None:
-    """Aprovado → biometria (best-effort) + tenta avançar o wizard. Espelha `_rg_post_approval`."""
+    """Aprovado → AVANÇA o wizard PRIMEIRO, biometria best-effort DEPOIS: um crash da biometria
+    (InsightFace/onnxruntime pode matar o worker) NÃO pode perder o avanço do wizard (Victor 2026-06-16)."""
+    # o doc já está aprovado + com número → avança documents→pix ANTES de tocar na biometria.
+    _advance_documents(cand, str(cand.user.external_id))
+
     from pathlib import Path
 
     from integrations.tools.biometric import service as biometric
@@ -785,7 +793,6 @@ def _doc_post_approval(cand: Candidate, sub) -> None:
                     image_path=str(crop_path),
                     caller="candidate.document_crop",
                 )
-    _advance_documents(cand, str(cand.user.external_id))
 
 
 def run_document_fill(candidate_id: int) -> None:
