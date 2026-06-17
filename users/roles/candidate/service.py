@@ -1435,9 +1435,12 @@ def approve_candidate(*, candidate_external_id: str, coordinator) -> Candidate:
         raise Forbidden(
             "Você não coordena o polo deste candidato.", code="NOT_HUB_COORDINATOR"
         )
-    if cand.status != _S.COMPLETED:
+    # rejeição é SOFT (Victor 2026-06-17: "aguarda ser aprovado") — um candidato REJEITADO continua
+    # aguardando e pode ser aprovado depois (o coordenador mudou de ideia / a situação mudou). Não é
+    # beco terminal. Só barra quem ainda está na coleta (não concluiu).
+    if cand.status not in (_S.COMPLETED, _S.REJECTED):
         raise Conflict(
-            "O candidato não está aguardando aprovação.",
+            "O candidato ainda não concluiu a coleta.",
             code="WRONG_STATUS",
             extra={"expected_status": _S.COMPLETED},
         )
@@ -1562,10 +1565,14 @@ def candidate_detail_for_coordinator(*, candidate_external_id: str, coordinator)
 
 
 def list_awaiting_approval_for_hub(*, hub) -> list[dict]:
-    """Candidatos do polo aguardando a APROVAÇÃO do coordenador (status COMPLETED). Pro inbox/fila."""
+    """Candidatos do polo aguardando a APROVAÇÃO do coordenador. Pro inbox/fila.
+
+    Inclui COMPLETED **e REJECTED** (Victor 2026-06-17: rejeição é SOFT — "aguarda ser aprovado";
+    o rejeitado não some, fica na fila e pode ser aprovado depois). `rejected: true` marca quem o
+    coordenador já tinha rejeitado, pro front mostrar diferente."""
     out = []
     qs = (
-        Candidate.objects.filter(hub=hub, status=_S.COMPLETED)
+        Candidate.objects.filter(hub=hub, status__in=[_S.COMPLETED, _S.REJECTED])
         .select_related("user")
         .order_by("updated_at")
     )
@@ -1576,6 +1583,7 @@ def list_awaiting_approval_for_hub(*, hub) -> list[dict]:
                 "external_id": str(cand.external_id),
                 "name": p.name if p else None,
                 "since": cand.updated_at.isoformat() if cand.updated_at else None,
+                "rejected": cand.status == _S.REJECTED,
             }
         )
     return out
