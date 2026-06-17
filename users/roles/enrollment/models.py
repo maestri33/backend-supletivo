@@ -61,9 +61,6 @@ class Enrollment(ExternalIdModel):
         default=Status.RG,
         db_index=True,
     )
-    # dados da plataforma externa que o COORDENADOR posta na liberação (6c). Schema livre por ora
-    # (legado guardava sem schema fixo); modelar campos exatos com o Victor no ciclo `student`.
-    study_platform = models.JSONField(null=True, blank=True)
     # identidade (filiação/estado civil/naturalidade/nacionalidade) → CENTRALIZADA no Profile
     # (Victor 2026-06-16: a pessoa mora SÓ no Profile, nunca espalhada na matrícula).
     # selfie/ASSINATURA (etapa `selfie`, 6b) — foto em media/enrollment/<ext>/ + validação IA
