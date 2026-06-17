@@ -1582,9 +1582,11 @@ def list_for_staff(*, hub_external_id=None, status=None, limit=200) -> list[dict
         qs = qs.filter(hub__external_id=hub_external_id)
     if status:
         qs = qs.filter(status=status)
+    rows = list(qs[:limit])
+    pmap = profiles.get_map([r.user for r in rows])
     out = []
-    for enr in qs[:limit]:
-        p = profiles.get(enr.user)
+    for enr in rows:
+        p = pmap.get(enr.user_id)
         out.append(
             {
                 "external_id": str(enr.external_id),

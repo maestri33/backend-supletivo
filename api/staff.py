@@ -406,10 +406,13 @@ def list_users(request, role: str | None = None, limit: int = 200):
     require_superuser(request.auth)
     from users.auth.models import User
 
-    base = roles.users_with_role(role) if role else list(User.objects.order_by("-id"))
+    base = (roles.users_with_role(role) if role else list(User.objects.order_by("-id")))[
+        :limit
+    ]
+    pmap = profiles.get_map(base)
     out = []
-    for u in base[:limit]:
-        p = profiles.get(u)
+    for u in base:
+        p = pmap.get(u.id)
         out.append(
             {
                 "external_id": str(u.external_id),

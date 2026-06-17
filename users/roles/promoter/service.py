@@ -168,11 +168,13 @@ def list_for_hub(hub) -> list[dict]:
     from users.profiles import interface as profiles
     from users.roles.training import interface as training_iface
 
-    out = []
-    for promoter in (
+    promoters = list(
         Promoter.objects.filter(hub=hub).select_related("user").order_by("created_at")
-    ):
-        p = profiles.get(promoter.user)
+    )
+    pmap = profiles.get_map([pr.user for pr in promoters])
+    out = []
+    for promoter in promoters:
+        p = pmap.get(promoter.user_id)
         out.append(
             {
                 "external_id": str(promoter.user.external_id),

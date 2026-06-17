@@ -43,6 +43,11 @@ def get(user) -> Profile | None:
     return Profile.objects.filter(user=user).first()
 
 
+def get_map(users) -> dict:
+    """Profiles de vários Users numa query só — evita N+1 nas listagens. Devolve `{user_id: Profile}`."""
+    return {p.user_id: p for p in Profile.objects.filter(user__in=list(users))}
+
+
 def create(
     *,
     user,
