@@ -185,7 +185,10 @@ MAX_UPLOAD_MB = env.int("MAX_UPLOAD_MB", default=10)
 # front (proposta API #2). TTL = quanto a gente espera o worker antes de jogar o `pending` em
 # `review` (nunca fica "analisando…" eterno se a task morreu). POLL = de quanto em quanto o front
 # volta a perguntar. Config, não hardcoded (§10).
-ANALYSIS_TTL_SECONDS = env.int("ANALYSIS_TTL_SECONDS", default=120)
+# 300s (Victor 2026-06-17): o pipeline real do RG mede ~35s ponta-a-ponta (visão+OCR+extração com IA),
+# então 300s só dispara pra task GENUINAMENTE morta — fecha a janela do "worker zumbi" (vivo, mas lento,
+# que terminaria e sobrescreveria uma decisão já tomada). O guard em `_rg_extract_and_finish` cobre o resto.
+ANALYSIS_TTL_SECONDS = env.int("ANALYSIS_TTL_SECONDS", default=300)
 ANALYSIS_POLL_MS = env.int("ANALYSIS_POLL_MS", default=2500)
 
 

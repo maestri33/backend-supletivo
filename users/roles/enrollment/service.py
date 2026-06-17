@@ -605,6 +605,12 @@ def _rg_extract_and_finish(enr: Enrollment, rg, result: dict, images: list) -> N
             result,
         )
         return
+    # guard do worker-zumbi (Victor 2026-06-17): o OCR + extração acima levam ~15s; se NESSE meio o
+    # sweep do TTL (worker que ficou lento) ou o coordenador já decidiu, NÃO sobrescrever a decisão.
+    # Mesma régua que a visão já aplica nas linhas 543-545 — aqui fecha a janela do estágio de extração.
+    rg.refresh_from_db()
+    if rg.validation_status != doc_ai.PENDING:
+        return
     result["extracted"] = data
     match = str(data.get("name_match") or "").strip().lower()
     name_reason = (data.get("name_reason") or "").strip()
