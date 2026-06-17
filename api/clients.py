@@ -14,11 +14,11 @@ from ninja import Field, File, Router, Schema
 from ninja.files import UploadedFile
 
 from api.auth import require_roles
-from api.base import build_group
+from api.base import add_auth_refresh, build_group, resolve_rg_slot
+from api.schemas import TokenOut
 from users.auth import interface as auth_iface
-from users.auth.jwt import service as jwt_service
 from users.auth.models import User
-from users.exceptions import Forbidden, NotFound, Unauthorized, ValidationError
+from users.exceptions import Forbidden, NotFound
 from users.roles import interface as roles
 from users.roles.enrollment import interface as enrollment_iface
 from users.roles.lead import interface as lead_iface
@@ -107,16 +107,6 @@ class CheckOut(Schema):
 class LoginIn(Schema):
     external_id: str = Field(description="external_id do USER (veio do /auth/check)")
     otp: str
-
-
-class RefreshIn(Schema):
-    refresh_token: str
-
-
-class TokenOut(Schema):
-    access_token: str
-    refresh_token: str
-    token_type: str
 
 
 class CardPriceOut(Schema):
@@ -296,17 +286,7 @@ def login(request, payload: LoginIn):
     )
 
 
-@auth_router.post("/refresh", response=TokenOut, auth=None)
-def refresh(request, payload: RefreshIn):
-    """Troca o `refresh_token` por um par NOVO (rotação) — o front renova silencioso quando o access
-    expira no meio da matrícula, sem voltar pro OTP. Refresh inválido/expirado OU role trocada desde a
-    emissão (`token_version`) → **401** (aí sim é re-login)."""
-    try:
-        return jwt_service.refresh(payload.refresh_token)
-    except jwt_service.TokenError as exc:
-        raise Unauthorized(
-            "Sessão expirada — faça login novamente.", code="SESSION_EXPIRED"
-        ) from exc
+add_auth_refresh(auth_router)
 
 
 # ── clients/lead — a fase LEAD do funil: estado + a URL (leitura do PRÓPRIO dado) ─
@@ -536,8 +516,6 @@ def enrollment_me(request):
 
 
 # ── seção DOCUMENTO (primeira do wizard — plan/13) ───────────────────────────
-# slot da borda (`front`/`back`/`full` — o path já diz que é RG) → slot interno do documents.
-_RG_SLOTS = {"front": "rg_front", "back": "rg_back", "full": "rg_full"}
 
 
 class RgUploadAck(Schema):
@@ -563,11 +541,7 @@ def enrollment_rg_photo(request, slot: str, file: UploadedFile = File(...)):
     em 2º plano: acompanhe `analysis_status` (+ motivo e campos extraídos) no
     `GET /enrollment/documents/rg`, voltando a perguntar a cada `poll_after_ms`."""
     ext = _enr_guard(request)
-    real_slot = _RG_SLOTS.get(slot)
-    if real_slot is None:
-        raise ValidationError(
-            "Slot inválido. Aceitos: front, back, full.", code="SLOT_INVALID"
-        )
+    real_slot = resolve_rg_slot(slot)
     ack = enrollment_iface.upload_rg_photo(
         user_external_id=ext, slot=real_slot, upload=file
     )

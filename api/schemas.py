@@ -45,3 +45,17 @@ class MaterialUpdateIn(Schema):
     ephemeral: bool | None = None
     video: str | None = None
     photo: str | None = None
+
+
+class RefreshIn(Schema):
+    """Body do `POST /auth/refresh` — compartilhado pelos 3 grupos (dedup #4)."""
+
+    refresh_token: str
+
+
+class TokenOut(Schema):
+    """Par de tokens devolvido por `login`/`refresh` — compartilhado pelos grupos (dedup #4)."""
+
+    access_token: str
+    refresh_token: str
+    token_type: str

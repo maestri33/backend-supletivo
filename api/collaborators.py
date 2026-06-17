@@ -16,11 +16,11 @@ from ninja import Field, File, Router, Schema
 from ninja.files import UploadedFile
 
 from api.auth import require_roles
-from api.base import build_group
+from api.base import add_auth_refresh, build_group
+from api.schemas import TokenOut
 from users.auth import interface as auth_iface
-from users.auth.jwt import service as jwt_service
 from users.auth.models import User
-from users.exceptions import Forbidden, NotFound, Unauthorized
+from users.exceptions import Forbidden, NotFound
 from users.roles import interface as roles
 from users.roles.candidate import interface as candidate_iface
 from users.roles.lead import interface as lead_iface
@@ -104,16 +104,6 @@ class CheckOut(Schema):
 class LoginIn(Schema):
     external_id: str = Field(description="external_id do USER (veio do /auth/check)")
     otp: str
-
-
-class RefreshIn(Schema):
-    refresh_token: str
-
-
-class TokenOut(Schema):
-    access_token: str
-    refresh_token: str
-    token_type: str
 
 
 class ProfileIn(Schema):
@@ -205,17 +195,7 @@ def login(request, payload: LoginIn):
     )
 
 
-@auth_router.post("/refresh", response=TokenOut, auth=None)
-def refresh(request, payload: RefreshIn):
-    """Troca o `refresh_token` por um par NOVO (rotação) — o front renova silencioso quando o access
-    expira no meio do funil, sem voltar pro OTP. Refresh inválido/expirado OU role trocada desde a
-    emissão (`token_version`) → **401** (aí sim é re-login)."""
-    try:
-        return jwt_service.refresh(payload.refresh_token)
-    except jwt_service.TokenError as exc:
-        raise Unauthorized(
-            "Sessão expirada — faça login novamente.", code="SESSION_EXPIRED"
-        ) from exc
+add_auth_refresh(auth_router)
 
 
 api.add_router("/auth", auth_router)

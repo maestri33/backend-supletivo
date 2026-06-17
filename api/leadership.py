@@ -17,16 +17,14 @@ from __future__ import annotations
 
 import structlog
 from ninja import Field, File, Router, Schema
-from ninja.errors import HttpError
 from ninja.files import UploadedFile
 
 from api.auth import require_roles
-from api.base import build_group
-from api.schemas import MaterialIn, MaterialUpdateIn
+from api.base import add_auth_refresh, build_group, resolve_rg_slot
+from api.schemas import MaterialIn, MaterialUpdateIn, TokenOut
 from users.auth import interface as auth_iface
-from users.auth.jwt import service as jwt_service
 from users.auth.models import User
-from users.exceptions import Forbidden, NotFound, Unauthorized
+from users.exceptions import Forbidden, NotFound
 from hub import interface as hub_iface
 from users.roles.candidate import interface as candidate_iface
 from users.roles.enrollment import interface as enrollment_iface
@@ -103,16 +101,6 @@ class LoginIn(Schema):
     otp: str
 
 
-class RefreshIn(Schema):
-    refresh_token: str
-
-
-class TokenOut(Schema):
-    access_token: str
-    refresh_token: str
-    token_type: str
-
-
 auth_router = Router(tags=["auth"])
 
 
@@ -154,17 +142,7 @@ def login(request, payload: LoginIn):
     )
 
 
-@auth_router.post("/refresh", response=TokenOut, auth=None)
-def refresh(request, payload: RefreshIn):
-    """Renova o par de tokens (rotação) — espelho do clients, pro front do coordenador não
-    depender de outro grupo."""
-    try:
-        return jwt_service.refresh(payload.refresh_token)
-    except jwt_service.TokenError as exc:
-        raise Unauthorized(
-            "Sessão expirada — faça login novamente.", code="SESSION_EXPIRED"
-        ) from exc
-
+add_auth_refresh(auth_router)
 
 api.add_router("/auth", auth_router)
 
@@ -316,30 +294,24 @@ def decide_enrollment_rg(request, external_id: str, payload: SelfieDecideIn):
     Aprovou → o aluno é avisado, a biometria roda e a extração best-effort preenche os campos;
     reprovou → o aluno é avisado pra reenviar a foto (com o motivo)."""
     coordinator = _coordinator(request)
-    try:
-        return enrollment_iface.decide_rg(
-            enrollment_external_id=external_id,
-            coordinator=coordinator,
-            approve=payload.approve,
-            reason=payload.reason,
-        )
-    except enrollment_iface.EnrollmentError as exc:
-        raise HttpError(422, str(exc)) from exc
+    return enrollment_iface.decide_rg(
+        enrollment_external_id=external_id,
+        coordinator=coordinator,
+        approve=payload.approve,
+        reason=payload.reason,
+    )
 
 
 @api.post("/enrollments/{external_id}/selfie/decide", tags=["enrollment"])
 def decide_enrollment_selfie(request, external_id: str, payload: SelfieDecideIn):
     """Coordenador decide a selfie de uma matrícula que a IA mandou pra REVISÃO."""
     coordinator = _coordinator(request)
-    try:
-        enr = enrollment_iface.decide_selfie(
-            enrollment_external_id=external_id,
-            coordinator=coordinator,
-            approve=payload.approve,
-            reason=payload.reason,
-        )
-    except enrollment_iface.EnrollmentError as exc:
-        raise HttpError(422, str(exc)) from exc
+    enr = enrollment_iface.decide_selfie(
+        enrollment_external_id=external_id,
+        coordinator=coordinator,
+        approve=payload.approve,
+        reason=payload.reason,
+    )
     return {
         "external_id": str(enr.external_id),
         "selfie_status": enr.selfie_status,
@@ -404,7 +376,6 @@ def reset_candidate_doc_type(request, external_id: str):
 
 
 # ── funil do aluno: coordenador conduz student→veteran (§4 item 9) ───────────
-# ⚠️ NÃO TESTADO (nem in-process completo, nem com fluxo real).
 class ExamGradeIn(Schema):
     passed: bool
     notes: str | None = None
@@ -422,10 +393,7 @@ class DocDecideIn(Schema):
 
 
 def _student_action(external_id: str, coordinator, fn, **kw):
-    try:
-        return fn(student_external_id=external_id, coordinator=coordinator, **kw)
-    except student_iface.StudentError as exc:
-        raise HttpError(422, str(exc)) from exc
+    return fn(student_external_id=external_id, coordinator=coordinator, **kw)
 
 
 @api.post("/students/{external_id}/exam/grade", tags=["student"])
@@ -483,12 +451,9 @@ def open_pendency(request, external_id: str, payload: PendencyIn):
 def resolve_pendency(request, external_id: str):
     """Coordenador resolve a pendência; sem pendência aberta o aluno segue pro diploma."""
     coordinator = _coordinator(request)
-    try:
-        pend = student_iface.resolve_pendency(
-            pendency_external_id=external_id, coordinator=coordinator
-        )
-    except student_iface.StudentError as exc:
-        raise HttpError(422, str(exc)) from exc
+    pend = student_iface.resolve_pendency(
+        pendency_external_id=external_id, coordinator=coordinator
+    )
     return {
         "external_id": str(pend.external_id),
         "resolved": pend.resolved_at is not None,
@@ -639,7 +604,6 @@ def get_student_for_coordinator(request, external_id: str):
 # ── coordenador AGE NO LUGAR do cliente sem prática digital (proxy auditado; Victor 2026-06-16) ──
 # Mesmas ações do wizard do aluno, mas o coordenador posta POR ele (gate: coordenar o hub da matrícula;
 # `acted_by` logado). A IA valida igual; review → cai pros decides que já existem.
-_PROXY_RG_SLOTS = {"front": "rg_front", "back": "rg_back", "full": "rg_full"}
 
 
 class ProxyCepIn(Schema):
@@ -685,9 +649,7 @@ def coord_proxy_rg_photo(
     """Coordenador ENVIA a foto do RG (`front`|`back`|`full`) NO LUGAR do cliente. A IA valida normal;
     se cair em revisão, o coordenador decide pelo `/rg/decide` que já existe. Auditado."""
     coordinator, user_ext = _proxy_user(request, external_id)
-    real_slot = _PROXY_RG_SLOTS.get(slot)
-    if real_slot is None:
-        raise HttpError(422, "Slot inválido. Aceitos: front, back, full.")
+    real_slot = resolve_rg_slot(slot)
     logger.info(
         "leadership.acted_for",
         action="rg_photo",

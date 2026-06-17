@@ -17,6 +17,7 @@ from ninja.errors import AuthenticationError, HttpError
 from ninja.errors import ValidationError as NinjaValidationError
 
 from api.auth import JWTAuth
+from api.schemas import RefreshIn, TokenOut
 from users.exceptions import DomainError
 
 logger = structlog.get_logger()
@@ -106,3 +107,38 @@ def build_group(name: str, description: str) -> NinjaAPI:
         }
 
     return api
+
+
+# ── helpers compartilhados entre grupos (dedup da auditoria 2026-06-17) ───────
+RG_PHOTO_SLOTS = {"front": "rg_front", "back": "rg_back", "full": "rg_full"}
+
+
+def resolve_rg_slot(slot: str) -> str:
+    """Slot da borda (`front`/`back`/`full`) → slot interno do `documents`. Desconhecido →
+    `ValidationError(SLOT_INVALID)`. Dedup #3: clients + leadership tinham o mesmo mapa/validação."""
+    from users.exceptions import ValidationError
+
+    real = RG_PHOTO_SLOTS.get(slot)
+    if real is None:
+        raise ValidationError(
+            "Slot inválido. Aceitos: front, back, full.", code="SLOT_INVALID"
+        )
+    return real
+
+
+def add_auth_refresh(router) -> None:
+    """Registra o `POST /refresh` padrão (rotação de tokens) — idêntico nos 3 grupos (dedup #4).
+    Refresh inválido/expirado OU role trocada desde a emissão (`token_version`) → 401."""
+    from users.auth.jwt import service as jwt_service
+    from users.exceptions import Unauthorized
+
+    @router.post("/refresh", response=TokenOut, auth=None)
+    def refresh(request, payload: RefreshIn):
+        """Troca o `refresh_token` por um par NOVO (rotação); o front renova silencioso quando o
+        access expira, sem voltar pro OTP."""
+        try:
+            return jwt_service.refresh(payload.refresh_token)
+        except jwt_service.TokenError as exc:
+            raise Unauthorized(
+                "Sessão expirada — faça login novamente.", code="SESSION_EXPIRED"
+            ) from exc
