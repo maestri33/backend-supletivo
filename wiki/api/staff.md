@@ -9,9 +9,10 @@ a flag `is_superuser` no banco — o JWT só carrega `roles`. Casca fina (CONVEN
 - `POST /hubs` `{brand, coordinator_external_id?}` → cria um polo (nasce com endereço vazio).
 - `GET  /hubs` → lista todos os polos.
 - `GET  /promoters` → lista os promotores (pra escolher coordenador).
-- `PUT  /hubs/{external_id}/coordinator` `{coordinator_external_id}` → designa/troca o coordenador.
+- `PUT  /hubs/{external_id}/coordinator` `{coordinator_external_id}` → designa/troca o coordenador. **Resiliência (2026-06-17):** o próprio **staff (`is_superuser`) pode virar coordenador SEM ser promotor** — polo sem promotor ativo deixa de ser irresgatável (último degrau da hierarquia user→coord→staff).
 - `PUT  /hubs/{external_id}/default` → marca o polo PADRÃO (fallback de captação; único).
 - `PATCH /hubs/{external_id}/address` `{cep, number?, complement?}` → preenche o endereço do polo (ViaCEP; CEP inexistente → 422 `CEP_NOT_FOUND`).
+- `PUT  /users/{external_id}/phone` `{phone}` → **resgate de login (2026-06-17):** troca o telefone de quem perdeu o número e ficou trancado fora do OTP. Valida WhatsApp ativo no novo número + unicidade. Codes: `USER_NOT_FOUND` (404), `PHONE_INVALID`/`PHONE_NOT_ON_WHATSAPP` (422), `PHONE_EXISTS` (409).
 
 Respostas de erro: **401** (sem token), **403** (não-superuser), **422** (marca inválida /
 coordenador não-promotor / CEP inexistente), **404** (polo inexistente). Doc OpenAPI viva em `/api/v1/staff/docs`.

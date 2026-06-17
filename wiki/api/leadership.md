@@ -39,7 +39,7 @@ Gate de role: o login só dá tokens com a role `coordinator` ativa; coordenar o
 | GET | `/leads/{external_id}` | Detalhe do lead (cpf/email/checkout — "coord vê tudo") |
 | GET | `/enrollments` | Matrículas do polo (filtro `status`) |
 | GET | `/enrollments/{external_id}` | Detalhe da matrícula (visão rica do /me do aluno + fees) |
-| GET | `/reviews` | **5 filas de análise numa chamada só** — RG/selfie de matrícula, selfie de candidato, docs de student, entrevistas |
+| GET | `/reviews` | **6 filas de análise numa chamada só** — RG/selfie de matrícula, **documento + selfie de candidato**, docs de student, candidatos aguardando aprovação. **Resiliência (2026-06-17):** ao montar, varre `pending` que estourou o TTL (worker da IA morto) → `review`, pra não sumir da vista de ninguém |
 | GET | `/training/materials` | Lista de matérias **com gabarito** (visão de autoria) |
 
 > O escopo do polo é resolvido por `coordinator.hub_coordinated` (o hub que o user coordena). Não
@@ -77,6 +77,7 @@ aguardando aprovação — `extra: {expected_status}`).
 | GET  | `/candidates/{external_id}/selfie` | **Tela de detalhe (plan/15 D2):** foto + `analysis_status`/`analysis_reason` (motivo da IA). O coord decide **vendo**, não às cegas (antes decidia só com o nome na fila). `in_review: true` = tá na fila de decisão. |
 | POST | `/candidates/{external_id}/selfie/decide` | `{approve: bool, reason?}` — decide selfie em REVIEW (sim/não) |
 | POST | `/candidates/{external_id}/document/decide` | `{approve: bool, reason?}` — decide RG/CNH em REVIEW (sim/não FINAL; plan/15 B3). Aprovou → biometria + extração best-effort preenche os campos; reprovou → candidato é avisado pra reenviar. |
+| POST | `/candidates/{external_id}/document/reset` | **Resgate (2026-06-17):** zera o `doc_type` do candidato que fixou o tipo errado (escolheu RG, só tem CNH) e volta pra `documents`. Perfil/endereço/pix **intactos**. Sem isso, a única saída era recomeçar tudo. |
 
 Codes: `CANDIDATE_NOT_FOUND` (404), `NOT_HUB_COORDINATOR` (403), `SELFIE_NOT_IN_REVIEW` (422,
 `extra: {selfie_status}`), `DOC_NOT_IN_REVIEW` (422, `extra: {validation_status}`), `DOC_TYPE_NOT_SET`
@@ -96,6 +97,7 @@ cliente sem prática digital (postar documento/endereço/selfie por ele, auditad
 | POST | `/enrollments/{external_id}/address` | `{cep}` — **age-no-lugar**: posta o endereço (ViaCEP) pelo cliente |
 | POST | `/enrollments/{external_id}/documents/rg/photo/{slot}` | foto do RG (`front`\|`back`\|`full`) pelo cliente — IA valida igual |
 | POST | `/enrollments/{external_id}/selfie` | selfie (assinatura) pelo cliente — IA + biometria validam (review → `/selfie/decide`) |
+| PATCH | `/enrollments/{external_id}/profile` | **corrige identidade do OCR torta** (`mother_name`/`father_name`/`marital_status`/`nationality`/`birthplace`). **NÃO** mexe em `name`/`birth_date` (CPFHub manda) nem `pix`. Sem isso, dado errado ficava gravado pra sempre. |
 
 > "Agir-no-lugar" = mesmas funções do wizard do aluno, mas o coordenador posta POR ele (gate: coordenar
 > o hub da matrícula; `acted_by` logado). Se a IA cair em revisão, cai nos `/decide` que já existem.
