@@ -223,6 +223,10 @@ def list_reviews(request):
     return {
         "enrollment_rg": enrollment_reviews["rg"],
         "enrollment_selfie": enrollment_reviews["selfie"],
+        # documentos (RG/CNH) de CANDIDATOS em review — a IA fora do ar/em dúvida cai aqui pro
+        # coordenador decidir (fix da auditoria 2026-06-17: estava ausente → candidato travado
+        # em `documents` sem ninguém pra destravar; agora segue a hierarquia user→coord→staff).
+        "candidate_document": candidate_iface.list_document_reviews_for_hub(hub=hub),
         "candidate_selfie": candidate_iface.list_selfie_reviews_for_hub(hub=hub),
         "student_documents": student_iface.list_document_reviews_for_hub(hub=hub),
         "candidates_awaiting_approval": candidate_iface.list_awaiting_approval_for_hub(
@@ -385,6 +389,17 @@ def decide_candidate_document(request, external_id: str, payload: SelfieDecideIn
         coordinator=coordinator,
         approve=payload.approve,
         reason=payload.reason,
+    )
+
+
+@api.post("/candidates/{external_id}/document/reset", tags=["candidate"])
+def reset_candidate_doc_type(request, external_id: str):
+    """Coordenador DESTRAVA o candidato que fixou o tipo de documento errado (escolheu RG, só tem
+    CNH — ou vice-versa): zera o `doc_type` e volta pra etapa `documents`, perfil/endereço/pix
+    intactos. Sem isso, a única saída seria recomeçar tudo (Victor 2026-06-17: user→coord, sem dev)."""
+    coordinator = _coordinator(request)
+    return candidate_iface.reset_doc_type(
+        candidate_external_id=external_id, coordinator=coordinator
     )
 
 
@@ -631,6 +646,16 @@ class ProxyCepIn(Schema):
     cep: str
 
 
+class CorrectIdentityIn(Schema):
+    # campos de identidade derivados do DOCUMENTO (OCR) que o coordenador pode corrigir.
+    # name/birth_date NÃO entram (CPFHub é a fonte); pix tem validação própria.
+    mother_name: str | None = None
+    father_name: str | None = None
+    marital_status: str | None = None
+    nationality: str | None = None
+    birthplace: str | None = None
+
+
 def _proxy_user(request, external_id: str):
     """Gate do proxy: o coordenador coordena o hub da matrícula → devolve (coordinator, user_external_id)."""
     coordinator = _coordinator(request)
@@ -692,3 +717,16 @@ def coord_proxy_selfie(request, external_id: str, file: UploadedFile = File(...)
     )
     # mesmo contrato do wizard do cliente: o coordenador também recebe o ack de análise (poll/TTL).
     return {**enrollment_iface.me_dict(enr), **enrollment_iface.selfie_ack(enr)}
+
+
+@api.patch("/enrollments/{external_id}/profile", tags=["enrollment"])
+def coord_correct_identity(request, external_id: str, payload: CorrectIdentityIn):
+    """Coordenador CORRIGE a identidade que o OCR extraiu torta (filiação/estado civil/naturalidade/
+    nacionalidade) — sem isso o dado errado fica gravado pra sempre e só um db-edit conserta. NÃO
+    mexe em nome/nascimento (CPFHub manda) nem em pix. Auditado (Victor 2026-06-17: user→coord)."""
+    coordinator = _coordinator(request)
+    return enrollment_iface.coordinator_correct_identity(
+        enrollment_external_id=external_id,
+        coordinator=coordinator,
+        **payload.dict(exclude_none=True),
+    )

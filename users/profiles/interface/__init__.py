@@ -147,6 +147,17 @@ def set_pix(external_id: str, pix_key: str, pix_key_type: str | None = None) -> 
     return profile
 
 
+def set_phone(user, phone: str) -> Profile | None:
+    """Grava o telefone de login no profile — usado pelo resgate do staff (`auth.change_phone`)
+    quando o usuário perde o número e fica trancado fora do OTP. None se não tem profile."""
+    p = Profile.objects.filter(user=user).first()
+    if p is None:
+        return None
+    p.phone = phone
+    p.save(update_fields=["phone", "updated_at"])
+    return p
+
+
 __all__ = [
     "exists_cpf",
     "exists_phone",
@@ -159,4 +170,5 @@ __all__ = [
     "attach_address",
     "get_address",
     "set_pix",
+    "set_phone",
 ]

@@ -4,6 +4,6 @@ Fina de propósito — reexporta a lógica do `service`. A view (`users/auth/vie
 HTTP; o edge FastAPI (depois) chama a view por HTTP. A lógica não sai do Django (modelo B, §1).
 """
 
-from users.auth.service import check, login, recover, register
+from users.auth.service import change_phone, check, login, recover, register
 
-__all__ = ["register", "check", "recover", "login"]
+__all__ = ["register", "check", "recover", "login", "change_phone"]

@@ -169,6 +169,39 @@ def register(*, role: str, phone: str, cpf: str, email: str | None = None) -> di
     return {"external_id": str(user.external_id)}
 
 
+def change_phone(*, user_external_id: str, new_phone: str) -> dict:
+    """Troca o telefone de LOGIN de um usuário — resgate do STAFF (Victor 2026-06-17).
+
+    Cenário de beco-sem-saída em prod: o usuário perdeu o número/chip e não recebe mais o OTP →
+    fica TRANCADO fora do login, sem nenhuma rota (nem o staff tinha; só um db-edit destravava, o
+    que o Victor não quer). Aqui o staff atualiza o telefone, com as MESMAS garantias do register:
+    formato válido + o NOVO número tem WhatsApp ativo (senão o OTP não chega) + unicidade.
+
+    Trocar o canal de login é poder do STAFF (is_superuser), não do coordenador — é a ponta da
+    hierarquia de resgate user→coord→staff. Auditado no log (sem PII)."""
+    user = User.objects.filter(external_id=user_external_id).first()
+    if user is None:
+        raise NotFound("Usuário não encontrado.", code="USER_NOT_FOUND")
+    try:
+        new_phone = validation.validate_phone(new_phone)
+    except ValueError as exc:
+        raise ValidationError(str(exc), code="PHONE_INVALID") from exc
+
+    phone_exists, resolved_phone = _check_phone_whatsapp(new_phone)
+    if not phone_exists:
+        raise ValidationError(
+            "Telefone sem WhatsApp ativo.", code="PHONE_NOT_ON_WHATSAPP"
+        )
+    other = profiles.find_by_phone(resolved_phone)
+    if other is not None and other.user_id != user.id:
+        raise Conflict("Telefone já cadastrado em outra conta.", code="PHONE_EXISTS")
+
+    if profiles.set_phone(user, resolved_phone) is None:
+        raise NotFound("Perfil não encontrado.", code="PROFILE_NOT_FOUND")
+    logger.info("auth.phone_changed", external_id=str(user.external_id))
+    return {"external_id": str(user.external_id), "phone": resolved_phone}
+
+
 # ── check / recover ──────────────────────────────────────────────────────
 
 

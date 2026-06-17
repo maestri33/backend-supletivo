@@ -18,6 +18,7 @@ from finance import interface as finance_iface
 from hub import interface as hub_iface
 from integrations import status as integ_status
 from integrations.bank.asaas import onboarding as asaas_onboarding
+from users.auth import interface as auth_iface
 from users.profiles import interface as profiles
 from users.roles import interface as roles
 from users.roles.enrollment import interface as enrollment_iface
@@ -424,3 +425,19 @@ def list_users(request, role: str | None = None, limit: int = 200):
             }
         )
     return out
+
+
+class PhoneIn(Schema):
+    phone: str
+
+
+@api.put("/users/{external_id}/phone", tags=["staff"])
+def set_user_phone(request, external_id: str, payload: PhoneIn):
+    """RESGATE DE LOGIN (Victor 2026-06-17): o usuário perdeu o número/chip e não recebe mais o OTP
+    → fica trancado fora, sem rota nem pro coordenador. O staff troca o telefone (valida formato +
+    WhatsApp ativo no novo número + unicidade). É a ponta da hierarquia de resgate user→coord→staff;
+    trocar o canal de login é poder do staff, não do coordenador. Auditado."""
+    require_superuser(request.auth)
+    return auth_iface.change_phone(
+        user_external_id=external_id, new_phone=payload.phone
+    )

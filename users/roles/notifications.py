@@ -152,6 +152,11 @@ _MESSAGES: dict[str, str] = {
         "Boa notícia, {name}! ✅ Seu documento foi aprovado e o cadastro segue em frente. "
         "Continue o preenchimento, {name}."
     ),
+    # coordenador destravou o tipo de documento (candidato escolheu RG/CNH errado). → candidato.
+    "candidate.doc_type_reset": (
+        "{name}, liberamos o reenvio do seu documento — pode mandar a foto do tipo certo (RG ou CNH). "
+        "É só subir de novo pelo aplicativo, {name}. 📄"
+    ),
     # candidato concluiu a coleta e aguarda a APROVAÇÃO do coordenador (vira promotor). → coordenador.
     "candidate.awaiting_approval": (
         "{name}, um candidato concluiu o cadastro e aguarda a sua aprovação para virar promotor. "

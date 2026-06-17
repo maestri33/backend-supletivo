@@ -398,9 +398,13 @@ def patch_rg_section(*, user_external_id: str, **fields) -> dict:
     doc_payload = {k: fields[k] for k in _RG_DOC_FIELDS if fields.get(k) is not None}
     if doc_payload:
         documents_iface.update(user_external_id, {"rg": doc_payload})
-    profile_payload = {k: fields[k] for k in _RG_PROFILE_FIELDS if fields.get(k) is not None}
+    profile_payload = {
+        k: fields[k] for k in _RG_PROFILE_FIELDS if fields.get(k) is not None
+    }
     if profile_payload:
-        profiles.update_identity(enr.user, **profile_payload)  # identidade → Profile (correção)
+        profiles.update_identity(
+            enr.user, **profile_payload
+        )  # identidade → Profile (correção)
     _advance_rg(enr, user_external_id)
     # destrave do gate #10: selfie já aprovada que só esperava os campos → fecha a coleta agora
     from users.roles import _selfie
@@ -661,8 +665,12 @@ def _apply_rg_extracted(enr: Enrollment, rg, data: dict) -> None:
     # 2026-06-16: a identidade mora SÓ no Profile, nunca espalhada no enrollment).
     profiles.fill_identity(
         enr.user,
-        mother_name=_clean(data["mother_name"], 255) if data.get("mother_name") else None,
-        father_name=_clean(data["father_name"], 255) if data.get("father_name") else None,
+        mother_name=_clean(data["mother_name"], 255)
+        if data.get("mother_name")
+        else None,
+        father_name=_clean(data["father_name"], 255)
+        if data.get("father_name")
+        else None,
         birthplace=_clean(data["birthplace"], 128) if data.get("birthplace") else None,
         birth_date=_date(data.get("birth_date")),
     )
@@ -1619,10 +1627,77 @@ def detail_for_hub(*, enrollment_external_id: str, coordinator) -> dict:
     return {**me_dict(enr), "status": enr.status, "fees": fee_facts(enr)}
 
 
+# campos de identidade DERIVADOS DO DOCUMENTO (OCR) que o coordenador pode corrigir. NÃO inclui
+# `name`/`birth_date` (CPFHub é a fonte autoritativa) nem `pix` (validação própria) — Victor 2026-06-17.
+_COORD_CORRECTABLE = ("mother_name", "father_name", "marital_status", "nationality", "birthplace")
+
+
+def coordinator_correct_identity(*, enrollment_external_id: str, coordinator, **fields) -> dict:
+    """Coordenador corrige campos de identidade do Profile que o OCR extraiu errado (filiação, estado
+    civil, naturalidade, nacionalidade) — sem isso uma extração torta fica gravada pra sempre e só um
+    db-edit conserta (Victor 2026-06-17: user→coord, sem dev). SOBRESCREVE via `profiles.update_identity`.
+
+    NÃO mexe em `name`/`birth_date` (CPFHub manda) nem em `pix`. Gate: coordenar o hub da matrícula."""
+    enr = _enrollment_for_coordinator(enrollment_external_id, coordinator)
+    clean = {k: v for k, v in fields.items() if k in _COORD_CORRECTABLE and v is not None}
+    if not clean:
+        raise DomainError(
+            "Nenhum campo de identidade corrigível foi informado.", code="NO_FIELDS"
+        )
+    profiles.update_identity(enr.user, **clean)
+    logger.info(
+        "leadership.acted_for",
+        action="correct_identity",
+        enrollment=enrollment_external_id,
+        fields=list(clean.keys()),
+        by=str(coordinator.external_id),
+    )
+    return {**me_dict(enr), "status": enr.status}
+
+
+def _sweep_stale_reviews(hub) -> None:
+    """Resiliência (Victor 2026-06-17): se o worker da IA morreu/reiniciou (OOM), a análise fica
+    PENDING calada — o TTL só vira `review` quando o PRÓPRIO aluno relê o /me. Se ele abandona, a
+    análise some da vista de todos e só um db-edit destrava (= o que o Victor não quer em prod).
+
+    Aqui, ao montar a fila do coordenador, todo PENDING que estourou o TTL VIRA `review` — assim
+    aparece pra ele decidir (hierarquia user→coord, sem dev/flash de DB). Bulk update barato; uma
+    vez em `review` não casa mais o filtro `=PENDING`."""
+    from datetime import timedelta
+
+    from django.utils import timezone
+
+    from users.documents.models import RG
+    from users.roles import _analysis, _selfie
+
+    # selfie: o campo `selfie_taken_at` data o início → bulk update direto.
+    cutoff = timezone.now() - timedelta(seconds=_analysis.ttl_seconds())
+    Enrollment.objects.filter(
+        hub=hub,
+        selfie_status=_selfie.SelfieStatus.PENDING,
+        selfie_taken_at__lt=cutoff,
+    ).update(
+        selfie_status=_selfie.SelfieStatus.REVIEW,
+        selfie_description=_analysis.stale_reason(),
+    )
+    # RG: o model não tem `updated_at`; o início vive no JSON (`analysis_started_at`), igual ao flip
+    # do /me do aluno (`_rg_started_at`). Loop curto (só os PENDING do polo) — sem referência → não mexe.
+    user_ids = list(Enrollment.objects.filter(hub=hub).values_list("user_id", flat=True))
+    for rg in RG.objects.filter(
+        document__user_id__in=user_ids, validation_status=_analysis.PENDING
+    ):
+        if _analysis.is_stale(rg.validation_status, _rg_started_at(rg)):
+            rg.validation_status = _analysis.REVIEW
+            rg.save(update_fields=["validation_status"])
+
+
 def list_reviews_for_hub(*, hub) -> dict:
     """Análises da MATRÍCULA paradas esperando decisão do coordenador (RG e selfie em revisão).
-    Cada item aponta pro POST de decisão que já existe (`/rg/decide`, `/selfie/decide`)."""
+    Cada item aponta pro POST de decisão que já existe (`/rg/decide`, `/selfie/decide`).
+    Antes de listar, varre PENDING órfão (worker morto) → review (`_sweep_stale_reviews`)."""
     from users.roles import _analysis, _selfie
+
+    _sweep_stale_reviews(hub)
 
     def _item(enr: Enrollment) -> dict:
         p = profiles.get(enr.user)

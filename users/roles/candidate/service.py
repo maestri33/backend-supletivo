@@ -938,11 +938,44 @@ def _notify_doc_event(
         logger.warning("candidate.notify_doc_event_failed", event=event, error=str(exc))
 
 
+def _sweep_stale_reviews(hub) -> None:
+    """Resiliência (Victor 2026-06-17): worker da IA morto → análise fica PENDING calada e o
+    candidato some da fila de TODOS (só destrava com db-edit, o que o Victor não quer em prod).
+    Ao montar a fila do coordenador, PENDING que estourou o TTL VIRA `review` (documento RG/CNH +
+    selfie) — aparece pra ele decidir (hierarquia user→coord). Bulk update; idempotente."""
+    from datetime import timedelta
+
+    from django.utils import timezone
+
+    from users.documents.models import CNH, RG
+    from users.roles import _analysis
+    from users.roles._selfie import SelfieStatus
+
+    # selfie: `selfie_taken_at` data o início → bulk update.
+    cutoff = timezone.now() - timedelta(seconds=_analysis.ttl_seconds())
+    Candidate.objects.filter(
+        hub=hub, selfie_status=SelfieStatus.PENDING, selfie_taken_at__lt=cutoff
+    ).update(
+        selfie_status=SelfieStatus.REVIEW, selfie_description=_analysis.stale_reason()
+    )
+    # documento (RG/CNH): sem `updated_at` no model; o início vive no JSON (`analysis_started_at`),
+    # igual ao ack do candidato (`_doc_started_at`). Loop curto — sem referência → não mexe.
+    user_ids = list(Candidate.objects.filter(hub=hub).values_list("user_id", flat=True))
+    for model in (RG, CNH):
+        for sub in model.objects.filter(
+            document__user_id__in=user_ids, validation_status=_analysis.PENDING
+        ):
+            if _analysis.is_stale(sub.validation_status, _doc_started_at(sub)):
+                sub.validation_status = _analysis.REVIEW
+                sub.save(update_fields=["validation_status"])
+
+
 def list_document_reviews_for_hub(*, hub) -> list[dict]:
     """Candidatos do polo com o documento parado em REVISÃO (decisão do coordenador — plan/15 B3).
-    Cada item aponta pro POST de decisão que existe."""
+    Cada item aponta pro POST de decisão que existe. Antes, varre PENDING órfão → review."""
     from users.roles import _document_ai as doc_ai
 
+    _sweep_stale_reviews(hub)
     out = []
     qs = (
         Candidate.objects.filter(hub=hub, doc_type__isnull=False)
@@ -1319,6 +1352,71 @@ def _notify_awaiting_approval(cand: Candidate) -> None:
 # ── aprovação do candidato → PROMOTOR (coordenador, grupo leadership) ────────
 
 
+def reset_doc_type(*, candidate_external_id: str, coordinator) -> dict:
+    """Coordenador DESTRAVA o candidato que fixou o tipo de documento errado (escolheu RG, só tem
+    CNH — ou vice-versa). Sem isso o `upload_document_photo` barra com `DOC_TYPE_LOCKED` e a única
+    saída seria recomeçar TODO o cadastro (perdendo perfil/endereço/pix) ou um db-edit (Victor
+    2026-06-17: hierarquia user→coord, sem dev em prod).
+
+    Zera o `doc_type` e volta pra etapa `documents` — perfil/endereço/pix ficam INTACTOS; a próxima
+    foto define o tipo certo. O sub-doc antigo (RG/CNH) é ignorado (a leitura chaveia por `doc_type`)."""
+    cand = (
+        Candidate.objects.filter(external_id=candidate_external_id)
+        .select_related("hub", "user")
+        .first()
+    )
+    if cand is None:
+        raise CandidateError("Candidato não encontrado.", code="CANDIDATE_NOT_FOUND")
+    if cand.hub.coordinator_id != coordinator.id:
+        raise Forbidden(
+            "Você não coordena o polo deste candidato.", code="NOT_HUB_COORDINATOR"
+        )
+    if cand.status in (_S.COMPLETED, _S.APPROVED, _S.REJECTED):
+        raise Conflict(
+            "O candidato já saiu da coleta — não dá pra trocar o tipo de documento.",
+            code="WRONG_STATUS",
+            extra={"expected_status": cand.status},
+        )
+    if not cand.doc_type:
+        raise CandidateError(
+            "O candidato ainda não escolheu um tipo de documento.",
+            code="DOC_TYPE_NOT_SET",
+        )
+    cand.doc_type = None
+    cand.save(update_fields=["doc_type", "updated_at"])
+    if cand.status != _S.DOCUMENTS:
+        _set_status(cand, _S.DOCUMENTS)
+    logger.info(
+        "candidate.doc_type_reset",
+        external_id=str(cand.external_id),
+        by=str(coordinator.external_id),
+    )
+    _notify_doc_type_reset(cand)
+    return me_dict(cand)
+
+
+def _notify_doc_type_reset(cand: Candidate) -> None:
+    """Avisa o candidato que pode reenviar o documento (o coordenador destravou o tipo)."""
+    from notify.interface.send import send
+    from users.roles import notifications as msgs
+
+    p = profiles.get(cand.user)
+    try:
+        send(
+            text=msgs.text(
+                "candidate.doc_type_reset", name=msgs.first_name(p.name if p else None)
+            ),
+            caller="candidate.doc_type_reset",
+            phone=p.phone if p else None,
+            email=p.email if p else None,
+            email_channel=bool(p and p.email),
+            gender=p.gender if p else None,
+            idempotency_key=f"cand_doctype_reset_{cand.external_id}_{cand.updated_at.timestamp()}",
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("candidate.notify_doc_type_reset_failed", error=str(exc))
+
+
 def approve_candidate(*, candidate_external_id: str, coordinator) -> Candidate:
     """Coordenador do polo APROVA o candidato → promove candidate→PROMOTOR + cria Promoter + atribui
     as matérias FIXAS (treino). Se houver matéria obrigatória pendente, o promotor nasce TRAVADO
@@ -1486,9 +1584,11 @@ def list_awaiting_approval_for_hub(*, hub) -> list[dict]:
 def list_selfie_reviews_for_hub(*, hub) -> list[dict]:
     """Candidatos do polo com a selfie parada em REVISÃO (decisão do coordenador — plan/14).
 
-    Cada item aponta pro POST de decisão que já existe (`/candidates/{ext}/selfie/decide`)."""
+    Cada item aponta pro POST de decisão que já existe (`/candidates/{ext}/selfie/decide`).
+    Antes, varre PENDING órfão (worker morto) → review (`_sweep_stale_reviews`)."""
     from users.roles._selfie import SelfieStatus
 
+    _sweep_stale_reviews(hub)
     out = []
     qs = (
         Candidate.objects.filter(hub=hub, selfie_status=SelfieStatus.REVIEW)

@@ -25,22 +25,40 @@ class HubError(Exception):
 
 
 def _coordinator_by_external_id(external_id: str) -> User:
-    """Resolve o User do coordenador por external_id e exige que seja PROMOTOR (spec hub/coordinator)."""
+    """Resolve o User do coordenador por external_id.
+
+    Regra: precisa ser PROMOTOR ativo (spec hub/coordinator) — É A REGRA NORMAL.
+    EXCEÇÃO (hierarquia de resgate user→coord→staff, Victor 2026-06-17): o **staff**
+    (`is_superuser`) pode ser coordenador SEM ser promotor. Por quê: quando o coordenador
+    de um polo trava e não há promotor ativo pra herdar, o staff é o último recurso —
+    se exigisse promoter, o polo ficaria irresgatável. Staff = supremo resgate.
+    """
     user = User.objects.filter(external_id=external_id).first()
     if user is None:
         raise HubError("coordinator_not_found")
+    if user.is_superuser:
+        return user  # staff destrava qualquer polo (último recurso da hierarquia de resgate)
     if "promoter" not in roles.active_roles(user):
         raise HubError("coordinator_not_promoter")
     return user
 
 
 def _ensure_coordinator_role(user: User) -> None:
-    """Garante a role `coordinator` ativa no user (idempotente). A regra exige promoter (já validado).
+    """Garante a role `coordinator` ativa no user (idempotente).
+
+    Caminho normal: `assign('coordinator')` valida o catálogo (exige promoter ativo) e bump
+    do token_version. **EXCEÇÃO (Victor 2026-06-17):** se o user é STAFF (`is_superuser`),
+    usa `grant()` direto — pula a regra do catálogo (staff é o último resgate, não precisa
+    ser promotor) e NÃO bump o token (staff não toma OTP ao destravar polo).
 
     Troca de role → notifica o novo coordenador (Victor: toda troca de role avisa os envolvidos)."""
-    if "coordinator" not in roles.active_roles(user):
+    if "coordinator" in roles.active_roles(user):
+        return
+    if user.is_superuser:
+        roles.grant(user, "coordinator")  # pula o catálogo + sem bump (overlay de resgate)
+    else:
         roles.assign(user, "coordinator")
-        _notify_coordinator_assigned(user)
+    _notify_coordinator_assigned(user)
 
 
 def _notify_coordinator_assigned(user: User) -> None:
