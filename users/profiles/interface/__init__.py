@@ -43,6 +43,52 @@ def get(user) -> Profile | None:
     return Profile.objects.filter(user=user).first()
 
 
+_IDENTITY_FIELDS = (
+    "name",
+    "birth_date",
+    "mother_name",
+    "father_name",
+    "marital_status",
+    "nationality",
+    "birthplace",
+    "pix_key",
+    "pix_key_type",
+)
+
+
+def fill_identity(user, **fields) -> Profile | None:
+    """Grava campos de IDENTIDADE no Profile — o lugar ÚNICO da pessoa (Victor 2026-06-16). SÓ os
+    que estão VAZIOS (não sobrescreve o que já existe). Usado pelo `set_profile`, pela extração do
+    OCR do documento e pela validação do Pix. Ignora chaves desconhecidas e valores None."""
+    p = Profile.objects.filter(user=user).first()
+    if p is None:
+        return None
+    changed = []
+    for field, value in fields.items():
+        if field in _IDENTITY_FIELDS and value is not None and not getattr(p, field, None):
+            setattr(p, field, value)
+            changed.append(field)
+    if changed:
+        p.save(update_fields=[*changed, "updated_at"])
+    return p
+
+
+def update_identity(user, **fields) -> Profile | None:
+    """Atualiza campos de IDENTIDADE no Profile — SOBRESCREVE (correção do usuário/coordenador). Par
+    do `fill_identity` (que só preenche vazios). Ignora chaves desconhecidas e valores None."""
+    p = Profile.objects.filter(user=user).first()
+    if p is None:
+        return None
+    changed = []
+    for field, value in fields.items():
+        if field in _IDENTITY_FIELDS and value is not None:
+            setattr(p, field, value)
+            changed.append(field)
+    if changed:
+        p.save(update_fields=[*changed, "updated_at"])
+    return p
+
+
 def get_map(users) -> dict:
     """Profiles de vários Users numa query só — evita N+1 nas listagens. Devolve `{user_id: Profile}`."""
     return {p.user_id: p for p in Profile.objects.filter(user__in=list(users))}
@@ -87,13 +133,17 @@ def get_address(external_id: str):
     return profile.address if profile else None
 
 
-def set_pix(external_id: str, pix_key: str) -> Profile | None:
-    """Grava a chave Pix no profile. Só o campo — validação Asaas/DICT é ciclo do `candidate`."""
+def set_pix(external_id: str, pix_key: str, pix_key_type: str | None = None) -> Profile | None:
+    """Grava a chave Pix (+ tipo) no profile — o lugar canônico (finance usa no payout)."""
     profile = find_by_external_id(external_id)
     if profile is None:
         return None
     profile.pix_key = pix_key
-    profile.save(update_fields=["pix_key"])
+    fields = ["pix_key"]
+    if pix_key_type is not None:
+        profile.pix_key_type = pix_key_type
+        fields.append("pix_key_type")
+    profile.save(update_fields=fields)
     return profile
 
 

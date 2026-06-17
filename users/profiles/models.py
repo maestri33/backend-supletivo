@@ -42,6 +42,21 @@ class Profile(models.Model):
     name = models.CharField("nome", max_length=200, null=True, blank=True)
     birth_date = models.DateField("data de nascimento", null=True, blank=True)
     pix_key = models.CharField("chave Pix", max_length=140, null=True, blank=True)
+    pix_key_type = models.CharField(
+        "tipo da chave Pix", max_length=10, null=True, blank=True
+    )
+    # IDENTIDADE CENTRALIZADA AQUI (Victor 2026-06-16): filiação/estado civil/nacionalidade/
+    # naturalidade moram SÓ no Profile. O que o OCR extrai do documento é gravado aqui — NUNCA
+    # espalhado nos models de processo (candidate/enrollment). O Profile é o lugar único da pessoa.
+    mother_name = models.CharField("nome da mãe", max_length=255, null=True, blank=True)
+    father_name = models.CharField("nome do pai", max_length=255, null=True, blank=True)
+    marital_status = models.CharField(
+        "estado civil", max_length=32, null=True, blank=True
+    )
+    nationality = models.CharField(
+        "nacionalidade", max_length=64, null=True, blank=True
+    )
+    birthplace = models.CharField("naturalidade", max_length=128, null=True, blank=True)
     address = models.OneToOneField(
         "users.Address",
         on_delete=models.SET_NULL,

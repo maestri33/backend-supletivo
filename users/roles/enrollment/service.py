@@ -175,23 +175,24 @@ def me_dict(enr: Enrollment) -> dict:
         enr
     )  # TTL guard (proposta #2): pending estourado → review, aqui também
     user_ext = str(enr.user.external_id)
+    p = profiles.get(enr.user)
 
     profile = None
-    if any(
+    if p and any(
         (
-            enr.mother_name,
-            enr.father_name,
-            enr.marital_status,
-            enr.birthplace,
-            enr.nationality,
+            p.mother_name,
+            p.father_name,
+            p.marital_status,
+            p.birthplace,
+            p.nationality,
         )
     ):
         profile = {
-            "mother_name": enr.mother_name,
-            "father_name": enr.father_name,
-            "marital_status": enr.marital_status,
-            "birthplace": enr.birthplace,
-            "nationality": enr.nationality,
+            "mother_name": p.mother_name,
+            "father_name": p.father_name,
+            "marital_status": p.marital_status,
+            "birthplace": p.birthplace,
+            "nationality": p.nationality,
         }
 
     rg_data = (documents_iface.get_by_external_id(user_ext) or {}).get("rg") or {}
@@ -216,7 +217,7 @@ def me_dict(enr: Enrollment) -> dict:
             # MESMA régua da seção (doc + perfil) — é a lista que trava a selfie (proposta #10)
             "missing_fields": [
                 *(f for f in _RG_DOC_FIELDS if not rg_data.get(f)),
-                *(f for f in _RG_PROFILE_FIELDS if not getattr(enr, f)),
+                *(f for f in _RG_PROFILE_FIELDS if not getattr(p, f, None)),
             ],
         }
 
@@ -354,11 +355,11 @@ def _rg_section_dict(enr: Enrollment) -> dict:
         "number": rg.number if rg else None,
         "issuing_agency": rg.issuing_agency if rg else None,
         "issue_date": rg.issue_date.isoformat() if (rg and rg.issue_date) else None,
-        "mother_name": enr.mother_name,
-        "father_name": enr.father_name,
-        "birthplace": enr.birthplace,
-        "marital_status": enr.marital_status,
-        "nationality": enr.nationality,
+        "mother_name": p.mother_name if p else None,
+        "father_name": p.father_name if p else None,
+        "birthplace": p.birthplace if p else None,
+        "marital_status": p.marital_status if p else None,
+        "nationality": p.nationality if p else None,
     }
     result = (rg.validation_result or {}) if rg else {}
     return {
@@ -395,11 +396,9 @@ def patch_rg_section(*, user_external_id: str, **fields) -> dict:
     doc_payload = {k: fields[k] for k in _RG_DOC_FIELDS if fields.get(k) is not None}
     if doc_payload:
         documents_iface.update(user_external_id, {"rg": doc_payload})
-    enr_changed = [k for k in _RG_PROFILE_FIELDS if fields.get(k) is not None]
-    for k in enr_changed:
-        setattr(enr, k, fields[k])
-    if enr_changed:
-        enr.save(update_fields=[*enr_changed, "updated_at"])
+    profile_payload = {k: fields[k] for k in _RG_PROFILE_FIELDS if fields.get(k) is not None}
+    if profile_payload:
+        profiles.update_identity(enr.user, **profile_payload)  # identidade → Profile (correção)
     _advance_rg(enr, user_external_id)
     # destrave do gate #10: selfie já aprovada que só esperava os campos → fecha a coleta agora
     from users.roles import _selfie
@@ -656,24 +655,15 @@ def _apply_rg_extracted(enr: Enrollment, rg, data: dict) -> None:
     if changed:
         rg.save(update_fields=changed)
 
-    enr_changed = []
-    for field, limit in (
-        ("mother_name", 255),
-        ("father_name", 255),
-        ("birthplace", 128),
-    ):
-        if not getattr(enr, field) and data.get(field):
-            setattr(enr, field, _clean(data[field], limit))
-            enr_changed.append(field)
-    if enr_changed:
-        enr.save(update_fields=[*enr_changed, "updated_at"])
-
-    p = profiles.get(enr.user)
-    if p and not p.birth_date:
-        bd = _date(data.get("birth_date"))
-        if bd:
-            p.birth_date = bd
-            p.save(update_fields=["birth_date"])
+    # filiação/naturalidade + nascimento extraídos do documento → CENTRALIZADO no Profile (Victor
+    # 2026-06-16: a identidade mora SÓ no Profile, nunca espalhada no enrollment).
+    profiles.fill_identity(
+        enr.user,
+        mother_name=_clean(data["mother_name"], 255) if data.get("mother_name") else None,
+        father_name=_clean(data["father_name"], 255) if data.get("father_name") else None,
+        birthplace=_clean(data["birthplace"], 128) if data.get("birthplace") else None,
+        birth_date=_date(data.get("birth_date")),
+    )
 
 
 def _finish_rg(

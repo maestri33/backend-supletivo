@@ -125,16 +125,15 @@ def me_dict(cand: Candidate) -> dict:
     p = profiles.get(cand.user)
 
     profile = None
-    if any(getattr(cand, f) for f in _PROFILE_FIELDS):
+    if p and any(getattr(p, f, None) for f in _PROFILE_FIELDS):
         profile = {
-            "mother_name": cand.mother_name,
-            "father_name": cand.father_name,
-            "birthplace": cand.birthplace,
-            "marital_status": cand.marital_status,
-            "nationality": cand.nationality,
-            # do CPFHub/extração — NÃO editáveis pelo candidato
-            "name": p.name if p else None,
-            "birth_date": p.birth_date.isoformat() if p and p.birth_date else None,
+            "mother_name": p.mother_name,
+            "father_name": p.father_name,
+            "birthplace": p.birthplace,
+            "marital_status": p.marital_status,
+            "nationality": p.nationality,
+            "name": p.name,
+            "birth_date": p.birth_date.isoformat() if p.birth_date else None,
         }
 
     address = address_iface.as_public_dict(address_iface.get_by_external_id(user_ext))
@@ -164,16 +163,15 @@ def set_profile(
     nationality=None,
 ) -> dict:
     cand = _require(user_external_id, _S.STARTED, _S.PROFILE)
-    for field, value in (
-        ("mother_name", mother_name),
-        ("father_name", father_name),
-        ("marital_status", marital_status),
-        ("birthplace", birthplace),
-        ("nationality", nationality),
-    ):
-        if value is not None:
-            setattr(cand, field, value)
-    cand.save()
+    # identidade → SÓ no Profile (Victor 2026-06-16), nunca no candidate
+    profiles.fill_identity(
+        cand.user,
+        mother_name=mother_name,
+        father_name=father_name,
+        marital_status=marital_status,
+        birthplace=birthplace,
+        nationality=nationality,
+    )
     if cand.status == _S.STARTED:
         _set_status(cand, _S.PROFILE)
     return me_dict(cand)
@@ -260,9 +258,7 @@ def patch_document_section(*, user_external_id, **fields) -> dict:
         k: fields[k] for k in _DOC_PROFILE_FIELDS if fields.get(k) is not None
     }
     if profile_payload:
-        for k, v in profile_payload.items():
-            setattr(cand, k, v)
-        cand.save(update_fields=[*profile_payload.keys(), "updated_at"])
+        profiles.update_identity(cand.user, **profile_payload)  # identidade → Profile (correção)
     _advance_documents(cand, user_external_id)
     return me_dict(cand)  # resposta canônica
 
@@ -712,25 +708,15 @@ def _apply_doc_extracted(cand: Candidate, sub, data: dict) -> None:
     if sub_changed:
         sub.save(update_fields=sub_changed)
 
-    cand_changed = []
-    for field, limit in (
-        ("mother_name", 255),
-        ("father_name", 255),
-        ("birthplace", 128),
-    ):
-        if not getattr(cand, field) and data.get(field):
-            setattr(cand, field, _clean(data[field], limit))
-            cand_changed.append(field)
-    if cand_changed:
-        cand.save(update_fields=[*cand_changed, "updated_at"])
-
-    # Profile.birth_date (espelho do enrollment)
-    p = profiles.get(cand.user)
-    if p and not p.birth_date and data.get("birth_date"):
-        bd = _date(data["birth_date"])
-        if bd:
-            p.birth_date = bd
-            p.save(update_fields=["birth_date"])
+    # filiação/naturalidade + nascimento extraídos do documento → CENTRALIZADO no Profile
+    # (Victor 2026-06-16: a identidade mora SÓ no Profile, nunca espalhada no candidate).
+    profiles.fill_identity(
+        cand.user,
+        mother_name=_clean(data["mother_name"], 255) if data.get("mother_name") else None,
+        father_name=_clean(data["father_name"], 255) if data.get("father_name") else None,
+        birthplace=_clean(data["birthplace"], 128) if data.get("birthplace") else None,
+        birth_date=_date(data.get("birth_date")),
+    )
 
 
 def _finish_doc(
@@ -1001,13 +987,10 @@ def set_pix(*, user_external_id, key: str, key_type: str) -> dict:
             extra={"reason": str(exc)},
         ) from exc
 
-    profiles.set_pix(
-        user_external_id, key.strip()
-    )  # chave canônica no Profile (finance usa no payout)
-    cand.pix_key = key.strip()
-    cand.pix_key_type = key_type.strip().upper()
+    # chave Pix canônica → SÓ no Profile (Victor 2026-06-16); no candidate fica só o flag de processo.
+    profiles.set_pix(user_external_id, key.strip(), key_type.strip().upper())
     cand.pix_validated = True
-    cand.save(update_fields=["pix_key", "pix_key_type", "pix_validated", "updated_at"])
+    cand.save(update_fields=["pix_validated", "updated_at"])
     if cand.status == _S.DOCUMENTS:
         _set_status(cand, _S.PIX)
     logger.info("candidate.pix_validated", external_id=str(cand.external_id))
@@ -1466,13 +1449,13 @@ def candidate_detail_for_coordinator(*, candidate_external_id: str, coordinator)
             "email": p.email if p else None,
         },
         "doc_type": cand.doc_type,
-        "mother_name": cand.mother_name,
-        "father_name": cand.father_name,
-        "marital_status": cand.marital_status,
-        "birthplace": cand.birthplace,
-        "nationality": cand.nationality,
-        "pix_key": cand.pix_key,
-        "pix_key_type": cand.pix_key_type,
+        "mother_name": p.mother_name if p else None,
+        "father_name": p.father_name if p else None,
+        "marital_status": p.marital_status if p else None,
+        "birthplace": p.birthplace if p else None,
+        "nationality": p.nationality if p else None,
+        "pix_key": p.pix_key if p else None,
+        "pix_key_type": p.pix_key_type if p else None,
         "pix_validated": cand.pix_validated,
         "selfie_status": cand.selfie_status,
         "selfie_image": cand.selfie_image,

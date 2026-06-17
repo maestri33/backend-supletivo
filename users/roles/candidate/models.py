@@ -63,15 +63,8 @@ class Candidate(ExternalIdModel):
         blank=True,
         db_index=True,
     )
-    # dados pessoais extras (etapa profile) — porte do legado. «PENDÊNCIA» (igual enrollment): destino/conjunto.
-    mother_name = models.CharField(max_length=255, null=True, blank=True)
-    father_name = models.CharField(max_length=255, null=True, blank=True)
-    marital_status = models.CharField(max_length=32, null=True, blank=True)
-    birthplace = models.CharField(max_length=128, null=True, blank=True)
-    nationality = models.CharField(max_length=64, null=True, blank=True)
-    # chave PIX (etapa pix) — validada no Asaas/DICT (a chave canônica também vai pro Profile).
-    pix_key = models.CharField(max_length=255, null=True, blank=True)
-    pix_key_type = models.CharField(max_length=10, null=True, blank=True)
+    # identidade (filiação/estado civil/naturalidade/nacionalidade) + chave Pix → CENTRALIZADAS no
+    # Profile (Victor 2026-06-16: a pessoa mora SÓ no Profile). Aqui fica só o flag de PROCESSO.
     pix_validated = models.BooleanField(default=False)
     # selfie (etapa selfie) — "assinar o contrato"; validação IA em 3 estados + revisão do coordenador.
     selfie_image = models.CharField(max_length=255, null=True, blank=True)
