@@ -27,7 +27,7 @@ REQUIRED_DOC_TYPES: tuple[str, ...] = (
 MALE_ONLY_DOC_TYPES: tuple[str, ...] = (_T.MILITARY,)
 
 # Prompt por tipo: a IA descreve a foto e decide. O service espera a resposta começar com
-# "APROVADO" ou "REPROVADO". Best-effort: IA fora do ar/ambígua → fica PENDING (não auto-aprova).
+# "APROVADO" ou "REPROVADO". Best-effort: IA fora do ar/ambígua → fica REVIEW (coordenador decide; não auto-aprova).
 _BASE_PROMPT = (
     "Você valida o documento de um aluno. Responda em português começando OBRIGATORIAMENTE "
     "com a palavra APROVADO ou REPROVADO, seguida de uma justificativa curta. "

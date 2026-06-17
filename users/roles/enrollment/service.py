@@ -1,11 +1,13 @@
 """Lógica do enrollment (matrícula).
 
-- **6a** — nascimento (`create_from_lead`, chamado pelo hook do lead pago). ✅ smoke in-process.
-- **6b** — funil de coleta (perfil → endereço → RG → educação → selfie até `awaiting_release`).
-- **6c** — liberação do coordenador (`awaiting_release` → promove `enrollment→student` + COMPLETED).
+- **6a** — nascimento (`create_from_lead`, chamado pelo hook do lead pago).
+- **6b** — funil de coleta DOCUMENTO-PRIMEIRO (`rg → address → education → selfie` até
+  `awaiting_release`); a extração do RG povoa o perfil (plan/13). A etapa `started`/perfil não existe mais.
+- **6c** — fase da taxa + `conclude` do coordenador (plan/14): paga/agenda as 2 parcelas e promove
+  `enrollment→student` (síncrono, não espera o pagamento; o `release` antigo foi removido).
 
-⚠️ **6b/6c NÃO TESTADOS** (nem in-process completo, nem com aluno real). Reusa `users/address`,
-`users/documents`, `integrations/ai` (visão da selfie, best-effort), `users/roles`, `notify`.
+Provado real fim-a-fim (RG/selfie reais, plan/13 2026-06-11; student→veteran 2026-06-06). Reusa
+`users/address`, `users/documents`, `integrations/ai` (visão da selfie, best-effort), `users/roles`, `notify`.
 """
 
 from __future__ import annotations
@@ -410,7 +412,7 @@ def patch_rg_section(*, user_external_id: str, **fields) -> dict:
     )  # resposta canônica (proposta #3): o rg detalhado segue no GET da seção
 
 
-def upload_rg_photo(*, user_external_id: str, slot: str, upload) -> str:
+def upload_rg_photo(*, user_external_id: str, slot: str, upload) -> dict:
     """Foto do RG (slot `rg_front`/`rg_back`/`rg_full`), dentro da seção `rg` — plan/12.
 
     Salva (PDF vira JPEG no `documents`), re-zera a validação e ENFILEIRA o pipeline de IA
@@ -791,15 +793,13 @@ def decide_rg(
     (sem veto); reprovou → volta pro aluno refazer (com o motivo)."""
     from users.roles import _document_ai as doc_ai
 
-    enr = get_by_external_id(enrollment_external_id)
-    if enr is None:
-        raise EnrollmentError("enrollment_not_found")
-    if enr.hub.coordinator_id != coordinator.id:
-        raise EnrollmentError("not_hub_coordinator")
+    enr = _enrollment_for_coordinator(enrollment_external_id, coordinator)
     rg = documents_iface.get_rg(str(enr.user.external_id))
     if rg is None or rg.validation_status != doc_ai.REVIEW:
         raise EnrollmentError(
-            f"rg_not_in_review:{rg.validation_status if rg else 'missing'}"
+            "O RG não está em revisão.",
+            code="RG_NOT_IN_REVIEW",
+            extra={"rg_validation_status": rg.validation_status if rg else "missing"},
         )
     note = (reason or "").strip() or (
         "aprovado pelo coordenador" if approve else "reprovado pelo coordenador"
@@ -1136,13 +1136,13 @@ def decide_selfie(
     """Coordenador do hub decide a selfie em REVISÃO (sim/não). aprova→aguarda liberação; reprova→refazer."""
     from users.roles import _selfie
 
-    enr = get_by_external_id(enrollment_external_id)
-    if enr is None:
-        raise EnrollmentError("enrollment_not_found")
-    if enr.hub.coordinator_id != coordinator.id:
-        raise EnrollmentError("not_hub_coordinator")
+    enr = _enrollment_for_coordinator(enrollment_external_id, coordinator)
     if enr.selfie_status != _selfie.REVIEW:
-        raise EnrollmentError(f"selfie_not_in_review:{enr.selfie_status}")
+        raise EnrollmentError(
+            "A selfie não está em revisão.",
+            code="SELFIE_NOT_IN_REVIEW",
+            extra={"selfie_status": enr.selfie_status},
+        )
     note = (reason or "").strip() or (
         "aprovada pelo coordenador" if approve else "reprovada pelo coordenador"
     )

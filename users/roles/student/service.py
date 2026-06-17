@@ -9,7 +9,8 @@ Fluxo (status em `Student.Status`):
     → (coordenador emite) → AWAITING_PICKUP → (aluno posta foto da retirada) → VETERAN + comissão do coordenador
 
 Cada passo é idempotente por gate de status (`_require`). A validação de documento é assíncrona
-(Django-Q `tasks.validate_document` → `ai.describe_image`); best-effort: IA fora do ar → fica PENDING.
+(Django-Q `tasks.validate_document` → `ai.describe_image`); best-effort: IA fora do ar / em dúvida
+→ fica REVIEW (o coordenador decide; nunca auto-aprova).
 A comissão da formatura usa o motor `finance` (`Source.VETERAN`, valor do `.env`), idempotente.
 """
 
@@ -194,7 +195,7 @@ def set_blood_type(*, user_external_id: str, blood_type: str) -> Student:
     )
     valid = {c for c, _ in Student.BloodType.choices}
     if blood_type not in valid:
-        raise StudentError("invalid_blood_type")
+        raise StudentError("Tipo sanguíneo inválido.", code="INVALID_BLOOD_TYPE")
     student.blood_type = blood_type
     student.save(update_fields=["blood_type", "updated_at"])
     return student
@@ -222,17 +223,21 @@ def upload_document(
     )
     valid_types = {c for c, _ in StudentDocument.Type.choices}
     if doc_type not in valid_types:
-        raise StudentError("invalid_doc_type")
+        raise StudentError("Tipo de documento inválido.", code="INVALID_DOC_TYPE")
     # militar só de homens (gate de gênero — igual o `documents` do enrollment).
     if doc_type in MALE_ONLY_DOC_TYPES and _gender_of(student) != "M":
-        raise StudentError("military_male_only")
+        raise StudentError(
+            "Documento de serviço militar só para homens.", code="MILITARY_MALE_ONLY"
+        )
     # não deixa um re-post derrubar um doc JÁ APROVADO de volta pra PENDING (reentrância: o aluno
     # clica 2× / retry de rede). Re-upload só é aceito enquanto PENDING (em análise) ou REJECTED.
     existing = StudentDocument.objects.filter(
         student=student, doc_type=doc_type
     ).first()
     if existing and existing.validation_status == StudentDocument.Validation.APPROVED:
-        raise StudentError("already_approved")
+        raise StudentError(
+            "Documento já aprovado — não precisa reenviar.", code="ALREADY_APPROVED"
+        )
 
     rel = _save_photo(student, doc_type, image_bytes, content_type)
     doc, _ = StudentDocument.objects.update_or_create(
@@ -400,9 +405,13 @@ def decide_document(
         student=student, external_id=document_external_id
     ).first()
     if doc is None:
-        raise StudentError("document_not_found")
+        raise StudentError("Documento não encontrado.", code="DOCUMENT_NOT_FOUND")
     if doc.validation_status != StudentDocument.Validation.REVIEW:
-        raise StudentError(f"not_in_review:{doc.validation_status}")
+        raise StudentError(
+            "O documento não está em revisão.",
+            code="DOC_NOT_IN_REVIEW",
+            extra={"validation_status": doc.validation_status},
+        )
     note = (reason or "").strip() or (
         "aprovado pelo coordenador" if approve else "reprovado pelo coordenador"
     )
@@ -451,13 +460,15 @@ def schedule_exam(*, user_external_id: str, subject: str, scheduled_at) -> Stude
         user_external_id, Student.Status.EXAM_RELEASED, Student.Status.EXAM_FAILED
     )
     if not (subject or "").strip():
-        raise StudentError("subject_required")
+        raise StudentError("Informe a matéria da prova.", code="SUBJECT_REQUIRED")
     if isinstance(scheduled_at, str):
         from django.utils.dateparse import parse_datetime
 
         parsed = parse_datetime(scheduled_at)
         if parsed is None:
-            raise StudentError("invalid_scheduled_at")
+            raise StudentError(
+                "Data/hora da prova inválida.", code="INVALID_SCHEDULED_AT"
+            )
         if timezone.is_naive(parsed):
             parsed = timezone.make_aware(parsed)
         scheduled_at = parsed
@@ -494,7 +505,7 @@ def grade_exam(
         )
     exam = student.exams.filter(result__isnull=True).order_by("-attempt_number").first()
     if exam is None:
-        raise StudentError("no_pending_exam")
+        raise StudentError("Não há prova pendente de correção.", code="NO_PENDING_EXAM")
     exam.result = StudentExam.Result.PASSED if passed else StudentExam.Result.FAILED
     exam.corrected_by = coordinator
     exam.corrected_at = timezone.now()
@@ -544,9 +555,11 @@ def open_pendency(
         )
     valid_kinds = {c for c, _ in StudentPendency.Kind.choices}
     if kind not in valid_kinds:
-        raise StudentError("invalid_kind")
+        raise StudentError("Tipo de pendência inválido.", code="INVALID_KIND")
     if not (description or "").strip():
-        raise StudentError("description_required")
+        raise StudentError(
+            "Informe a descrição da pendência.", code="DESCRIPTION_REQUIRED"
+        )
     pend = StudentPendency.objects.create(
         student=student,
         kind=kind,
@@ -574,9 +587,11 @@ def resolve_pendency(*, pendency_external_id: str, coordinator) -> StudentPenden
         .first()
     )
     if pend is None:
-        raise StudentError("pendency_not_found")
+        raise StudentError("Pendência não encontrada.", code="PENDENCY_NOT_FOUND")
     if pend.student.hub.coordinator_id != coordinator.id:
-        raise StudentError("not_hub_coordinator")
+        raise StudentError(
+            "Você não coordena o polo deste aluno.", code="NOT_HUB_COORDINATOR"
+        )
     # lock no aluno: a checagem "sem pendência aberta → avança" não pode correr com um open_pendency
     # concorrente (senão o aluno avançaria com pendência aberta). select_for_update trava no Postgres.
     with transaction.atomic():
@@ -617,7 +632,7 @@ def clear_documentation(*, student_external_id: str, coordinator) -> Student:
             extra={"expected_status": student.status},
         )
     if student.pendencies.filter(resolved_at__isnull=True).exists():
-        raise StudentError("open_pendencies")
+        raise StudentError("Há pendências em aberto.", code="OPEN_PENDENCIES")
     _set_status(student, Student.Status.AWAITING_DIPLOMA_ISSUANCE)
     logger.info("student.documentation_cleared", external_id=str(student.external_id))
     return student
@@ -659,7 +674,9 @@ def register_pickup(
     student = _require(user_external_id, Student.Status.AWAITING_PICKUP)
     diploma = getattr(student, "diploma", None)
     if diploma is None:
-        raise StudentError("diploma_not_issued")
+        raise StudentError(
+            "O diploma ainda não foi emitido.", code="DIPLOMA_NOT_ISSUED"
+        )
     rel = _save_photo(student, "diploma_pickup", image_bytes, content_type)
     with transaction.atomic():
         diploma.pickup_photo = rel
@@ -712,7 +729,10 @@ def _credit_coordinator(student: Student, diploma: StudentDiploma) -> None:
 
     coordinator = student.hub.coordinator
     if coordinator is None:
-        raise StudentError("no_hub_coordinator")
+        raise StudentError(
+            "O polo não tem coordenador para receber a comissão.",
+            code="NO_HUB_COORDINATOR",
+        )
     try:
         commissions.credit_commission(
             payee=coordinator,
@@ -723,7 +743,9 @@ def _credit_coordinator(student: Student, diploma: StudentDiploma) -> None:
     except (
         ValueError
     ) as exc:  # payee None/inválido (defensivo; coordinator já checado acima)
-        raise StudentError("commission_payee_invalid") from exc
+        raise StudentError(
+            "Beneficiário da comissão inválido.", code="COMMISSION_PAYEE_INVALID"
+        ) from exc
     diploma.commission_triggered_at = timezone.now()
     diploma.save(update_fields=["commission_triggered_at", "updated_at"])
 
@@ -735,7 +757,9 @@ def _coordinated(student_external_id: str, coordinator) -> Student:
     """Carrega o aluno e exige que `coordinator` seja o coordenador do hub dele."""
     student = _by_external_id(student_external_id)
     if student.hub.coordinator_id != coordinator.id:
-        raise StudentError("not_hub_coordinator")
+        raise StudentError(
+            "Você não coordena o polo deste aluno.", code="NOT_HUB_COORDINATOR"
+        )
     return student
 
 

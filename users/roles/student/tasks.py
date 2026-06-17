@@ -1,7 +1,7 @@
 """Tasks Django-Q do `student` — validação de documento por IA (assíncrona).
 
 A IA roda fora do request (spec: "validada por IA, inclusive de forma assíncrona — só muda status se
-aprovar"). Degrada com graça: se a IA falhar/indecidir, o documento fica PENDING (não auto-aprova).
+aprovar"). Degrada com graça: se a IA falhar/indecidir, o documento fica REVIEW (coordenador decide; não auto-aprova).
 """
 
 from __future__ import annotations
