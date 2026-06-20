@@ -38,6 +38,10 @@ _ERROR_REGISTRY = """
 | `VALIDATION_ERROR` | body/query fora do schema (422) | `detail` = lista do pydantic |
 | `NO_HUB` | nenhum polo disponível pro cadastro (422) | — |
 | `INVALID_DOC_TYPE` | tipo de documento ≠ rg/cnh (422) | — |
+| `DOC_TYPE_NOT_SET` | tipo de documento ainda não definido/enviado (422) | — |
+| `DOC_TYPE_LOCKED` | troca de tipo de documento bloqueada após o início (422) | — |
+| `SLOT_INVALID` | slot de foto do documento inválido (≠ front/back/full) (422) | — |
+| `DOC_NOT_IN_REVIEW` | decisão de documento fora de revisão (422) | — |
 | `PIX_INVALID` | chave Pix inválida ou não é do titular (422) | `reason` |
 | `PROFILE_CPF_MISSING` | perfil sem CPF (refazer cadastro) (422) | — |
 | `MATERIAL_NOT_FOUND` / `TRAINEE_NOT_FOUND` / `CANDIDATE_NOT_FOUND` / `PROMOTER_NOT_FOUND` / `USER_NOT_FOUND` | recurso não existe (404) | — |
