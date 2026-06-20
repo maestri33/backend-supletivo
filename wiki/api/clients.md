@@ -43,8 +43,8 @@ POST /auth/register ──▶ nasce role `lead`   (TODO cliente entra como lead)
 role lead:        GET /lead/me  (estado + a URL ✦ checkout/recibo)  ·  GET /lead/checkout-url
   │   paga (fora) ──▶ webhook confirma ──▶ vira role `enrollment`  (re-login: papel mudou)
   ▼
-role enrollment:  GET /enrollment/me → profile → address/cep → address/data
-                  → documents/rg + documents/rg/photo (front/back) → education → selfie
+role enrollment:  GET /enrollment/me → rg (POST foto {front/back/full} + PATCH dados/perfil)
+                  → address (POST cep + PATCH dados) → education → selfie
   │   (coordenador LIBERA no grupo `leadership`) ──▶ vira role `student`  (re-login)
   ▼
 role student:     GET /student/me → blood-type → documents → exam/schedule
@@ -171,17 +171,22 @@ conclui com número + foto da frente + do verso (qualquer ordem).
 
 | Método | Caminho | Body | Resposta |
 |---|---|---|---|
-| GET | `/enrollment/me` | — | `EnrollmentOut` (ou `404`) |
-| POST | `/enrollment/profile` | `{mother_name?, father_name?, marital_status?, birthplace?, nationality?}` | `EnrollmentOut` |
-| GET | `/enrollment/address` | — | objeto endereço |
-| POST | `/enrollment/address/cep` | `{cep}` | objeto endereço (preenchido via ViaCEP) |
-| POST | `/enrollment/address/data` | `{street?, number?, complement?, neighborhood?, city?, state?}` | objeto endereço (só preenche o que está vazio) |
-| POST | `/enrollment/documents/rg` | `{number, issuing_agency?, issue_date?}` | `EnrollmentOut` |
-| POST | `/enrollment/documents/rg/photo/{slot}` | **multipart** `file=` ; `slot` ∈ `front`/`back` | `{slot, stored}` |
-| POST | `/enrollment/education` | `{last_year_studied, last_school, last_year_when?}` | `EnrollmentOut` |
-| POST | `/enrollment/selfie` | **multipart** `file=` | `EnrollmentOut` |
+| GET | `/enrollment/me` | — | `EnrollmentMeOut` (ou `404`) |
+| POST | `/enrollment/documents/rg/photo/{slot}` | **multipart** `file=` ; `slot` ∈ `front`/`back`/`full` | `RgUploadAck` (ack da análise async) |
+| GET | `/enrollment/documents/rg` | — | `RgSectionOut` (fotos + campos extraídos + `missing_fields`) |
+| PATCH | `/enrollment/documents/rg` | `{number?, issuing_agency?, issue_date?, mother_name?, father_name?, marital_status?, birthplace?, nationality?}` | `EnrollmentMeOut` |
+| GET | `/enrollment/address` | — | objeto endereço (+ `missing_fields`) |
+| POST | `/enrollment/address` | `{cep}` | `EnrollmentMeOut` (endereço via ViaCEP) |
+| PATCH | `/enrollment/address` | `{street?, number?, complement?, neighborhood?, city?, state?}` | `EnrollmentMeOut` (só preenche o que está vazio) |
+| GET | `/enrollment/education` | — | `EducationOut` |
+| POST | `/enrollment/education` | `{last_year_studied, last_school, last_year_when?}` | `EnrollmentMeOut` |
+| GET | `/enrollment/selfie` | — | `SelfieOut` |
+| POST | `/enrollment/selfie` | **multipart** `file=` | `EnrollmentMeOut` |
 
-- **`EnrollmentOut`**: `{ external_id, status, hub_external_id, selfie_verified, selfie_status }`.
+- **Resposta canônica** (`EnrollmentMeOut`): toda mutação devolve o mesmo shape do `GET /enrollment/me`
+  (status + blocos `address`/`selfie` + `analysis_status`/`missing_fields`) — zero re-fetch pra rotear.
+  A etapa `profile` separada MORREU: os campos de perfil (filiação/estado civil/naturalidade/nacionalidade)
+  entram no `PATCH /enrollment/documents/rg` e a extração do RG já os povoa.
   - `selfie_status` ∈ `pending`/`approved`/`rejected`/`review` — em `review` a IA ficou em dúvida
     e o **coordenador** decide (grupo `leadership`).
 - **objeto endereço**: `{ cep, zipcode (alias DEPRECATED), street, number, complement, neighborhood, city, state, country }`.
@@ -222,9 +227,11 @@ Todas exigem Bearer com papel `student` (`403` se não tiver).
 ## Tabelas de valores (enums)
 
 ### Estados da matrícula
-`EnrollmentOut.status` = a seção a preencher AGORA (2026-06-11): `started` (= perfil) →
-`address` → `rg` → `education` → `selfie` → `awaiting_release` (espera o coordenador) →
-`completed`. Selfie reprovada/em revisão NÃO avança (fica `selfie`; `selfie_status` diz o porquê).
+`EnrollmentOut.status` = a seção a preencher AGORA (plan/13, Victor 2026-06-11): `rg` → `address` →
+`education` → `selfie` → `awaiting_release` (espera o coordenador) → `completed`. A etapa `started`/perfil
+MORREU — o RG é a 1ª seção e a extração povoa o perfil. A fase interna da taxa (`fee_paid`/`fee_scheduled`)
+aparece pro aluno como `awaiting_release` (máscara do polo). Selfie reprovada/em revisão NÃO avança
+(fica `selfie`; `selfie_status` diz o porquê).
 
 ### Estados do aluno
 `student.status` ∈ `awaiting_documents` → `documents_under_review` → `exam_released` →
