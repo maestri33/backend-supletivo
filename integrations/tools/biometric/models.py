@@ -83,7 +83,6 @@ class FaceVerification(ExternalIdModel):
         max_length=16, db_index=True
     )  # approved | rejected | review
     provider = models.CharField(max_length=32, default="insightface")
-    liveness = models.JSONField(default=dict, blank=True)  # {passed, provider}
     metadata = models.JSONField(
         default=dict, blank=True
     )  # evidência (det_score/bbox/erro)

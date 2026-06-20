@@ -1,4 +1,4 @@
-"""Saúde da biometria: importa deps, CARREGA o modelo (baixa no 1º uso) e roda a prova de vida.
+"""Saúde da biometria: importa deps e CARREGA o modelo (baixa no 1º uso).
 
 Uso: python manage.py biometric_health
 Fecha parte do Portão 3 (§8 — integração validada de verdade, com o modelo carregado em CPU).
@@ -12,12 +12,11 @@ from core.validation import record_check
 
 
 class Command(BaseCommand):
-    help = "Verifica deps + carrega o modelo InsightFace (CPU) + prova de vida; grava ValidationCheck."
+    help = "Verifica deps + carrega o modelo InsightFace (CPU); grava ValidationCheck."
 
     def handle(self, *args, **options):
         from integrations.tools.biometric import face_match
         from integrations.tools.biometric.exceptions import BiometricError
-        from integrations.tools.biometric.liveness import check_liveness
 
         self.stdout.write(
             f"modelo={settings.BIOMETRIC_MODEL_NAME} root={settings.BIOMETRIC_MODEL_ROOT} "
@@ -37,10 +36,7 @@ class Command(BaseCommand):
             record_check("biometric", "health", False, mode="real", detail=repr(exc))
             return
 
-        liveness = check_liveness()
-        self.stdout.write(
-            self.style.SUCCESS(f"modelo carregado (CPU) ✓  liveness={liveness}")
-        )
+        self.stdout.write(self.style.SUCCESS("modelo carregado (CPU) ✓"))
         record_check(
-            "biometric", "health", True, mode="real", detail=f"liveness={liveness}"
+            "biometric", "health", True, mode="real", detail="modelo carregado (CPU)"
         )

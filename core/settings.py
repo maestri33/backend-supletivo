@@ -208,7 +208,6 @@ BIOMETRIC_MODEL_ROOT = env(
 # Calibrado com par REAL 2026-06-05 (CNH×selfie mesma pessoa ≈0.42; pessoas diferentes <0.21). O .env manda.
 BIOMETRIC_MATCH_THRESHOLD = env.float("BIOMETRIC_MATCH_THRESHOLD", default=0.35)
 BIOMETRIC_REVIEW_THRESHOLD = env.float("BIOMETRIC_REVIEW_THRESHOLD", default=0.28)
-BIOMETRIC_LIVENESS_PROVIDER = env("BIOMETRIC_LIVENESS_PROVIDER", default="local")
 
 # Default primary key field type
 # https://docs.djangoproject.com/en/5.2/ref/settings/#default-auto-field

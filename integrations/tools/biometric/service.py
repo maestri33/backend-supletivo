@@ -46,7 +46,6 @@ class FaceMatchResult:
     provider: str
     status: str  # approved | rejected | review
     reason: str
-    liveness: dict
 
 
 def classify(score: float) -> tuple[str, bool]:
@@ -123,7 +122,7 @@ def try_enroll_document(
 
 
 def _record(
-    *, user, caller, status, approved, score, reference, probe, liveness, reason, meta
+    *, user, caller, status, approved, score, reference, probe, reason, meta
 ) -> FaceMatchResult:
     """Grava o evento de auditoria e devolve o resultado (uma porta de saída só → nada descartado)."""
     FaceVerification.objects.create(
@@ -136,7 +135,6 @@ def _record(
         approved=approved,
         status=status,
         provider=PROVIDER,
-        liveness=liveness,
         metadata=meta,
     )
     return FaceMatchResult(
@@ -146,17 +144,12 @@ def _record(
         provider=PROVIDER,
         status=status,
         reason=reason,
-        liveness=liveness,
     )
 
 
 def verify_identity(*, user, selfie_image_path: str, caller: str) -> FaceMatchResult:
     """Compara a SELFIE com o template do DOCUMENTO do user. Salva a selfie (expandir a biometria) +
     grava `FaceVerification`. Modelo fora / sem rosto / sem documento → `review` (= bloqueio)."""
-    from .liveness import check_liveness
-
-    liveness = check_liveness(image_path=selfie_image_path)
-
     # 1. enroll da selfie (rosto + embedding). Modelo fora ou sem rosto → review (bloqueio seguro).
     try:
         emb, meta = face_match.embed(selfie_image_path)
@@ -169,7 +162,6 @@ def verify_identity(*, user, selfie_image_path: str, caller: str) -> FaceMatchRe
             score=None,
             reference=None,
             probe=None,
-            liveness=liveness,
             reason=f"biometria indisponível — enviado p/ revisão do coordenador: {exc}",
             meta={"error": str(exc), "stage": "model"},
         )
@@ -182,7 +174,6 @@ def verify_identity(*, user, selfie_image_path: str, caller: str) -> FaceMatchRe
             score=None,
             reference=None,
             probe=None,
-            liveness=liveness,
             reason=f"nenhum rosto na selfie — revisão do coordenador: {exc}",
             meta={"error": str(exc), "stage": "selfie"},
         )
@@ -213,7 +204,6 @@ def verify_identity(*, user, selfie_image_path: str, caller: str) -> FaceMatchRe
             score=None,
             reference=None,
             probe=probe,
-            liveness=liveness,
             reason="sem biometria do documento p/ comparar — revisão do coordenador",
             meta={**meta, "stage": "reference"},
         )
@@ -240,7 +230,6 @@ def verify_identity(*, user, selfie_image_path: str, caller: str) -> FaceMatchRe
         score=score,
         reference=reference,
         probe=probe,
-        liveness=liveness,
         reason=reason,
         meta=meta,
     )
