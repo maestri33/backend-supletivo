@@ -80,6 +80,10 @@ class LeadOut(Schema):
     external_id: str = Field(
         description="external_id do LEAD (≠ do user — proposta #8)"
     )
+    user_external_id: str = Field(
+        description="external_id do USER — é o que o POST /auth/login espera (proposta #8). "
+        "O register cria o lead E o user na mesma transação; o login é por USER, não por lead."
+    )
     status: str
     checkout: CheckoutOut | None = None
 
