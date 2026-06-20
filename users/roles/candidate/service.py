@@ -411,6 +411,9 @@ def _reconcile_stale_analyses(cand: Candidate) -> None:
     ):
         sub.validation_status = _analysis.REVIEW
         sub.save(update_fields=["validation_status"])
+        # TTL estourou (IA não respondeu) → review: avisa o coordenador, igual o flip da
+        # selfie (review-purge DUA: o doc salvava calado enquanto a selfie notificava).
+        _notify_doc_event(cand=cand, event="candidate.document_in_review")
 
 
 def _doc_section_dict(cand: Candidate) -> dict:
