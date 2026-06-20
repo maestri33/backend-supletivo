@@ -76,6 +76,7 @@ def create_lead(
     # o LINK DE PAGAMENTO vai pro lead quando o gateway responder (fill_checkout_from_provider).
     return {
         "external_id": str(lead.external_id),
+        "user_external_id": str(user.external_id),
         "status": lead.status,
         "checkout": _checkout_dict(checkout),
     }
@@ -478,6 +479,7 @@ def create_self_study_lead(*, user, payment_method=None) -> dict:
     logger.info("lead.self_study_created", external_id=str(lead.external_id))
     return {
         "external_id": str(lead.external_id),
+        "user_external_id": str(user.external_id),
         "status": lead.status,
         "checkout": _checkout_dict(checkout),
     }
