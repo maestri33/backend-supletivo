@@ -73,9 +73,7 @@ def validate_ref(ref: str):
 
 
 def ref_url(user) -> str:
-    base = (
-        getattr(settings, "LANDING_BASE_URL", "") or settings.EXTERNAL_URL or ""
-    ).rstrip("/")
+    base = (settings.EXTERNAL_URL or "").rstrip("/")
     return f"{base}/?ref={user.external_id}"
 
 

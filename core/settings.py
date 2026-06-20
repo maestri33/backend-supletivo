@@ -323,10 +323,6 @@ GOOGLE_VISION_API_KEY = env("GOOGLE_VISION_API_KEY", default="")
 GOOGLE_VISION_BASE_URL = env(
     "GOOGLE_VISION_BASE_URL", default="https://vision.googleapis.com"
 )
-# Alternativa de auth (prod, mais robusto): path pro JSON do service-account. Vazio => usa a api-key.
-GOOGLE_VISION_SERVICE_ACCOUNT_JSON = env(
-    "GOOGLE_VISION_SERVICE_ACCOUNT_JSON", default=""
-)
 
 # MiniMax — mídia: TTS (t2a_v2) e visão (descrever imagem com MiniMax-M3). Hoje é o PRIMÁRIO de TTS
 # (ElevenLabs vira fallback) e de visão (Gemini vira fallback) — Victor 2026-06-05. Reusa a key do
