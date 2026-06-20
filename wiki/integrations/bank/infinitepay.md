@@ -5,7 +5,7 @@
 > §4 item 1 (o 1º é o [[asaas|asaas]]).
 
 App Django que porta o gateway de **checkout** da **InfinitePay** do micro legado
-(`~/coders/backend/infinitepay`, FastAPI) pro monólito. Label do app: `infinitepay`.
+(`~/coders/backend/infinitepay`) pro monólito. Label do app: `infinitepay`.
 Doc oficial (Context7): `/websites/api_infinitepay_io_invoices_public_checkout`.
 
 ## ⚠️ Anti-delírio (importante)

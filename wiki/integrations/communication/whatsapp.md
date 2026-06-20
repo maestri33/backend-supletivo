@@ -5,8 +5,7 @@
 > subgrupo **comunicação**. Label do app: `whatsapp`. É **só o cliente** — quem orquestra
 > template/contato/log/inbound é o app `notify` (§4-item-2, ainda não existe).
 
-App Django que porta o `WhatsAppClient` da Evolution do micro legado (`~/coders/backend/notify`,
-FastAPI) pro monólito. **Evolution é gateway self-hosted; auth = header `apikey`.** Sem models/
+App Django que porta o `WhatsAppClient` da Evolution do micro legado (`~/coders/backend/notify`) pro monólito. **Evolution é gateway self-hosted; auth = header `apikey`.** Sem models/
 migração/endpoint (cliente stateless; cache do 9º dígito é em memória). Consumo in-process pelo `notify`.
 
 ## Config (.env, CONVENTION §8/§10)

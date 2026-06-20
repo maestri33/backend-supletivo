@@ -5,7 +5,7 @@
 > canais** entregues no aparelho/e-mail do Victor numa passada. Consome `integrations/communication/
 > whatsapp` + `…/mail` + `integrations/ai` (TTS) — **não** é integração, **não** expõe endpoint/webhook.
 
-App Django que **orquestra** o envio (o legado `~/coders/backend/notify` era um serviço FastAPI maior;
+App Django que **orquestra** o envio (o legado `~/coders/backend/notify` era um serviço maior;
 aqui portamos só o **dispatcher**: contatos/logs-timeline/templates-em-DB/métricas/IA-gera-texto são de
 apps futuros ou já viraram `integrations/`). **Dispatcher puro:** o caller passa `phone`/`email` e o
 **conteúdo pronto** (notify não tem model de contato — isso é do `profiles`, §4-3). Envio **assíncrono**
