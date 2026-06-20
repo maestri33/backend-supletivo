@@ -701,12 +701,6 @@ def _apply_doc_extracted(cand: Candidate, sub, data: dict) -> None:
             if d:
                 sub.date_of_birth = d
                 sub_changed.append("date_of_birth")
-    # perfil do candidato (campos compartilhados com o RG)
-    if not sub.date_of_birth and cand.doc_type == "rg":
-        d = _date(data.get("birth_date"))
-        if d:
-            sub.date_of_birth = d
-            sub_changed.append("date_of_birth")
     if sub_changed:
         sub.save(update_fields=sub_changed)
 
@@ -1084,14 +1078,7 @@ def _selfie_ack(cand: Candidate) -> dict:
     """Ack canônico (mesma régua do `enrollment.selfie_ack`) pra responder no POST."""
     from users.roles import _analysis
 
-    return {
-        "stored": True,
-        "analysis_status": _analysis.PENDING,
-        "poll_after_ms": _analysis.poll_after_ms(),
-        "expires_at": _analysis.expires_at(cand.selfie_taken_at).isoformat()
-        if cand.selfie_taken_at
-        else None,
-    }
+    return {"stored": True, **_analysis.ack(cand.selfie_status, cand.selfie_taken_at)}
 
 
 def _selfie_dict(cand: Candidate) -> dict:
