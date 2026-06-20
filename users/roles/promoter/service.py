@@ -1,4 +1,4 @@
-"""Lógica do promoter (fim do funil do colaborador). Criado na aprovação da entrevista do treino.
+"""Lógica do promoter (fim do funil do colaborador). Criado quando o coordenador aprova o candidato.
 
 `ref` de captação = o `external_id` do User (sem model de link). `validate_ref` é o que o funil do ALUNO
 consome pra amarrar o lead ao promotor. Listagens (leads/comissões) são read-only sobre `lead`/`finance`.
