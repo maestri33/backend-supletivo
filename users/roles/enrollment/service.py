@@ -1266,11 +1266,13 @@ def _fee_due_ref(enr: Enrollment) -> str:
 def _fee_dict(pr) -> dict | None:
     if pr is None:
         return None
+    from finance.interface import fees
+
     return {
         "status": pr.status,
         "amount": str(pr.amount),
         "scheduled_for": pr.scheduled_for.isoformat() if pr.scheduled_for else None,
-        "paid": pr.status == "paid",
+        "paid": pr.status == fees.PaymentStatus.PAID,
         "last_error": pr.last_error or None,
     }
 
