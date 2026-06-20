@@ -412,14 +412,13 @@ def lead_self_dict(lead: Lead) -> dict:
     }
 
 
-def pricing() -> dict:
-    """Preço público de vitrine — É O MESMO que é cobrado (Victor 2026-06-07): PIX (valor cheio) + cartão 12x.
-
-    Lê a MESMA fonte da cobrança (`price_pix`/`price_card`): PIX em reais; cartão do `.env` em centavos → reais."""
+def _pricing(pix_fn, card_fn) -> dict:
+    """Monta a vitrine `{pix, card{installments, installment, total}}` a partir das fontes de preço.
+    PIX em reais; cartão do `.env` em centavos → reais; parcela = total / 12 (quantizado)."""
     from decimal import Decimal
 
-    pix = config.price_pix()
-    total = config.price_card()
+    pix = pix_fn()
+    total = card_fn()
     installment = (total / config.CARD_INSTALLMENTS).quantize(Decimal("0.01"))
     return {
         "pix": f"{pix:.2f}",
@@ -429,23 +428,17 @@ def pricing() -> dict:
             "total": f"{total:.2f}",
         },
     }
+
+
+def pricing() -> dict:
+    """Preço público de vitrine — É O MESMO que é cobrado (Victor 2026-06-07): PIX (valor cheio) + cartão 12x.
+    Lê a MESMA fonte da cobrança (`price_pix`/`price_card`)."""
+    return _pricing(config.price_pix, config.price_card)
 
 
 def promoter_pricing() -> dict:
     """Vitrine da auto-matrícula do PROMOTOR (preço próprio; mesma estrutura do `pricing`)."""
-    from decimal import Decimal
-
-    pix = config.promoter_price_pix()
-    total = config.promoter_price_card()
-    installment = (total / config.CARD_INSTALLMENTS).quantize(Decimal("0.01"))
-    return {
-        "pix": f"{pix:.2f}",
-        "card": {
-            "installments": config.CARD_INSTALLMENTS,
-            "installment": f"{installment:.2f}",
-            "total": f"{total:.2f}",
-        },
-    }
+    return _pricing(config.promoter_price_pix, config.promoter_price_card)
 
 
 def create_self_study_lead(*, user, payment_method=None) -> dict:

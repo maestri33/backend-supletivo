@@ -1,4 +1,4 @@
-"""Lógica do promoter (fim do funil do colaborador). Criado na aprovação da entrevista do treino.
+"""Lógica do promoter (fim do funil do colaborador). Criado quando o coordenador aprova o candidato.
 
 `ref` de captação = o `external_id` do User (sem model de link). `validate_ref` é o que o funil do ALUNO
 consome pra amarrar o lead ao promotor. Listagens (leads/comissões) são read-only sobre `lead`/`finance`.
@@ -73,9 +73,7 @@ def validate_ref(ref: str):
 
 
 def ref_url(user) -> str:
-    base = (
-        getattr(settings, "LANDING_BASE_URL", "") or settings.EXTERNAL_URL or ""
-    ).rstrip("/")
+    base = (settings.EXTERNAL_URL or "").rstrip("/")
     return f"{base}/?ref={user.external_id}"
 
 

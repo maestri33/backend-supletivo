@@ -1,6 +1,6 @@
 """Promoter — fim do funil do COLABORADOR (candidato→treino→promotor).
 
-Nasce quando o coordenador aprova a entrevista do treino. O `ref` de captação do lead **é o `external_id`
+Nasce quando o coordenador aprova o candidato (não há mais entrevista/Trainee). O `ref` de captação do lead **é o `external_id`
 do User** (sem model de link — decisão `mvp-fluxo-roles`): a landing usa `?ref=<external_id do promotor>`.
 Carrega o HUB herdado do candidato (promotor pertence a um polo). Sub-pacote de `users` (app_label `users`).
 """

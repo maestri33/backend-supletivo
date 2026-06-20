@@ -4,7 +4,7 @@
 > Portão 3** (Victor 2026-06-01). Caminho do MVP §4 item 1 (subgrupo **tools**). Label do app: `cep`.
 > É **só o cliente** — quem persiste/expõe endereço é o app `users/address` (ainda não existe).
 
-App Django que porta a integração **ViaCEP** do micro legado (`~/coders/backend/address`, FastAPI)
+App Django que porta a integração **ViaCEP** do micro legado (`~/coders/backend/address`)
 pro monólito, como *tool* de apoio (CONVENTION §2/§8: `integrations/tools/<funcao>/scripts/`).
 **ViaCEP é API pública — sem api-key**, logo sem system check de credencial e sem models/migração.
 

@@ -4,7 +4,7 @@
 > Portão 3** (Victor 2026-06-01). Caminho do MVP §4 item 1 (subgrupo **tools**). Label do app: `cpf`.
 > É **só o cliente** — quem persiste/expõe identidade é o app `users/profiles` (ainda não existe).
 
-App Django que porta a integração **CPFHub.io** do micro legado (`~/coders/backend/profiles`, FastAPI)
+App Django que porta a integração **CPFHub.io** do micro legado (`~/coders/backend/profiles`)
 pro monólito, como *tool* de apoio (CONVENTION §2/§8: `integrations/tools/<funcao>/scripts/`).
 **CPFHub exige api-key** (header `x-api-key`, server-side only — §8); o app tem system check que
 **avisa** (não trava) se a key faltar (`cpf.W001` — diferente do asaas/ia, que travam o `manage.py`).

@@ -1,7 +1,7 @@
 """Tasks Django-Q do training: correção assíncrona da submissão pela IA (`ai.grade`).
 
 Enfileirada por `service.submit` (após o commit). Degrade gracioso: se a IA falha, a submissão fica
-`pending` (re-correção possível) — nunca derruba o fluxo do trainee.
+`pending` (re-correção possível) — nunca derruba o fluxo do treino.
 """
 
 from __future__ import annotations

@@ -162,6 +162,10 @@ Codes do `collaborators`:
 | `ALREADY_GRADING` | 409 | já existe submission em correção pra essa matéria |
 | `MATERIAL_NOT_ASSIGNED` | 422 | submeter matéria que não está atribuída ao promotor |
 | `INVALID_DOC_TYPE` | 422 | `doc_type` ∉ {rg, cnh} |
+| `DOC_TYPE_NOT_SET` | 422 | tipo de documento ainda não definido/enviado |
+| `DOC_TYPE_LOCKED` | 422 | trocar de tipo de documento após o 1º upload (imutável) |
+| `SLOT_INVALID` | 422 | slot de foto inválido (≠ front/back/full) |
+| `DOC_NOT_IN_REVIEW` | 422 | coordenador tentou decidir documento que não está em REVIEW |
 | `NO_HUB` | 422 | nenhum polo disponível (seed não rodou) |
 | `PROFILE_CPF_MISSING` | 422 | CPF do perfil ausente (cadastro inconsistente) |
 | `PIX_INVALID` | 422 | chave Pix inválida / não é do titular — `extra: {reason}` |

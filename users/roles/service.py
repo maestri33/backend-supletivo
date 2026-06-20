@@ -35,11 +35,11 @@ def assign(user, role: str) -> list[str]:
     """Atribui uma role de ENTRADA (regra com from_role=None). Aditiva. Devolve as ativas."""
     rule = catalog.find_rule(to_role=role, from_role=None)
     if not rule:
-        any_rule = catalog.find_any_rule(role)
-        if any_rule and any_rule.mode == "replace":
+        promo_rule = catalog.find_promotion_rule(role)
+        if promo_rule:
             raise ValidationError(
                 f"Role '{role}' não pode ser atribuída diretamente — "
-                f"é promoção a partir de '{any_rule.from_role}'.",
+                f"é promoção a partir de '{promo_rule.from_role}'.",
                 code="INVALID_ROLE_ASSIGNMENT",
             )
         raise NotFound(

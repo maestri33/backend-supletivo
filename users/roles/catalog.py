@@ -102,12 +102,5 @@ def find_promotion_rule(to_role: str) -> RuleSpec | None:
     return None
 
 
-def find_any_rule(to_role: str) -> RuleSpec | None:
-    for r in _RULES:
-        if r.to_role == to_role:
-            return r
-    return None
-
-
 def blocking_roles() -> frozenset[str]:
     return frozenset(r.to_role for r in _RULES if r.blocking)

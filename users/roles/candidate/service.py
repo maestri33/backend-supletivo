@@ -411,6 +411,9 @@ def _reconcile_stale_analyses(cand: Candidate) -> None:
     ):
         sub.validation_status = _analysis.REVIEW
         sub.save(update_fields=["validation_status"])
+        # TTL estourou (IA não respondeu) → review: avisa o coordenador, igual o flip da
+        # selfie (review-purge DUA: o doc salvava calado enquanto a selfie notificava).
+        _notify_doc_event(cand=cand, event="candidate.document_in_review")
 
 
 def _doc_section_dict(cand: Candidate) -> dict:
@@ -701,12 +704,6 @@ def _apply_doc_extracted(cand: Candidate, sub, data: dict) -> None:
             if d:
                 sub.date_of_birth = d
                 sub_changed.append("date_of_birth")
-    # perfil do candidato (campos compartilhados com o RG)
-    if not sub.date_of_birth and cand.doc_type == "rg":
-        d = _date(data.get("birth_date"))
-        if d:
-            sub.date_of_birth = d
-            sub_changed.append("date_of_birth")
     if sub_changed:
         sub.save(update_fields=sub_changed)
 
@@ -1084,14 +1081,7 @@ def _selfie_ack(cand: Candidate) -> dict:
     """Ack canônico (mesma régua do `enrollment.selfie_ack`) pra responder no POST."""
     from users.roles import _analysis
 
-    return {
-        "stored": True,
-        "analysis_status": _analysis.PENDING,
-        "poll_after_ms": _analysis.poll_after_ms(),
-        "expires_at": _analysis.expires_at(cand.selfie_taken_at).isoformat()
-        if cand.selfie_taken_at
-        else None,
-    }
+    return {"stored": True, **_analysis.ack(cand.selfie_status, cand.selfie_taken_at)}
 
 
 def _selfie_dict(cand: Candidate) -> dict:

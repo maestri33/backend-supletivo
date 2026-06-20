@@ -5,7 +5,7 @@
 > §4 item 1 (o 1º é o [[asaas|asaas]]).
 
 App Django que porta o gateway de **checkout** da **InfinitePay** do micro legado
-(`~/coders/backend/infinitepay`, FastAPI) pro monólito. Label do app: `infinitepay`.
+(`~/coders/backend/infinitepay`) pro monólito. Label do app: `infinitepay`.
 Doc oficial (Context7): `/websites/api_infinitepay_io_invoices_public_checkout`.
 
 ## ⚠️ Anti-delírio (importante)
@@ -17,6 +17,11 @@ Doc oficial (Context7): `/websites/api_infinitepay_io_invoices_public_checkout`.
   o webhook só marca PAID depois de reconfirmar o pagamento direto na API. O `order_nsu` (= nosso
   `external_id`, UUID opaco) liga o webhook ao checkout.
 - **Handle é case-sensitive:** o nosso é `v7m` (minúsculo) — `V7M`/`V7m` dão "Merchant not found".
+- **Sem ciclo de estorno/expiração (assimetria PROPOSITAL com o asaas).** O `Checkout` é `PENDING→PAID`
+  e só (link one-shot): a InfinitePay, como integrada, **não emite** webhook de estorno/cancelamento/
+  expiração — diferente do asaas, que é plataforma de cobrança e tem `OVERDUE/DELETED/REFUNDED`. Mapear
+  esses estados aqui seria **estado morto** (nada os produz). Estorno fora-de-banda (painel) NÃO vira
+  evento — se um dia precisar refletir, é feature nova (leitura ativa), Portão 3.
 
 ## Fluxo
 

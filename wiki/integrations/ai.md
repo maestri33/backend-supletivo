@@ -1,7 +1,7 @@
 # integrations/ai — engine LLM multi-provider
 
 > Engine de IA do monólito (§4 item 1 "ai"). **Multi-provider OpenAI-compatible com fallback.**
-> Consumido **in-process** (sem FastAPI, sem HTTP interno) pelos apps do Django via `service.py`.
+> Consumido **in-process** (sem HTTP interno) pelos apps do Django via `service.py`.
 > Plano: `.claude/plan/1-ia-i-deepseek-core.md` · Testes: `.claude/tests/1-ia-i-deepseek-core.md`.
 
 ## O que é

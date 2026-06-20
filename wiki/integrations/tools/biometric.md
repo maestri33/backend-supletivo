@@ -7,7 +7,7 @@
 ## Para que serve
 Validar identidade no funil do **aluno** (`enrollment`) e do **colaborador** (`candidate`): o rosto da
 selfie tem que **bater** com o rosto do documento. Roda **junto** com a validação de selfie por IA
-(liveness/anti-foto-de-foto) — é o **"somar"**: o funil só avança se **os dois** passarem.
+(anti-foto-de-foto, por IA) — é o **"somar"**: o funil só avança se **os dois** passarem.
 
 ## Como funciona
 - **InsightFace** (ArcFace `buffalo_l`) em **CPU** (`onnxruntime`, sem GPU). Modelo carregado
@@ -31,7 +31,7 @@ Fail-safe: modelo fora / sem rosto / sem documento → `review` (nunca passa em 
 - **`FaceBiometric`** — template por captura: `user` FK, `source` (document/selfie), `embedding` 512-d,
   `det_score`, `image_path`, `metadata`. Herda `core.ExternalIdModel`.
 - **`FaceVerification`** — auditoria de cada comparação: `score`, `threshold`, `approved`, `status`,
-  `reference` (doc), `probe` (selfie), `liveness`. Nada é descartado.
+  `reference` (doc), `probe` (selfie). Nada é descartado.
 
 ## Interface (`service.py`)
 - `enroll_face(user, image_path, source, caller)` — salva um template.
@@ -45,15 +45,10 @@ Fiação no funil: `users.roles._selfie.add_face_match` (+`combine`, pior-vence)
 
 ## Config (`.env` / `settings.py`)
 `BIOMETRIC_ENABLED` (liga o gate) · `BIOMETRIC_MATCH_THRESHOLD`=0.35 · `BIOMETRIC_REVIEW_THRESHOLD`=0.28
-(calibrados com par real) · `BIOMETRIC_MODEL_NAME`=buffalo_l · `BIOMETRIC_MODEL_ROOT` (FORA do backend) ·
-`BIOMETRIC_LIVENESS_PROVIDER` (seam p/ FaceTec/Unico/CAF no futuro).
-
-## Liveness
-`liveness.py` é um **seam plugável** — hoje stub local (`{passed:True, provider:local}`); a arquitetura
-permite trocar por FaceTec/Unico/CAF sem mexer no negócio.
+(calibrados com par real) · `BIOMETRIC_MODEL_NAME`=buffalo_l · `BIOMETRIC_MODEL_ROOT` (FORA do backend).
 
 ## Comandos
-- `manage.py biometric_health` — deps + carrega o modelo (CPU) + liveness; grava `ValidationCheck`.
+- `manage.py biometric_health` — deps + carrega o modelo (CPU); grava `ValidationCheck`.
 - `manage.py biometric_test <doc> <selfie>` — compara duas imagens e imprime score/veredito (calibração).
 
 ## Checks

@@ -2,7 +2,7 @@
 
 O **cérebro** da plataforma: toda a lógica de negócio + o banco moram aqui. A **API pública
 vive DENTRO do Django, via Django Ninja** (in-process), em 4 grupos por público sob
-`/api/v1/` — sem serviço separado, sem hop HTTP (edges FastAPI foram descartados 2026-06-01).
+`/api/v1/` — sem serviço separado, sem hop HTTP (edges externos descartados 2026-06-01).
 Arquitetura completa nas instruções do projeto (`.claude/CONVENTION.md`).
 
 ## Rodar em dev

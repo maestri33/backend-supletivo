@@ -6,7 +6,7 @@
 > dinheiro/OTP real) — ver a página de cada grupo. Régua: [[CONVENTION]] §1/§3/§5.
 
 A API pública do MVP **vive dentro do monólito Django**, via **Django Ninja** (in-process —
-sem serviço separado, sem hop HTTP). Decisão do Victor 2026-06-01 (FastAPI/edges descartados).
+sem serviço separado, sem hop HTTP). Decisão do Victor 2026-06-01 (edges externos descartados).
 O router é casca fina: recebe a request (auth + gate de role + validação de borda) → chama o
 `interface/` do módulo **no mesmo processo** → devolve. **Zero regra de negócio no router.**
 

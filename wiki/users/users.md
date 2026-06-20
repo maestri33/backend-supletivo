@@ -2,8 +2,8 @@
 
 > O "quem" da plataforma. Um **app Django** com sub-módulos (pacotes): `auth/` (+ `jwt/`, `otp/`),
 > `profiles/`, `roles/`, **`address/`** e **`documents/`** (ciclo 3b).
-> Fonte de verdade da identidade (VISAO). Modelo B (CONVENTION §1): a lógica vive no Django; os
-> edges FastAPI (depois) chamam as **views DMZ** por HTTP.
+> Fonte de verdade da identidade (VISAO). Modelo B (CONVENTION §1): a lógica vive no Django e a
+> **API Ninja** (in-process) a consome direto.
 
 ## Decisões que mandam aqui
 - **Custom `AUTH_USER_MODEL = users.User`** (Victor 2026-06-01) — o `User` carrega o `external_id`

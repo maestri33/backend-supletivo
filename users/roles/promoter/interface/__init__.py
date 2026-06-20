@@ -1,5 +1,5 @@
 """Superfície pública in-process do `promoter` (CONVENTION §3): o que o grupo `collaborators`, o
-`training` (cria na entrevista) e o funil do aluno (`validate_ref`) chamam. Fina — reexporta o `service`.
+`leadership` (cria na aprovação do candidato) e o funil do aluno (`validate_ref`) chamam. Fina — reexporta o `service`.
 """
 
 from users.roles.promoter.service import (

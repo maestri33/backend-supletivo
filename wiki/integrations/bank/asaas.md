@@ -6,8 +6,7 @@
 > + **charge (1a-iv)** — aprovado com **E2E real** (pagamento real → webhook → PAID). Falta **payout
 > + E2E de saída (1a-v)**. Doc honesto — **não é "asaas pronto".**
 
-App Django que porta o gateway de pagamento **Asaas** do micro legado (`~/coders/backend/asaas`,
-FastAPI) pro monólito. Caminho do MVP §4 item 1-a. Label do app: `asaas`.
+App Django que porta o gateway de pagamento **Asaas** do micro legado (`~/coders/backend/asaas`) pro monólito. Caminho do MVP §4 item 1-a. Label do app: `asaas`.
 
 ## ⚠️ Anti-delírio (importante)
 
