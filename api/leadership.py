@@ -21,7 +21,7 @@ from ninja.files import UploadedFile
 
 from api.auth import require_roles
 from api.base import add_auth_refresh, build_group, resolve_rg_slot
-from api.schemas import MaterialIn, MaterialUpdateIn, TokenOut
+from api.schemas import CheckIn, LoginIn, MaterialIn, MaterialUpdateIn, TokenOut
 from users.auth import interface as auth_iface
 from users.auth.models import User
 from users.exceptions import Forbidden, NotFound
@@ -65,12 +65,6 @@ def _coordinator_hub(coordinator: User):
 
 
 # ── entrada do coordenador (público): check → login (OTP) → refresh — plan/14 ───────────────
-class CheckIn(Schema):
-    cpf: str | None = None
-    phone: str | None = None
-    external_id: str | None = None  # re-dispara OTP de usuário já conhecido (do USER)
-
-
 class HubOut(Schema):
     external_id: str
     brand: str
@@ -94,11 +88,6 @@ class CoordinatorCheckOut(Schema):
         description="presente quando a pessoa existe mas NÃO coordena polo — o front "
         "redireciona pra área de login da role dela (em `roles`), levando o external_id",
     )
-
-
-class LoginIn(Schema):
-    external_id: str = Field(description="external_id do USER (veio do /auth/check)")
-    otp: str
 
 
 auth_router = Router(tags=["auth"])

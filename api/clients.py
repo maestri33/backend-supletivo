@@ -15,7 +15,7 @@ from ninja.files import UploadedFile
 
 from api.auth import require_roles
 from api.base import add_auth_refresh, build_group, resolve_rg_slot
-from api.schemas import TokenOut
+from api.schemas import CheckIn, LoginIn, TokenOut
 from users.auth import interface as auth_iface
 from users.auth.models import User
 from users.exceptions import Forbidden, NotFound
@@ -84,14 +84,6 @@ class LeadOut(Schema):
     checkout: CheckoutOut | None = None
 
 
-class CheckIn(Schema):
-    cpf: str | None = None
-    phone: str | None = None
-    external_id: str | None = (
-        None  # re-dispara OTP de usuário já conhecido (o service já aceitava)
-    )
-
-
 class CheckOut(Schema):
     found: bool
     external_id: str | None = Field(
@@ -102,11 +94,6 @@ class CheckOut(Schema):
     otp_wait: int | None = None
     whatsapp: bool | None = None
     roles: list[str] | None = None
-
-
-class LoginIn(Schema):
-    external_id: str = Field(description="external_id do USER (veio do /auth/check)")
-    otp: str
 
 
 class CardPriceOut(Schema):

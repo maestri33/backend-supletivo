@@ -7,7 +7,7 @@ não duplicar (plan/15 A7).
 
 from __future__ import annotations
 
-from ninja import Schema
+from ninja import Field, Schema
 
 
 class MaterialIn(Schema):
@@ -59,3 +59,19 @@ class TokenOut(Schema):
     access_token: str
     refresh_token: str
     token_type: str
+
+
+class CheckIn(Schema):
+    """Body do `POST /auth/check` — `cpf` OU `phone` (ou `external_id` pra re-disparar o OTP de
+    quem já existe). Compartilhado por clients/collaborators/leadership (dedup review-purge)."""
+
+    cpf: str | None = None
+    phone: str | None = None
+    external_id: str | None = None  # re-dispara OTP de usuário já conhecido (do USER)
+
+
+class LoginIn(Schema):
+    """Body do `POST /auth/login` — troca OTP por token. Compartilhado pelos grupos (dedup)."""
+
+    external_id: str = Field(description="external_id do USER (veio do /auth/check)")
+    otp: str
