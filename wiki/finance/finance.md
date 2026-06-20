@@ -21,9 +21,10 @@
 
 ## Superfície (CONVENTION §3) — `finance/interface/`
 
-- **`commissions.credit_commission(*, payee_external_id, payee_role, source_type, source_external_id)`** —
-  ponto que `lead`/`student` vão chamar (hoje: command/teste). Resolve o User via `profiles.interface`
-  (sem profile → `ValueError`, não cria comissão órfã), lê o `amount` do `.env`, idempotente por fonte.
+- **`commissions.credit_commission(*, payee, payee_role, source_type, source_external_id)`** —
+  ponto que `lead`/`student` vão chamar (hoje: command/teste). `payee` é o objeto `users.User` (o caller
+  já tem a FK — sem ida-e-volta por external_id); `payee` None → `ValueError` (não cria comissão órfã),
+  lê o `amount` do `.env`, idempotente por fonte.
 - **`commissions.run_weekly_closing(*, reference_date=None)`** — a "sexta 18h": janela = **semana corrente**
   (seg→dom de `reference_date`, America/Sao_Paulo — corrige o bug do legado "tudo que está pending"), dispara
   o **bônus FLAT** (promotor com ≥ `threshold` indicações de lead na semana; `uuid5` determinístico → não

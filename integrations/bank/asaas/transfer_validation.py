@@ -7,8 +7,8 @@ MOBILE_PHONE_RECHARGE, PIX_REFUND) pedindo autorização. Respondemos:
   {"status": "REFUSED", "refuseReason": "<motivo>"}        -> Asaas cancela
 3 falhas (ou resposta que não seja APPROVED/REFUSED) -> Asaas cancela a operação.
 
-Aprova SÓ saída que NÓS iniciamos e que bate com o nosso DB. Como payout (1a-v) ainda não cria
-nenhum Payment de saída, hoje RECUSA tudo — lado seguro do dinheiro (CONVENTION §8).
+Aprova SÓ saída que NÓS iniciamos e que bate com o nosso DB (asaas_id + kind + valor, com o Payment
+local em SUBMITTING/SUBMITTED); qualquer outra saída → RECUSA (lado seguro do dinheiro, CONVENTION §8).
 """
 
 import structlog
