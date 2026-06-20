@@ -12,7 +12,6 @@ from users.address.service import (
     fill_by_cep,
     fill_empty,
     get_by_external_id,
-    get_by_id,
     is_complete,
     list_all,
     patch,
@@ -42,15 +41,15 @@ def as_public_dict(address: Address) -> dict:
     a gente remove). O endereço é acessado pelo contexto do user logado, não tem id próprio."""
     data = as_dict(address)
     data.pop("id", None)
-    data["cep"] = data.pop("zipcode", None)
-    data["zipcode"] = data["cep"]  # alias temporário
+    data["cep"] = data[
+        "zipcode"
+    ]  # `cep` é o padrão; `zipcode` segue como alias DEPRECATED
     return data
 
 
 __all__ = [
     "create_empty",
     "get_by_external_id",
-    "get_by_id",
     "list_all",
     "patch",
     "fill_empty",

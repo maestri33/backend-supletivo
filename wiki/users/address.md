@@ -19,7 +19,7 @@
 - `PATCH <external_id>/` — demais dados (`number`, `complement`, ...); valida UF se enviada.
 
 ## interface (`address/interface/`)
-`create_empty` (provisionamento), `get_by_external_id`, `get_by_id`, `list_all`, `set_by_cep`,
+`create_empty` (provisionamento), `get_by_external_id`, `list_all`, `set_by_cep`,
 `patch`, `as_dict`. A view embrulha isto em HTTP; o `auth` chama `create_empty` no register.
 
 ## Provisionamento

@@ -45,10 +45,6 @@ def get_by_external_id(external_id: str) -> Address | None:
     return profiles.get_address(external_id)
 
 
-def get_by_id(address_id: int) -> Address | None:
-    return Address.objects.filter(pk=address_id).first()
-
-
 def list_all(*, limit: int = 100, offset: int = 0) -> list[Address]:
     return list(Address.objects.order_by("-created_at")[offset : offset + limit])
 
@@ -72,13 +68,8 @@ def _require_address(external_id: str) -> Address:
     return address
 
 
-def set_by_cep(*, external_id: str, cep: str) -> Address:
-    """Valida o CEP, busca no ViaCEP e grava no endereço do usuário (spec address: já salva no db)."""
-    address = _require_address(external_id)
-    data = _viacep(cep)
-    if data is None:
-        raise ValidationError("CEP não encontrado ou inválido.", code="CEP_NOT_FOUND")
-
+def _apply_viacep(address: Address, data: dict) -> None:
+    """Grava os campos do ViaCEP no Address (reuso de set_by_cep/fill_by_cep)."""
     address.zipcode = data["zipcode"]
     address.street = data["street"]
     address.neighborhood = data["neighborhood"]
@@ -86,6 +77,16 @@ def set_by_cep(*, external_id: str, cep: str) -> Address:
     address.state = data["state"]
     if data.get("complement"):
         address.complement = data["complement"]
+
+
+def set_by_cep(*, external_id: str, cep: str) -> Address:
+    """Valida o CEP, busca no ViaCEP e grava no endereço do usuário (spec address: já salva no db)."""
+    address = _require_address(external_id)
+    data = _viacep(cep)
+    if data is None:
+        raise ValidationError("CEP não encontrado ou inválido.", code="CEP_NOT_FOUND")
+
+    _apply_viacep(address, data)
     address.save()
     logger.info("address.cep_set", external_id=external_id, zipcode=data["zipcode"])
     return address
@@ -97,13 +98,7 @@ def fill_by_cep(address: Address, cep: str, *, number=None, complement=None) -> 
     data = _viacep(cep)
     if data is None:
         raise ValidationError("CEP não encontrado ou inválido.", code="CEP_NOT_FOUND")
-    address.zipcode = data["zipcode"]
-    address.street = data["street"]
-    address.neighborhood = data["neighborhood"]
-    address.city = data["city"]
-    address.state = data["state"]
-    if data.get("complement"):
-        address.complement = data["complement"]
+    _apply_viacep(address, data)
     if number is not None:
         address.number = number
     if complement is not None:
