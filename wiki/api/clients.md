@@ -123,7 +123,7 @@ O que o cliente VÊ na landing — **é o MESMO valor que será COBRADO** (Victo
 ## Rotas autenticadas — comuns
 
 ### `GET /whoami`
-Eco do token (debug/sanity): `{ external_id, roles }`. Exige Bearer. `401` sem token válido.
+Eco do token + `name` do Profile (o front saúda pelo nome): `{ external_id, roles, name }`. Exige Bearer. `401` sem token válido.
 
 ---
 
