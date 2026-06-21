@@ -288,12 +288,13 @@ def upload_photo(external_id: str, slot: str, upload) -> str:
     else:
         _decode_image(data)
         ext = _ALLOWED_IMAGE[content_type]
-    path = f"documents/{external_id}/{slot}.{ext}"
-    if default_storage.exists(path):
-        default_storage.delete(path)
-    default_storage.save(path, ContentFile(data))
+    from core.media import save_media
 
     sub = getattr(document, sub_name)
+    old = getattr(sub, field, None)
+    path = save_media(prefix="documents", data=data, ext=ext)
+    if old and old != path and default_storage.exists(old):
+        default_storage.delete(old)
     setattr(sub, field, path)
     sub.save(update_fields=[field])
     logger.info("documents.photo_uploaded", external_id=external_id, slot=slot)
