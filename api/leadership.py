@@ -256,6 +256,57 @@ class HubStudentRowOut(Schema):
     created_at: str
 
 
+# ── detalhe RICO do aluno (A1 — Victor 2026-06-21: /students/{id} devolvia dict solto; agora tipa o
+# que `student.detail_for_coordinator` monta = `to_dict` + self_study + user, tudo estático).
+class StudentPlatformOut(Schema):
+    url: str | None = None
+    login: str | None = None
+    password: str | None = None
+    notes: str | None = None
+
+
+class StudentDocItemOut(Schema):
+    doc_type: str
+    validation_status: str
+    has_photo: bool
+
+
+class StudentPendencyOut(Schema):
+    external_id: str
+    kind: str
+    description: str
+    amount_cents: int | None = None
+    resolved: bool
+
+
+class StudentDiplomaOut(Schema):
+    issued_at: str | None = None
+    picked_up: bool
+
+
+class StudentUserOut(Schema):
+    external_id: str
+    name: str | None = None
+    cpf: str | None = None
+    phone: str | None = None
+    email: str | None = None
+
+
+class HubStudentDetailOut(Schema):
+    """Detalhe do aluno pro coordenador: docs/pendências/diploma/plataforma/identidade. `diploma`
+    é `null` enquanto não emitido; `platform` traz as credenciais da instituição (visão do coord)."""
+    external_id: str
+    status: str
+    hub_external_id: str
+    blood_type: str | None = None
+    self_study: bool
+    platform: StudentPlatformOut
+    documents: list[StudentDocItemOut] = []
+    pendencies: list[StudentPendencyOut] = []
+    diploma: StudentDiplomaOut | None = None
+    user: StudentUserOut
+
+
 auth_router = Router(tags=["auth"])
 
 
@@ -797,7 +848,7 @@ def list_hub_students(request, status: str | None = None, limit: int = 200, offs
     return {"items": items, "total": total, "limit": limit, "offset": offset}
 
 
-@api.get("/students/{external_id}", response=dict, tags=["student"])
+@api.get("/students/{external_id}", response=HubStudentDetailOut, tags=["student"])
 def get_student_for_coordinator(request, external_id: str):
     """Detalhe RICO do aluno (docs/pendências/diploma/plataforma/identidade) pro coordenador — antes
     ele agia no aluno (grade/decide/pendency) mas não tinha um GET completo dele."""
