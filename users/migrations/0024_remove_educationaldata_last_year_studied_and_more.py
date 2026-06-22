@@ -4,44 +4,62 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
-        ('users', '0023_remove_enrollment_study_platform'),
+        ("users", "0023_remove_enrollment_study_platform"),
     ]
 
     operations = [
         migrations.RemoveField(
-            model_name='educationaldata',
-            name='last_year_studied',
+            model_name="educationaldata",
+            name="last_year_studied",
         ),
         migrations.AddField(
-            model_name='educationaldata',
-            name='city',
-            field=models.CharField(blank=True, max_length=100, null=True, verbose_name='cidade da escola'),
+            model_name="educationaldata",
+            name="city",
+            field=models.CharField(
+                blank=True, max_length=100, null=True, verbose_name="cidade da escola"
+            ),
         ),
         migrations.AddField(
-            model_name='educationaldata',
-            name='completed',
-            field=models.BooleanField(blank=True, null=True, verbose_name='concluiu o nível?'),
+            model_name="educationaldata",
+            name="completed",
+            field=models.BooleanField(
+                blank=True, null=True, verbose_name="concluiu o nível?"
+            ),
         ),
         migrations.AddField(
-            model_name='educationaldata',
-            name='grade',
-            field=models.PositiveSmallIntegerField(blank=True, null=True, verbose_name='série/ano'),
+            model_name="educationaldata",
+            name="grade",
+            field=models.PositiveSmallIntegerField(
+                blank=True, null=True, verbose_name="série/ano"
+            ),
         ),
         migrations.AddField(
-            model_name='educationaldata',
-            name='level',
-            field=models.CharField(blank=True, choices=[('fundamental', 'Ensino Fundamental'), ('medio', 'Ensino Médio')], max_length=16, null=True, verbose_name='nível'),
+            model_name="educationaldata",
+            name="level",
+            field=models.CharField(
+                blank=True,
+                choices=[
+                    ("fundamental", "Ensino Fundamental"),
+                    ("medio", "Ensino Médio"),
+                ],
+                max_length=16,
+                null=True,
+                verbose_name="nível",
+            ),
         ),
         migrations.AddField(
-            model_name='educationaldata',
-            name='state',
-            field=models.CharField(blank=True, max_length=2, null=True, verbose_name='UF da escola'),
+            model_name="educationaldata",
+            name="state",
+            field=models.CharField(
+                blank=True, max_length=2, null=True, verbose_name="UF da escola"
+            ),
         ),
         migrations.AlterField(
-            model_name='educationaldata',
-            name='last_school',
-            field=models.CharField(blank=True, max_length=255, null=True, verbose_name='qual escola'),
+            model_name="educationaldata",
+            name="last_school",
+            field=models.CharField(
+                blank=True, max_length=255, null=True, verbose_name="qual escola"
+            ),
         ),
     ]

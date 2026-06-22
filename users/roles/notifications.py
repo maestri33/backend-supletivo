@@ -271,8 +271,10 @@ def age_from(birth_date) -> int | None:
     from datetime import date
 
     today = date.today()
-    return today.year - birth_date.year - (
-        (today.month, today.day) < (birth_date.month, birth_date.day)
+    return (
+        today.year
+        - birth_date.year
+        - ((today.month, today.day) < (birth_date.month, birth_date.day))
     )
 
 
@@ -301,7 +303,9 @@ _STORY_INSTRUCTIONS = {
 }
 
 
-def story_text(event: str, *, name: str, fallback: str, age: int | None = None, **_ctx) -> str:
+def story_text(
+    event: str, *, name: str, fallback: str, age: int | None = None, **_ctx
+) -> str:
     """Texto caloroso gerado por 1 LLM (temperatura baixa) nos marcos especiais; cai no `fallback`
     fixo se o evento não for de história, se a IA falhar, ou se o texto vier ruim (curto/sem o nome).
     Enriquece com a DATA de hoje e adapta o tom à IDADE (Victor 2026-06-21). Roda síncrono no caller;
@@ -314,8 +318,18 @@ def story_text(event: str, *, name: str, fallback: str, age: int | None = None, 
         from integrations.ai import service as ai
 
         _meses = (
-            "janeiro", "fevereiro", "março", "abril", "maio", "junho",
-            "julho", "agosto", "setembro", "outubro", "novembro", "dezembro",
+            "janeiro",
+            "fevereiro",
+            "março",
+            "abril",
+            "maio",
+            "junho",
+            "julho",
+            "agosto",
+            "setembro",
+            "outubro",
+            "novembro",
+            "dezembro",
         )
         hoje = date.today()
         data_hoje = f"{hoje.day} de {_meses[hoje.month - 1]} de {hoje.year}"

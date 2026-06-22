@@ -983,11 +983,17 @@ def _notify_resolution(enr: Enrollment, event_key: str, **placeholders) -> None:
         # assinatura da matrícula = pequeno discurso motivacional RICO (visão da selfie → Opus 4.8,
         # fallback DeepSeek → MiniMax). Cai no story_text simples e, por fim, no teor fixo.
         text = _selfie_story(enr, p, name) or msgs.story_text(
-            event_key, name=name, fallback=fallback, age=msgs.age_from(getattr(p, "birth_date", None))
+            event_key,
+            name=name,
+            fallback=fallback,
+            age=msgs.age_from(getattr(p, "birth_date", None)),
         )
     else:
         text = msgs.story_text(
-            event_key, name=name, fallback=fallback, age=msgs.age_from(getattr(p, "birth_date", None))
+            event_key,
+            name=name,
+            fallback=fallback,
+            age=msgs.age_from(getattr(p, "birth_date", None)),
         )
     # O link de "continuar" só faz sentido quando o aluno PRECISA voltar ao wizard. Em marcos de
     # conclusão/assinatura (a mensagem manda AGUARDAR) o link se contradiz — por isso o guard.

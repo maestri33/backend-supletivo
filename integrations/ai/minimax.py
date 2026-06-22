@@ -175,9 +175,7 @@ class MiniMaxClient:
             data_url = (
                 f"data:{subject_mime};base64,{base64.b64encode(subject_image).decode()}"
             )
-            body["subject_reference"] = [
-                {"type": "character", "image_file": data_url}
-            ]
+            body["subject_reference"] = [{"type": "character", "image_file": data_url}]
         url = f"{self._base_url}/v1/image_generation"
         async with httpx.AsyncClient(
             timeout=httpx.Timeout(self._timeout, connect=10.0)

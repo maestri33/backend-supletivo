@@ -253,7 +253,6 @@ def upload_photo(external_id: str, slot: str, upload) -> str:
 
     Aceita JPEG/PNG/WEBP (decode real — arquivo renomeado não passa) e PDF (convertido pra JPEG
     internamente; no disco fica sempre imagem) — plan/12."""
-    from django.core.files.base import ContentFile
 
     if slot not in _PHOTO_SLOTS:
         raise ValidationError(f"Slot de foto inválido: {slot}.", code="SLOT_INVALID")

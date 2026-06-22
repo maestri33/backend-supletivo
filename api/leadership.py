@@ -200,22 +200,34 @@ class HubEnrollmentRowOut(Schema):
 class ReviewItemOut(Schema):
     """Item NORMALIZADO de qualquer balde do /reviews: sempre external_id + type + kind, mais
     extras (name/doc_type/since/rejected/…). O front roteia por `type`+`kind` e linka por `external_id`."""
-    external_id: str = Field(description="id do recurso a decidir (matrícula/candidato/documento/student)")
+
+    external_id: str = Field(
+        description="id do recurso a decidir (matrícula/candidato/documento/student)"
+    )
     type: str = Field(description="enrollment | candidate | student | promoter")
-    kind: str = Field(description="rg | selfie | document | awaiting_approval | locked_training")
+    kind: str = Field(
+        description="rg | selfie | document | awaiting_approval | locked_training"
+    )
     name: str | None = None
     doc_type: str | None = None
     since: str | None = None
     rejected: bool | None = None
-    document_external_id: str | None = Field(None, description="só kind=document de student (par student+doc)")
-    student_external_id: str | None = Field(None, description="só kind=document de student")
-    promoter_external_id: str | None = Field(None, description="só kind=locked_training (id do promotor)")
+    document_external_id: str | None = Field(
+        None, description="só kind=document de student (par student+doc)"
+    )
+    student_external_id: str | None = Field(
+        None, description="só kind=document de student"
+    )
+    promoter_external_id: str | None = Field(
+        None, description="só kind=locked_training (id do promotor)"
+    )
     pending_materials: list[dict] | None = None
 
 
 class ReviewsOut(Schema):
     """Tela-âncora do coordenador — TODOS os baldes unificados em listas de ReviewItemOut (Victor
     2026-06-21: antes cada balde tinha nome de id diferente e sem `type`; agora é homogêneo)."""
+
     enrollment_rg: list[ReviewItemOut] = []
     enrollment_selfie: list[ReviewItemOut] = []
     candidate_document: list[ReviewItemOut] = []
@@ -227,6 +239,7 @@ class ReviewsOut(Schema):
 
 class PaginatedOut(Schema):
     """Envelope de paginação padronizado (A5): toda lista do leadership passa a devolver isto."""
+
     items: list
     total: int
     limit: int
@@ -249,6 +262,7 @@ class CandidateAwaitingOut(Schema):
 
 class HubStudentRowOut(Schema):
     """Aluno do polo (A2 — lista nova): rol de aluno pelo status, com o external_id pra abrir o detalhe."""
+
     external_id: str
     name: str | None = None
     phone: str | None = None
@@ -295,6 +309,7 @@ class StudentUserOut(Schema):
 class HubStudentDetailOut(Schema):
     """Detalhe do aluno pro coordenador: docs/pendências/diploma/plataforma/identidade. `diploma`
     é `null` enquanto não emitido; `platform` traz as credenciais da instituição (visão do coord)."""
+
     external_id: str
     status: str
     hub_external_id: str
@@ -408,7 +423,12 @@ def list_reviews(request):
     enrollment_reviews = enrollment_iface.list_reviews_for_hub(hub=hub)
 
     def _norm(item: dict, type_: str, kind: str) -> dict:
-        return {"external_id": item.get("external_id"), "type": type_, "kind": kind, **item}
+        return {
+            "external_id": item.get("external_id"),
+            "type": type_,
+            "kind": kind,
+            **item,
+        }
 
     return {
         "enrollment_rg": [
@@ -837,7 +857,9 @@ def reactivate_promoter(request, external_id: str):
 
 
 @api.get("/students", response=PaginatedOut, tags=["student"])
-def list_hub_students(request, status: str | None = None, limit: int = 200, offset: int = 0):
+def list_hub_students(
+    request, status: str | None = None, limit: int = 200, offset: int = 0
+):
     """Alunos do polo do coordenador (A2 — lista nova, Victor 2026-06-21). Filtro opcional por status,
     paginação `limit`/`offset` + `total`. Cada item traz o `external_id` pra abrir o detalhe."""
     coordinator = _coordinator(request)

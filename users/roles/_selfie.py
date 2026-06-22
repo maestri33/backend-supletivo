@@ -61,7 +61,10 @@ def verify(
     # corrigem ("INVALIDA… na verdade VALIDA"). `\b` evita casar "VALIDA" dentro de "INVALIDA".
     verdicts = re.findall(r"\b(?:IN)?VALIDA\b", (desc or "").upper())
     if not verdicts:
-        return REVIEW, desc  # resposta inconclusiva → revisão humana (nunca reprova no escuro)
+        return (
+            REVIEW,
+            desc,
+        )  # resposta inconclusiva → revisão humana (nunca reprova no escuro)
     return (REJECTED if verdicts[-1].startswith("IN") else APPROVED), desc
 
 

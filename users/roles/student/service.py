@@ -835,9 +835,13 @@ def _notify_coordinator(student: Student, *, event: str, key: str, **ctx) -> Non
         logger.warning("student.notify_coord_failed", caller=event, error=str(exc))
 
 
-def list_for_hub(*, hub, status: str | None = None, limit: int = 200, offset: int = 0) -> tuple[list[dict], int]:
+def list_for_hub(
+    *, hub, status: str | None = None, limit: int = 200, offset: int = 0
+) -> tuple[list[dict], int]:
     """Alunos do POLO (visão do coordenador, A2 — Victor 2026-06-21: antes o coordenador só tinha o
     detalhe /students/{id}; agora lista/busca por status). Devolve (rows, total) pra paginação."""
+    from users.profiles import interface as profiles
+
     qs = Student.objects.filter(hub=hub).select_related("user").order_by("-created_at")
     if status:
         qs = qs.filter(status=status)
