@@ -401,6 +401,53 @@ def list_all_students(request, hub: str | None = None, status: str | None = None
     return student_iface.list_for_staff(hub_external_id=hub, status=status)
 
 
+# ── credenciais da plataforma (SÓ staff altera após a conclusão — Victor 2026-06-23) ──
+class PlatformCredentialsIn(Schema):
+    platform_login: str
+    platform_password: str
+    platform_url: str | None = None
+    platform_notes: str | None = None
+
+
+@api.put("/students/{external_id}/platform-credentials", tags=["student"])
+def set_student_platform_credentials(
+    request, external_id: str, payload: PlatformCredentialsIn
+):
+    """Staff corrige login/senha (e url/notes) da plataforma de um aluno JÁ concluído. SÓ staff
+    altera depois de concluído (Victor 2026-06-23: coordenador/bot não mexem). Login é ÚNICO por
+    matrícula → 409 `PLATFORM_LOGIN_TAKEN` se repetir; aluno inexistente → 404."""
+    require_superuser(request.auth)
+    student = student_iface.set_platform_credentials(
+        student_external_id=external_id,
+        platform_login=payload.platform_login,
+        platform_password=payload.platform_password,
+        platform_url=payload.platform_url,
+        platform_notes=payload.platform_notes,
+    )
+    return {"external_id": str(student.external_id), "status": student.status}
+
+
+# ── bot matriculador (MOCK — o gatilho real é o signal enrollment_ready_for_matricula) ──
+class BotMatriculadorIn(Schema):
+    enrollment_external_id: str
+
+
+@api.post("/bot-matriculador", tags=["todo"])
+def bot_matriculador(request, payload: BotMatriculadorIn):
+    """STUB do bot matriculador — ainda NÃO implementado (Victor 2026-06-23). Reserva de interface;
+    o gatilho de verdade é o Django signal `enrollment_ready_for_matricula` (core/todo). Responde 501."""
+    require_superuser(request.auth)
+    from django.http import JsonResponse
+
+    return JsonResponse(
+        {
+            "detail": "Bot matriculador ainda não implementado.",
+            "code": "NOT_IMPLEMENTED",
+        },
+        status=501,
+    )
+
+
 # ── usuários da plataforma (read-only; mutação de role = «PENDÊNCIA» Victor) ──
 @api.get("/users", tags=["staff"])
 def list_users(request, role: str | None = None, limit: int = 200):
