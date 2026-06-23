@@ -260,6 +260,54 @@ class CandidateAwaitingOut(Schema):
     rejected: bool
 
 
+# ── candidato L2: detalhe + resultados de decisão (Victor 2026-06-23: eram dict cru e o front
+# renderizava às cegas; agora o OpenAPI publica o contrato. Espelham 1:1 o que os services montam.
+# Os endpoints que devolvem o /me inteiro do candidato — document/decide, document/reset — e o
+# GET /{id}/selfie (foto+análise) seguem dict cru de propósito: shape aninhado, re-fetch após decidir).
+class CandidateUserOut(Schema):
+    external_id: str
+    name: str | None = None
+    cpf: str | None = None
+    phone: str | None = None
+    email: str | None = None
+
+
+class CandidateDetailOut(Schema):
+    """Detalhe do candidato pro coordenador decidir VENDO (perfil + coleta). Identidade/Pix vêm do
+    Profile; `selfie_image` é o caminho da foto (servida em /media)."""
+
+    external_id: str
+    status: str
+    user: CandidateUserOut
+    doc_type: str | None = None
+    mother_name: str | None = None
+    father_name: str | None = None
+    marital_status: str | None = None
+    birthplace: str | None = None
+    nationality: str | None = None
+    pix_key: str | None = None
+    pix_key_type: str | None = None
+    pix_validated: bool
+    selfie_status: str
+    selfie_image: str | None = None
+    selfie_description: str | None = None
+
+
+class CandidateActionOut(Schema):
+    """Resultado de approve/reject — o novo status do candidato (`approved` | `rejected`)."""
+
+    external_id: str
+    status: str
+
+
+class CandidateSelfieDecideOut(Schema):
+    """Resultado da decisão de selfie do candidato pelo coordenador."""
+
+    external_id: str
+    selfie_status: str
+    status: str
+
+
 class HubStudentRowOut(Schema):
     """Aluno do polo (A2 — lista nova): rol de aluno pelo status, com o external_id pra abrir o detalhe."""
 
@@ -584,7 +632,11 @@ def decide_enrollment_selfie(request, external_id: str, payload: SelfieDecideIn)
     }
 
 
-@api.post("/candidates/{external_id}/selfie/decide", tags=["candidate"])
+@api.post(
+    "/candidates/{external_id}/selfie/decide",
+    response=CandidateSelfieDecideOut,
+    tags=["candidate"],
+)
 def decide_candidate_selfie(request, external_id: str, payload: SelfieDecideIn):
     """Coordenador decide a selfie de um candidato que a IA mandou pra REVISÃO."""
     coordinator = _coordinator(request)
@@ -785,7 +837,7 @@ def list_candidates_awaiting(request):
     return candidate_iface.list_awaiting_approval_for_hub(hub=hub)
 
 
-@api.get("/candidates/{external_id}", response=dict, tags=["candidate"])
+@api.get("/candidates/{external_id}", response=CandidateDetailOut, tags=["candidate"])
 def get_candidate_for_coordinator(request, external_id: str):
     """Detalhe do candidato (perfil + coleta) pro coordenador decidir VENDO antes de aprovar."""
     coordinator = _coordinator(request)
@@ -794,7 +846,9 @@ def get_candidate_for_coordinator(request, external_id: str):
     )
 
 
-@api.post("/candidates/{external_id}/approve", tags=["candidate"])
+@api.post(
+    "/candidates/{external_id}/approve", response=CandidateActionOut, tags=["candidate"]
+)
 def approve_candidate(request, external_id: str):
     """Aprova o candidato do seu polo → promove a PROMOTOR (e atribui o treino obrigatório)."""
     coordinator = _coordinator(request)
@@ -804,7 +858,9 @@ def approve_candidate(request, external_id: str):
     return {"external_id": str(cand.external_id), "status": cand.status}
 
 
-@api.post("/candidates/{external_id}/reject", tags=["candidate"])
+@api.post(
+    "/candidates/{external_id}/reject", response=CandidateActionOut, tags=["candidate"]
+)
 def reject_candidate(request, external_id: str, payload: RejectIn):
     """Rejeita o candidato aguardando aprovação (com motivo) — não promove."""
     coordinator = _coordinator(request)
