@@ -96,13 +96,15 @@ def list_hubs(request):
 def list_promoters(request):
     """Lista os promotores (pra escolher quem será coordenador de um polo)."""
     require_superuser(request.auth)
+    base = roles.users_with_role("promoter")
+    pmap = profiles.get_map(base)
     out = []
-    for user in roles.users_with_role("promoter"):
-        profile = profiles.get(user)
+    for user in base:
+        p = pmap.get(user.id)
         out.append(
             {
                 "external_id": str(user.external_id),
-                "name": profile.name if profile else None,
+                "name": p.name if p else None,
             }
         )
     return out
@@ -407,9 +409,10 @@ def list_users(request, role: str | None = None, limit: int = 200):
     require_superuser(request.auth)
     from users.auth.models import User
 
-    base = (
-        roles.users_with_role(role) if role else list(User.objects.order_by("-id"))
-    )[:limit]
+    if role:
+        base = roles.users_with_role(role)[:limit]
+    else:
+        base = list(User.objects.order_by("-id")[:limit])
     pmap = profiles.get_map(base)
     out = []
     for u in base:
