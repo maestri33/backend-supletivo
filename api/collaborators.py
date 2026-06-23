@@ -73,7 +73,9 @@ class CandidateCreateIn(Schema):
     cpf: str
     phone: str
     email: str
-    hub: str | None = None  # external_id do polo (ref do coordenador); senão hub padrão
+    hub: str | None = (
+        None  # ?ref= da landing: external_id de POLO ou PROMOTOR; ruim/ausente → polo padrão
+    )
 
 
 class CandidateOut(Schema):
@@ -160,9 +162,11 @@ auth_router = Router(tags=["auth"])
 
 @auth_router.post("/register", response={201: CandidateOut}, auth=None)
 def register(request, payload: CandidateCreateIn):
-    """Cadastro do candidato: cria o user (role `candidate`) + o Candidate ligado a um polo (`hub`
-    = external_id do coordenador na landing `?ref=`; senão o polo padrão). Devolve o external_id do
-    CANDIDATO e do USER (este o /auth/login consome)."""
+    """Cadastro do candidato: cria o user (role `candidate`) + o Candidate ligado a um polo.
+
+    `hub` = `?ref=` da landing: aceita external_id de POLO **ou** de PROMOTOR (resolvido pro hub dele).
+    Ref ausente/inválido/sem-coordenador cai no polo padrão — tolerante, não bloqueia o cadastro
+    (`resolve_capture_hub`). Devolve o external_id do CANDIDATO e do USER (este o /auth/login consome)."""
     return 201, candidate_iface.create_candidate(
         cpf=payload.cpf, phone=payload.phone, email=payload.email, hub=payload.hub
     )
