@@ -86,6 +86,60 @@ def create_from_enrollment(
     return student
 
 
+def ensure_platform_login_available(
+    *, platform_login: str | None, exclude_user_external_id: str | None = None
+) -> None:
+    """Login da plataforma é ÚNICO por matrícula (Victor 2026-06-23): nenhum OUTRO student usa o
+    mesmo `platform_login`. Vazio/None não trava (login é opcional no model). Usado no `conclude`
+    (criação) e no `set_platform_credentials` (edição do staff)."""
+    if not platform_login:
+        return
+    qs = Student.objects.filter(platform_login=platform_login)
+    if exclude_user_external_id:
+        qs = qs.exclude(user__external_id=exclude_user_external_id)
+    if qs.exists():
+        raise Conflict(
+            "Este login de plataforma já está em uso por outra matrícula.",
+            code="PLATFORM_LOGIN_TAKEN",
+        )
+
+
+def set_platform_credentials(
+    *,
+    student_external_id: str,
+    platform_login: str,
+    platform_password: str,
+    platform_url: str | None = None,
+    platform_notes: str | None = None,
+) -> Student:
+    """Staff corrige as credenciais da plataforma de um aluno JÁ concluído (Victor 2026-06-23: SÓ
+    staff altera — coordenador/bot não mexem depois de concluído). Login único por matrícula."""
+    student = _by_external_id(student_external_id)
+    ensure_platform_login_available(
+        platform_login=platform_login,
+        exclude_user_external_id=str(student.user.external_id),
+    )
+    student.platform_login = platform_login
+    student.platform_password = platform_password
+    if platform_url is not None:
+        student.platform_url = platform_url
+    if platform_notes is not None:
+        student.platform_notes = platform_notes
+    student.save(
+        update_fields=[
+            "platform_login",
+            "platform_password",
+            "platform_url",
+            "platform_notes",
+            "updated_at",
+        ]
+    )
+    logger.info(
+        "student.platform_credentials_updated", external_id=str(student.external_id)
+    )
+    return student
+
+
 # ── consulta / helpers ───────────────────────────────────────────────────────
 
 

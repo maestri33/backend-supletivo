@@ -88,6 +88,15 @@ class Student(ExternalIdModel):
         db_table = "users_student"
         verbose_name = "aluno"
         verbose_name_plural = "alunos"
+        constraints = [
+            # login da plataforma é ÚNICO por matrícula (Victor 2026-06-23). Parcial: só vale pra
+            # login preenchido — `__gt=""` exclui null e string vazia.
+            models.UniqueConstraint(
+                fields=["platform_login"],
+                condition=models.Q(platform_login__gt=""),
+                name="uniq_student_platform_login",
+            ),
+        ]
 
     def __str__(self) -> str:
         return f"student<{self.external_id}:{self.status}>"

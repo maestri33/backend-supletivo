@@ -79,6 +79,9 @@ INSTALLED_APPS = [
     # hub = o POLO (§4 item 5). Hub→Address (FK §4); marca = catálogo no .env. Ações do
     # coordenador entram depois (grupo leadership). Consome users (coordinator/promoter).
     "hub.apps.HubConfig",
+    # todo = casca de funcionalidades a desenvolver (mocks "não implementado"). Hoje: bot
+    # matriculador (mock) + receiver do signal enrollment_ready_for_matricula. Sem models.
+    "core.todo.apps.TodoConfig",
 ]
 
 # User custom (palavra do Victor 2026-06-01; sobrepõe o "User padrão" da CONVENTION §4): a
@@ -234,6 +237,11 @@ FRONTEND_URL = env("FRONTEND_URL", default="")
 # Path do wizard de matrícula no front — vira o deep-link dos notifies de resolução (proposta API #11:
 # o coordenador decide → o aluno recebe o link e volta direto pro passo certo). Sem FRONTEND_URL → sem link.
 ENROLLMENT_RESUME_PATH = env("ENROLLMENT_RESUME_PATH", default="/matricula")
+# URL de login da instituição parceira (SIGA) — vai no notify de credenciais quando o cliente
+# vira ALUNO (login/senha/link). A partir daí é a única coisa que ele recebe (Victor 2026-06-23).
+INSTITUTION_LOGIN_URL = env(
+    "INSTITUTION_LOGIN_URL", default="https://cbi.sistemasiga.net/login/"
+)
 # Prazo default (dias) da cobrança PIX quando o caller não passa due_date.
 ASAAS_CHARGE_DUE_DAYS = env.int("ASAAS_CHARGE_DUE_DAYS", default=3)
 # Onboarding/auto-cadastro do webhook (1a-v): nome do webhook que gerenciamos no Asaas (casamos por

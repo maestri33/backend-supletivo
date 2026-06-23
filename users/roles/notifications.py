@@ -79,6 +79,15 @@ _MESSAGES: dict[str, str] = {
         "{name}, é oficial: você é nosso aluno! 💚 Sua matrícula foi liberada. "
         "Seja muito bem-vindo(a), {name} — a sua escola estava esperando por você."
     ),
+    # dados de acesso à plataforma da instituição parceira — enviados ao virar ALUNO (WhatsApp +
+    # e-mail). Sem TTS (não se lê senha em voz). É a única coisa que o aluno recebe daqui pra frente.
+    "enrollment.credentials": (
+        "{name}, aqui estão seus dados de acesso à plataforma de estudos:\n\n"
+        "🔗 {link}\n"
+        "👤 Login: {login}\n"
+        "🔑 Senha: {password}\n\n"
+        "Guarde com você, {name} — é por aqui que você entra nas suas aulas. Bons estudos! 📚"
+    ),
     "enrollment.selfie_rejected": (
         "{name}, sua selfie não pôde ser confirmada. Envie uma nova foto pelo aplicativo, "
         "nítida e mostrando bem o rosto, {name}."

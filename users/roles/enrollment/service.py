@@ -1296,6 +1296,11 @@ def _advance_to_release(enr: Enrollment) -> None:
         )
         return
     _set_status(enr, _S.AWAITING_RELEASE)
+    # bot matriculador (mock) via signal: um dia faz a matrícula no SIGA automaticamente; hoje é
+    # no-op (cai no coordenador). O notify abaixo é o fallback (Victor 2026-06-23). 1º signal do repo.
+    from users.roles.enrollment.signals import enrollment_ready_for_matricula
+
+    enrollment_ready_for_matricula.send(sender=Enrollment, enrollment=enr)
     _notify_coordinator_awaiting(enr)
 
 
@@ -1670,6 +1675,12 @@ def conclude(
             extra={"missing": missing},
         )
 
+    # login da plataforma é ÚNICO por matrícula (Victor 2026-06-23) — rejeita ANTES de promover.
+    student_iface.ensure_platform_login_available(
+        platform_login=platform_login,
+        exclude_user_external_id=str(enr.user.external_id),
+    )
+
     with transaction.atomic():
         if "student" not in roles.active_roles(enr.user):
             roles.promote(enr.user, "student")
@@ -1686,6 +1697,7 @@ def conclude(
         )
 
     _notify_released(enr)
+    _notify_credentials(enr, login=platform_login, password=platform_password)
     logger.info("enrollment.concluded", external_id=str(enr.external_id))
     return enr
 
@@ -1969,3 +1981,30 @@ def _notify_released(enr: Enrollment) -> None:
         )
     except Exception as exc:  # noqa: BLE001
         logger.warning("enrollment.notify_released_failed", error=str(exc))
+
+
+def _notify_credentials(enr: Enrollment, *, login: str, password: str) -> None:
+    """Manda login/senha/link da plataforma ao novo ALUNO (WhatsApp + e-mail; SEM TTS — não se lê
+    senha em voz). Link = INSTITUTION_LOGIN_URL. Best-effort (§12); idempotente por chave."""
+    from notify.interface.send import send
+    from users.roles import notifications as msgs
+
+    p = profiles.get(enr.user)
+    link = getattr(settings, "INSTITUTION_LOGIN_URL", "") or ""
+    try:
+        send(
+            text=msgs.text(
+                "enrollment.credentials",
+                name=msgs.first_name(p.name if p else None),
+                login=login,
+                password=password,
+                link=link,
+            ),
+            caller="enrollment.credentials",
+            phone=p.phone if p else None,
+            email=p.email if p else None,
+            email_channel=bool(p and p.email),
+            idempotency_key=f"enr_credentials_{enr.external_id}",
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("enrollment.notify_credentials_failed", error=str(exc))

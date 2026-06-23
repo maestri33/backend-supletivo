@@ -10,6 +10,7 @@ from users.roles.student.service import (
     create_from_enrollment,
     decide_document,
     detail_for_coordinator,
+    ensure_platform_login_available,
     get_for_user_external_id,
     grade_exam,
     issue_diploma,
@@ -22,6 +23,7 @@ from users.roles.student.service import (
     resolve_pendency,
     schedule_exam,
     set_blood_type,
+    set_platform_credentials,
     to_dict,
     upload_document,
 )
@@ -32,6 +34,7 @@ __all__ = [
     "create_from_enrollment",
     "decide_document",
     "detail_for_coordinator",
+    "ensure_platform_login_available",
     "get_for_user_external_id",
     "grade_exam",
     "issue_diploma",
@@ -44,6 +47,7 @@ __all__ = [
     "resolve_pendency",
     "schedule_exam",
     "set_blood_type",
+    "set_platform_credentials",
     "to_dict",
     "upload_document",
 ]
