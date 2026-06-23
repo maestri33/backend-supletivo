@@ -44,11 +44,20 @@ def create_candidate(*, cpf: str, phone: str, email: str, hub=None) -> dict:
     `hub` = external_id do polo (landing `?ref=` do coordenador); sem hub → hub padrão (regra dura:
     candidato↔hub).
     """
-    hub_obj = hub_iface.get_by_external_id(hub) if hub else hub_iface.get_default()
+    hub_obj, ref_reason = hub_iface.resolve_capture_hub(hub)
     if hub_obj is None:
         raise CandidateError(
             "Nenhum polo disponível para o cadastro.", code="NO_HUB"
-        )  # seed_defaults não rodou / hub inexistente
+        )  # nem o polo padrão existe (seed_defaults não rodou)
+    if ref_reason.endswith("_default") and ref_reason != "no_ref_default":
+        # veio um ref mas não resolveu pro polo dele (inválido / promotor sem hub / polo sem coord)
+        # → caiu no padrão. Loga pro staff monitorar links de captação ruins.
+        logger.warning(
+            "candidate.ref_fallback",
+            ref=hub,
+            reason=ref_reason,
+            hub=str(hub_obj.external_id),
+        )
 
     reg = auth_iface.register(role="candidate", phone=phone, cpf=cpf, email=email)
     user = User.objects.get(external_id=reg["external_id"])
@@ -57,6 +66,7 @@ def create_candidate(*, cpf: str, phone: str, email: str, hub=None) -> dict:
         "candidate.created",
         external_id=str(candidate.external_id),
         hub=str(hub_obj.external_id),
+        ref_reason=ref_reason,
     )
     return {
         "external_id": str(candidate.external_id),

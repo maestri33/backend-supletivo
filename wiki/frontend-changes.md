@@ -3,6 +3,20 @@
 > Nota viva. O backend muda aqui primeiro; cada item abaixo é algo que o app/landing
 > precisa ajustar. O Victor repassa pro time de frontend. Datas em AAAA-MM-DD.
 
+## 2026-06-23 — Cadastro de candidato: `ref` tolerante + diagnóstico da fila L2
+
+**Fila L2 (candidatos aguardando aprovação) — NÃO era bug de hub.** Um candidato só entra na fila do
+coordenador (`GET /leadership/candidates` e o balde `candidates_awaiting_approval` de `/reviews`)
+quando **conclui a coleta** (status `completed`). Em `started`/meio do funil ele NÃO aparece — em polo
+nenhum. (Diagnóstico do caso reportado: o candidato estava em `started`; o vínculo com o polo do
+coordenador estava correto.)
+
+**`POST /collaborators/auth/register` — o `hub` (o `?ref=` da landing) ficou tolerante:**
+- aceita external_id de **POLO ou de PROMOTOR** (resolve pro hub do promotor — espelha o `?ref=` do funil do lead);
+- `ref` ausente / inválido / malformado / de polo sem coordenador → cai no **polo padrão** (não dá mais erro nem 500);
+- ⚠️ no funil do **lead** o `?ref=` é o id do **promotor**; no do **candidato** mande o external_id do
+  **polo** (do coordenador) pra captação cair no coordenador certo — senão vai pro padrão.
+
 ## 2026-06-21 — Passo "educação" virou ESTRUTURADO (breaking)
 
 `POST /enrollment/education` **não aceita mais** `last_year_studied` (texto livre). Novo payload:

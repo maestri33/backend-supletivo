@@ -164,6 +164,49 @@ def hub_of(user) -> Hub | None:
     return coordinated or get_default()
 
 
+def resolve_capture_hub(ref: str | None) -> tuple[Hub | None, str]:
+    """Resolve o POLO de captação de um candidato a partir do `ref` da landing — TOLERANTE (Victor
+    2026-06-23). Nunca bloqueia o cadastro nem estoura por `ref` ruim: sempre devolve um polo COM
+    coordenador (pra fila L2 do coordenador poder encher) ou cai no padrão, com o motivo pra log.
+
+    `ref` aceita external_id de POLO **ou** de PROMOTOR (espelha o funil do lead, que usa
+    `?ref=promotor`). Devolve `(hub, reason)`; `hub=None` só se nem o polo padrão existir (seed_defaults
+    não rodou). Lookups são à prova de `ref` malformado (não-UUID não pode derrubar a porta de entrada).
+    """
+    from django.core.exceptions import ValidationError
+
+    ref = (ref or "").strip()
+    if not ref:
+        return get_default(), "no_ref_default"
+
+    # 1) ref como POLO (lookup seguro: ref malformado vira "não achou", não 500).
+    try:
+        hub = get_by_external_id(ref)
+    except (ValueError, ValidationError):
+        hub = None
+    if hub is not None:
+        if hub.coordinator_id is not None:
+            return hub, "hub"
+        # polo sem coordenador nunca aprovaria o candidato → manda pro padrão e avisa.
+        return get_default(), "hub_no_coordinator_default"
+
+    # 2) ref como PROMOTOR (external_id de User) → hub_of (Promoter.hub → coordenado → padrão).
+    from users.auth.models import User
+
+    try:
+        user = User.objects.filter(external_id=ref, is_active=True).first()
+    except (ValueError, ValidationError):
+        user = None
+    if user is not None:
+        promoter_hub = hub_of(user)
+        if promoter_hub is not None and promoter_hub.coordinator_id is not None:
+            return promoter_hub, "promoter_ref"
+        return get_default(), "promoter_hub_no_coordinator_default"
+
+    # 3) ref não resolveu (link velho / typo) → padrão, sem perder o candidato (staff vê pelo log).
+    return get_default(), "ref_unresolved_default"
+
+
 def set_coordinator(*, hub_external_id: str, coordinator_external_id: str) -> Hub:
     """Designa/troca o coordenador do polo (um promotor); garante a role `coordinator` nele."""
     hub = get_by_external_id(hub_external_id)
