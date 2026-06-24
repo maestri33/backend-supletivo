@@ -27,7 +27,6 @@ from users.exceptions import Conflict, DomainError, NotFound
 from users.roles.student.config import (
     MALE_ONLY_DOC_TYPES,
     REQUIRED_DOC_TYPES,
-    validation_prompt,
 )
 from users.roles.student.models import (
     Student,
@@ -207,6 +206,9 @@ def to_dict(student: Student) -> dict:
                 "doc_type": d.doc_type,
                 "validation_status": d.validation_status,
                 "has_photo": bool(d.photo),
+                "analysis_status": d.validation_status,
+                "analysis_reason": _document_analysis_reason(d),
+                "expires_at": _document_expires_at(d),
             }
             for d in student.documents.all()
         ],
@@ -229,6 +231,42 @@ def to_dict(student: Student) -> dict:
         if diploma
         else None,
     }
+
+
+def _document_analysis_reason(doc: StudentDocument) -> str | None:
+    """Motivo da análise guardado no validation_result (pipeline 2 estágios)."""
+    if not isinstance(doc.validation_result, dict):
+        return None
+    return doc.validation_result.get("reason")
+
+
+def _document_expires_at(doc: StudentDocument) -> str | None:
+    """TTL do pending: até quando o status `pending` vale."""
+    from datetime import datetime
+
+    from django.utils import timezone
+    from users.roles import _analysis
+
+    if doc.validation_status != StudentDocument.Validation.PENDING:
+        return None
+    started_raw = (doc.validation_result or {}).get("analysis_started_at")
+    if not started_raw:
+        return None
+    if isinstance(started_raw, datetime):
+        started = (
+            started_raw
+            if started_raw.tzinfo
+            else started_raw.replace(tzinfo=timezone.utc)
+        )
+    else:
+        try:
+            started = datetime.fromisoformat(started_raw)
+        except (TypeError, ValueError):
+            return None
+        if started.tzinfo is None:
+            started = started.replace(tzinfo=timezone.utc)
+    exp = _analysis.expires_at(started)
+    return exp.isoformat() if exp else None
 
 
 # ── envio de documentos (aluno) + validação por IA (async) ───────────────────
@@ -266,8 +304,14 @@ def _save_photo(
 
 def upload_document(
     *, user_external_id: str, doc_type: str, image_bytes: bytes, content_type: str
-) -> StudentDocument:
-    """Aluno envia a foto de um documento → fica PENDING e dispara a validação por IA (async)."""
+) -> tuple[StudentDocument, dict]:
+    """Aluno envia a foto de um documento → fica PENDING e dispara a validação por IA (async).
+
+    Retorna (documento, ack) para a API devolver `analysis_status`, `poll_after_ms` e `expires_at`."""
+    from django.utils import timezone
+
+    from users.roles import _analysis
+
     student = _require(
         user_external_id,
         Student.Status.AWAITING_DOCUMENTS,
@@ -292,13 +336,14 @@ def upload_document(
         )
 
     rel = _save_photo(student, doc_type, image_bytes, content_type)
+    started_at = timezone.now()
     doc, _ = StudentDocument.objects.update_or_create(
         student=student,
         doc_type=doc_type,
         defaults={
             "photo": rel,
             "validation_status": StudentDocument.Validation.PENDING,
-            "validation_result": None,
+            "validation_result": {"analysis_started_at": started_at.isoformat()},
             "validated_at": None,
         },
     )
@@ -316,53 +361,110 @@ def upload_document(
         external_id=str(doc.external_id),
         doc_type=doc_type,
     )
-    return doc
+    return doc, _analysis.ack(_analysis.PENDING, started_at)
 
 
-def _ai_validate(doc: StudentDocument) -> tuple[str, str | None]:
-    """Roda a IA na foto. Retorna (validation_status, texto_bruto). Best-effort → ('pending', None).
+def _ai_validate(
+    doc: StudentDocument,
+) -> tuple[str, dict | None]:
+    """Pipeline 2 estágios de IA para 1 foto de documento do aluno.
 
-    Confere a IDENTIDADE: passa o nome/nascimento que o CPFHub deu no cadastro (gravados no Profile) →
-    se o documento for de outra pessoa, a IA reprova de imediato (Victor 2026-06-05)."""
-    from integrations.ai import service as ai
+    (a) Visão: a foto é o documento esperado e está legível?
+    (b) Se aprovado, OCR + extração JSON: lê campos relevantes e confere identidade.
+
+    Retorna (validation_status, payload). O payload grava `vision` (status+motivo),
+    `ocr` (texto bruto), `extracted` (JSON) e `reason` (motivo final). Best-effort sem foto
+    → ('pending', None). IA fora do ar/ambígua → REVIEW (coordenador decide; nunca auto-aprova).
+
+    Confere a IDENTIDADE: passa o nome do CPFHub (Profile); se o documento for de outra pessoa,
+    a IA reprova de imediato (Victor 2026-06-05)."""
     from users.profiles import interface as profiles
+    from users.roles.student import _document_ai as doc_ai
 
     fp = Path(settings.MEDIA_ROOT) / (doc.photo or "")
     if not doc.photo or not fp.exists():
         return StudentDocument.Validation.PENDING, None
+
     ext = fp.suffix.lstrip(".").lower()
     mime = "image/png" if ext == "png" else "image/jpeg"
+    caller = "student.document"
+
     p = profiles.get(doc.student.user)
     holder_name = p.name if p else None
-    holder_birth = p.birth_date.strftime("%d/%m/%Y") if (p and p.birth_date) else None
+
+    image_bytes = fp.read_bytes()
+
+    # (a) Visão: foto é o documento esperado e está legível?
+    vision_status, vision_reason = doc_ai.check_student_document_photo(
+        image_bytes,
+        doc_type=doc.doc_type,
+        mime_type=mime,
+        caller=caller,
+    )
+
+    result: dict = {
+        "vision": {"status": vision_status, "reason": vision_reason},
+    }
+
+    # Visão reprovou → rejeita imediatamente (sem gastar OCR).
+    if vision_status == doc_ai.REJECTED:
+        result["reason"] = vision_reason
+        return StudentDocument.Validation.REJECTED, result
+
+    # Visão em dúvida/fora do ar → review.
+    if vision_status != doc_ai.APPROVED:
+        result["reason"] = vision_reason
+        return StudentDocument.Validation.REVIEW, result
+
+    # (b) OCR + extração JSON.
     try:
-        desc = ai.describe_image(
-            fp.read_bytes(),
-            caller="student.document",
-            mime_type=mime,
-            prompt=validation_prompt(
-                doc.doc_type, holder_name=holder_name, holder_birth=holder_birth
-            ),
+        ocr_text = doc_ai.ocr_image(image_bytes, caller=caller)
+        extracted = doc_ai.extract_student_document(
+            ocr_text,
+            doc_type=doc.doc_type,
+            holder_name=holder_name,
+            caller=caller,
         )
-    except Exception as exc:  # noqa: BLE001 — IA fora do ar → REVIEW (coordenador resolve), Victor 2026-06-05
+    except Exception as exc:  # noqa: BLE001 — IA do ar na extração → review
         logger.warning(
-            "student.doc_ai_failed", external_id=str(doc.external_id), error=str(exc)
+            "student.doc_extract_failed",
+            external_id=str(doc.external_id),
+            error=str(exc),
         )
-        return (
-            StudentDocument.Validation.REVIEW,
-            "IA indisponível no momento — enviado para revisão manual do coordenador.",
+        result["reason"] = (
+            "IA indisponível na extração dos dados — enviado para revisão manual do coordenador."
         )
-    head = (desc or "").strip().upper()[:24]
-    if "REPROVADO" in head:
-        return StudentDocument.Validation.REJECTED, desc
-    if "APROVADO" in head:
-        return StudentDocument.Validation.APPROVED, desc
-    # IA respondeu mas não foi conclusiva (dúvida) → revisão humana, NÃO auto-aprova (Victor 2026-06-05).
-    return StudentDocument.Validation.REVIEW, desc
+        return StudentDocument.Validation.REVIEW, result
+
+    result["ocr"] = ocr_text
+    result["extracted"] = extracted
+
+    match = str(extracted.get("name_match") or "").strip().lower()
+    name_reason = (extracted.get("name_reason") or "").strip()
+
+    if match in ("nao", "não", "no"):
+        result["reason"] = (
+            f"O nome no documento não confere com o do cadastro. {name_reason}".strip()
+        )
+        return StudentDocument.Validation.REJECTED, result
+
+    if match not in ("sim", "yes"):
+        result["reason"] = (
+            f"Não deu pra confirmar o nome do titular. {name_reason}".strip()
+        )
+        return StudentDocument.Validation.REVIEW, result
+
+    result["reason"] = name_reason or "Documento validado."
+    return StudentDocument.Validation.APPROVED, result
 
 
-def apply_validation(student_document_id: int, *, status: str, raw: str | None) -> None:
-    """Grava o veredito da IA no documento (chamado pela task). Idempotente (só age em PENDING)."""
+def apply_validation(
+    student_document_id: int, *, status: str, payload: dict | None
+) -> None:
+    """Grava o veredito da IA no documento (chamado pela task). Idempotente (só age em PENDING).
+
+    `payload` contém `vision`, `ocr`, `extracted` e `reason` (motivo final). Mantém compat
+    com o formato legado em que a chave `raw` pode vir do `validation_result` legado."""
     doc = (
         StudentDocument.objects.select_related("student")
         .filter(id=student_document_id)
@@ -373,7 +475,7 @@ def apply_validation(student_document_id: int, *, status: str, raw: str | None) 
     if status == StudentDocument.Validation.PENDING:
         return  # sem foto — nada a aplicar
     doc.validation_status = status
-    doc.validation_result = {"raw": raw} if raw else None
+    doc.validation_result = payload
     doc.validated_at = timezone.now()
     doc.save(
         update_fields=[
@@ -383,10 +485,12 @@ def apply_validation(student_document_id: int, *, status: str, raw: str | None) 
             "updated_at",
         ]
     )
+    reason = (payload or {}).get("reason")
     logger.info(
         "student.document_validated",
         external_id=str(doc.external_id),
         status=status,
+        reason=reason,
     )
     if status == StudentDocument.Validation.APPROVED:
         _maybe_release_exam(doc.student)
@@ -397,6 +501,7 @@ def apply_validation(student_document_id: int, *, status: str, raw: str | None) 
             event="student.document_rejected",
             key=f"student_doc_rejected_{doc.external_id}",
             doc_type=doc.get_doc_type_display(),
+            reason=reason,
         )
     elif status == StudentDocument.Validation.REVIEW:
         # IA em dúvida / fora do ar → aciona o coordenador pra decidir (sim/não).
@@ -405,6 +510,7 @@ def apply_validation(student_document_id: int, *, status: str, raw: str | None) 
             event="student.document_in_review",
             key=f"student_doc_review_{doc.external_id}",
             doc_type=doc.get_doc_type_display(),
+            reason=reason,
         )
 
 
@@ -474,7 +580,7 @@ def decide_document(
     )
     # preserva a justificativa da IA e soma a decisão humana (auditoria).
     doc.validation_result = {
-        "ai": (doc.validation_result or {}).get("raw"),
+        **(doc.validation_result or {}),
         "coordinator": note,
     }
     doc.validated_at = timezone.now()

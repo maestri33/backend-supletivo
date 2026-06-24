@@ -151,6 +151,227 @@ class SubmissionIn(Schema):
     answer: str
 
 
+# ── schemas de SAÍDA (response=) — espelham o snake_case real dos services (candidate/promoter/training)
+class CandidateProfileOut(Schema):
+    """Perfil do candidato como aparece no /me (inclui name/birth_date que o CPFHub manda)."""
+
+    mother_name: str | None = None
+    father_name: str | None = None
+    birthplace: str | None = None
+    marital_status: str | None = None
+    nationality: str | None = None
+    name: str | None = None
+    birth_date: str | None = None
+
+
+class CandidateAddressOut(Schema):
+    """Endereço do candidato (público) com `cep`/`zipcode` e `missing_fields`."""
+
+    cep: str | None = None
+    zipcode: str | None = None
+    street: str | None = None
+    number: str | None = None
+    complement: str | None = None
+    neighborhood: str | None = None
+    city: str | None = None
+    state: str | None = None
+    country: str | None = None
+    missing_fields: list[str] = []
+
+
+class CandidateDocumentSubOut(Schema):
+    """Sub-documento genérico (RG/CNH/certidão/militar) — foto + número básico + validação."""
+
+    number: str | None = None
+    issuing_agency: str | None = None
+    issue_date: str | None = None
+    category: str | None = None
+    date_of_birth: str | None = None
+    expires_on: str | None = None
+    national_register: str | None = None
+    front_photo: str | None = None
+    back_photo: str | None = None
+    full_photo: str | None = None
+    validation_status: str | None = None
+    validation_reason: str | None = None
+
+
+class CandidateDocumentsOut(Schema):
+    """Bloco de documentos do candidato."""
+
+    external_id: str
+    rg: CandidateDocumentSubOut | None = None
+    cnh: CandidateDocumentSubOut | None = None
+    certificate: CandidateDocumentSubOut | None = None
+    military: CandidateDocumentSubOut | None = None
+
+
+class CandidateSelfieOut(Schema):
+    """Bloco da selfie no /me e no GET /candidate/selfie."""
+
+    exists: bool
+    photo: str | None = None
+    taken_at: str | None = None
+    status: str | None = None
+    analysis_status: str | None = None
+    analysis_reason: str | None = None
+    expires_at: str | None = None
+    verified: bool
+    description: str | None = None
+
+
+class CandidateMeOut(Schema):
+    """/me RICO do candidato — devolvido por TODA mutação do wizard."""
+
+    external_id: str
+    status: str
+    hub_external_id: str
+    pix_validated: bool
+    selfie_verified: bool
+    selfie_status: str | None = None
+    profile: CandidateProfileOut | None = None
+    address: CandidateAddressOut | None = None
+    documents: CandidateDocumentsOut | None = None
+    selfie: CandidateSelfieOut | None = None
+
+
+class CandidateDocumentSectionOut(Schema):
+    """Seção rica do documento (GET /candidate/document): tipo + fotos + validação IA + extraídos + missing_fields."""
+
+    doc_type: str | None = None
+    number: str | None = None
+    issuing_agency: str | None = None
+    issue_date: str | None = None
+    category: str | None = None
+    date_of_birth: str | None = None
+    expires_on: str | None = None
+    national_register: str | None = None
+    front_photo: str | None = None
+    back_photo: str | None = None
+    full_photo: str | None = None
+    validation_status: str | None = None
+    validation_reason: str | None = None
+    analysis_status: str | None = None
+    analysis_reason: str | None = None
+    extracted: dict = {}
+    missing_fields: list[str] = []
+
+
+class AnalysisAckOut(Schema):
+    """Ack de upload que dispara análise assíncrona (documento ou selfie)."""
+
+    stored: bool | str
+    analysis_status: str | None = None
+    poll_after_ms: int
+    expires_at: str | None = None
+
+
+class TrainingMaterialOut(Schema):
+    """Matéria atribuída ao promotor em treino (COM conteúdo)."""
+
+    material_external_id: str
+    title: str
+    blocking: bool
+    kind: str
+    assignment_status: str
+    submission_status: str
+    grade: str | None = None
+    justification: str | None = None
+    text_content: str = ""
+    content_blocks: list[dict] = []
+    question: str = ""
+    video: str | None = None
+    photo: str | None = None
+
+
+class TrainingMaterialProgressOut(Schema):
+    """Resumo de status por matéria atribuída (SEM conteúdo)."""
+
+    material_external_id: str
+    title: str
+    blocking: bool
+    kind: str
+    assignment_status: str
+    submission_status: str
+    grade: str | None = None
+    justification: str | None = None
+
+
+class SubmissionOut(Schema):
+    """Resultado da submissão de resposta de treino."""
+
+    external_id: str
+    material_external_id: str
+    grade: str | None = None
+    justification: str | None = None
+    status: str
+
+
+class PromoterMeOut(Schema):
+    """Painel do promotor: status + trava do treino + link de captação."""
+
+    external_id: str
+    status: str
+    hub_external_id: str
+    ref_url: str
+    locked: bool
+    pending_materials: list[dict] = []
+
+
+class PromoterLeadOut(Schema):
+    """Lead captado pelo promotor (read-only)."""
+
+    external_id: str
+    status: str
+    created_at: str
+
+
+class PromoterCommissionOut(Schema):
+    """Comissão do promotor (read-only)."""
+
+    external_id: str
+    amount: str
+    source: str
+    status: str
+    created_at: str
+
+
+class StudyPricingCardOut(Schema):
+    installments: int
+    installment: str
+    total: str
+
+
+class StudyPricingOut(Schema):
+    """Preço da auto-matrícula do promotor."""
+
+    pix: str
+    card: StudyPricingCardOut
+
+
+class StudyCheckoutOut(Schema):
+    """Checkout da auto-matrícula do promotor."""
+
+    payment_method: str | None = None
+    provider: str | None = None
+    amount: str | None = None
+    is_paid: bool | None = None
+    checkout_url: str | None = None
+    short_url: str | None = None
+    qrcode_payload: str | None = None
+    qrcode_image: str | None = None
+    due_date: str | None = None
+
+
+class StudyStartOut(Schema):
+    """Resultado da criação da auto-matrícula do promotor."""
+
+    external_id: str
+    user_external_id: str
+    status: str
+    checkout: StudyCheckoutOut | None = None
+
+
 # Erros de domínio (`DomainError`, incl. CandidateError/TrainingError) NÃO são capturados aqui:
 # sobem pro handler central da fábrica (`api/base.py`) → JSON `{detail, code, …extra}` no status certo.
 
@@ -208,7 +429,7 @@ api.add_router("/auth", auth_router)
 # ── candidato: funil de coleta (autenticado, role candidate) ────────────────
 # Ordem do wizard (plan/15 #4 — mantém a do promotor): perfil → endereço → documento → pix → selfie.
 # Convenção: o /me e TODA mutação devolvem o `me_dict` canônico (status + seções + missing_fields).
-@api.get("/candidate/me", tags=["candidate"])
+@api.get("/candidate/me", response=CandidateMeOut, tags=["candidate"])
 def candidate_me(request):
     """Estado COMPLETO do candidato pro resume do wizard: status + cada seção já preenchida +
     `missing_fields` por seção, numa chamada só."""
@@ -219,7 +440,7 @@ def candidate_me(request):
     return candidate_iface.me_dict(cand)
 
 
-@api.post("/candidate/profile", tags=["candidate"])
+@api.post("/candidate/profile", response=CandidateMeOut, tags=["candidate"])
 def candidate_profile(request, payload: ProfileIn):
     """Dados do perfil que o documento NÃO traz (estado civil, nacionalidade) — filiação/naturalidade
     vêm da extração do documento (Fatia B). Devolve o `me_dict` canônico."""
@@ -227,14 +448,14 @@ def candidate_profile(request, payload: ProfileIn):
     return candidate_iface.set_profile(user_external_id=ext, **payload.dict())
 
 
-@api.get("/candidate/address", tags=["candidate"])
+@api.get("/candidate/address", response=CandidateAddressOut, tags=["candidate"])
 def candidate_get_address(request):
     """GET do endereço + `missing_fields` (o front renderiza input só do que falta)."""
     ext = _guard(request, "candidate")
     return candidate_iface.get_address(user_external_id=ext)
 
 
-@api.post("/candidate/address", tags=["candidate"])
+@api.post("/candidate/address", response=CandidateMeOut, tags=["candidate"])
 def candidate_address(request, payload: AddressCepIn):
     """Body só `{cep}`: acha no ViaCEP, grava o endereço e devolve o `me_dict` canônico —
     `address.missing_fields` JÁ AVISA o que falta (`["number"]` = só o número; rua/bairro na lista =
@@ -243,7 +464,7 @@ def candidate_address(request, payload: AddressCepIn):
     return candidate_iface.set_address_cep(user_external_id=ext, cep=payload.cep)
 
 
-@api.patch("/candidate/address", tags=["candidate"])
+@api.patch("/candidate/address", response=CandidateMeOut, tags=["candidate"])
 def candidate_address_patch(request, payload: AddressDataIn):
     """Preenche os demais campos — SÓ os que estão VAZIOS (não sobrescreve o que o CEP trouxe).
     Devolve o `me_dict` canônico."""
@@ -253,7 +474,7 @@ def candidate_address_patch(request, payload: AddressDataIn):
     )
 
 
-@api.post("/candidate/documents", tags=["candidate"])
+@api.post("/candidate/documents", response=CandidateMeOut, tags=["candidate"])
 def candidate_documents(request, payload: DocumentsIn):
     """RG ou CNH (o candidato aceita os dois). Devolve o `me_dict` canônico."""
     ext = _guard(request, "candidate")
@@ -264,7 +485,9 @@ def candidate_documents(request, payload: DocumentsIn):
     )
 
 
-@api.get("/candidate/document", tags=["candidate"])
+@api.get(
+    "/candidate/document", response=CandidateDocumentSectionOut, tags=["candidate"]
+)
 def candidate_get_document(request):
     """Seção rica do documento (plan/15 B3): `doc_type` + fotos + validação IA canônica
     (`analysis_status`/`analysis_reason`/`analysis_started_at`) + campos extraídos + `missing_fields`
@@ -273,7 +496,7 @@ def candidate_get_document(request):
     return candidate_iface.get_document_section(user_external_id=ext)
 
 
-@api.patch("/candidate/document", tags=["candidate"])
+@api.patch("/candidate/document", response=CandidateMeOut, tags=["candidate"])
 def candidate_patch_document(request, payload: DocumentsIn):
     """Completa/corrige campos que a extração OCR não trouxe. Aceito em qualquer etapa da coleta
     (a foto segue sendo a fonte de verdade pra auditoria). Devolve o `me_dict` canônico."""
@@ -283,7 +506,9 @@ def candidate_patch_document(request, payload: DocumentsIn):
     return candidate_iface.patch_document_section(user_external_id=ext, **fields)
 
 
-@api.post("/candidate/documents/photo/{slot}", tags=["candidate"])
+@api.post(
+    "/candidate/documents/photo/{slot}", response=AnalysisAckOut, tags=["candidate"]
+)
 def candidate_document_photo(request, slot: str, file: UploadedFile = File(...)):
     """Foto do documento (slots `rg_front`/`rg_back`/`rg_full`/`cnh_front`/`cnh_back`/`cnh_full`).
     Plan/15 B3: na frente o rosto vira biometria do documento (best-effort) e a foto entra no
@@ -299,7 +524,7 @@ def candidate_document_photo(request, slot: str, file: UploadedFile = File(...))
     )
 
 
-@api.post("/candidate/pix", tags=["candidate"])
+@api.post("/candidate/pix", response=CandidateMeOut, tags=["candidate"])
 def candidate_pix(request, payload: PixIn):
     """Valida a chave Pix no Asaas/DICT (confere o titular) e grava. Devolve o `me_dict` canônico.
     ⚠️ MEXE R$0,01 real (DICT)."""
@@ -309,7 +534,7 @@ def candidate_pix(request, payload: PixIn):
     )
 
 
-@api.post("/candidate/selfie", tags=["candidate"])
+@api.post("/candidate/selfie", response=AnalysisAckOut, tags=["candidate"])
 def candidate_selfie(request, file: UploadedFile = File(...)):
     """Envia a selfie (assinatura) — **assíncrona** (plan/15 C, espelha `/enrollment/selfie`):
 
@@ -325,7 +550,7 @@ def candidate_selfie(request, file: UploadedFile = File(...)):
     )
 
 
-@api.get("/candidate/selfie", response=dict, tags=["candidate"])
+@api.get("/candidate/selfie", response=CandidateSelfieOut, tags=["candidate"])
 def get_candidate_selfie(request):
     """GET da selfie/assinatura (plan/15 C): foto + `analysis_status`/`analysis_reason` (canônico)
     + `expires_at` (TTL do `pending`). Aplica o TTL na leitura: pending estourado vira `review`
@@ -338,7 +563,7 @@ def get_candidate_selfie(request):
 # O candidato vira promotor quando o coordenador aprova; se houver matéria obrigatória pendente, o
 # promotor nasce TRAVADO e só vê o treino. As rotas são gated por `promoter` (ele já é promotor); a
 # trava em si é lida do `/promoter/me` (campo `locked`).
-@api.get("/training/materials", tags=["training"])
+@api.get("/training/materials", response=list[TrainingMaterialOut], tags=["training"])
 def training_materials(request):
     """Matérias ATRIBUÍDAS ao promotor (fixas do onboarding + transitórias publicadas pra ele):
     conteúdo (sem gabarito) + status de cada. NÃO é a lista global — só o treino dele."""
@@ -346,13 +571,15 @@ def training_materials(request):
     return training_iface.assigned_materials(ext)
 
 
-@api.get("/training/progress", tags=["training"])
+@api.get(
+    "/training/progress", response=list[TrainingMaterialProgressOut], tags=["training"]
+)
 def training_progress(request):
     ext = _guard(request, "promoter")
     return training_iface.progress(ext)
 
 
-@api.post("/training/submissions", tags=["training"])
+@api.post("/training/submissions", response=SubmissionOut, tags=["training"])
 def training_submit(request, payload: SubmissionIn):
     ext = _guard(request, "promoter")
     sub = training_iface.submit(
@@ -372,17 +599,19 @@ def _promoter(request):
     return p
 
 
-@api.get("/promoter/me", tags=["promoter"])
+@api.get("/promoter/me", response=PromoterMeOut, tags=["promoter"])
 def promoter_me(request):
     return promoter_iface.to_dict(_promoter(request))
 
 
-@api.get("/promoter/me/leads", tags=["promoter"])
+@api.get("/promoter/me/leads", response=list[PromoterLeadOut], tags=["promoter"])
 def promoter_leads(request):
     return promoter_iface.list_leads(_promoter(request).user)
 
 
-@api.get("/promoter/me/commissions", tags=["promoter"])
+@api.get(
+    "/promoter/me/commissions", response=list[PromoterCommissionOut], tags=["promoter"]
+)
 def promoter_commissions(request):
     return promoter_iface.list_commissions(_promoter(request).user)
 
@@ -394,14 +623,14 @@ class StudyStartIn(Schema):
     payment_method: str | None = None  # "card" (default) | "pix"
 
 
-@api.get("/promoter/study/pricing", tags=["promoter"])
+@api.get("/promoter/study/pricing", response=StudyPricingOut, tags=["promoter"])
 def promoter_study_pricing(request):
     """Preço da auto-matrícula do promotor (preço próprio, ≠ vitrine pública do aluno)."""
     _guard(request, "promoter")
     return lead_iface.promoter_pricing()
 
 
-@api.post("/promoter/study/start", tags=["promoter"])
+@api.post("/promoter/study/start", response=StudyStartOut, tags=["promoter"])
 def promoter_study_start(request, payload: StudyStartIn):
     """Promotor quer estudar: cria a auto-matrícula (preço promotor, SEM comissão) e devolve o checkout.
     Ele paga pelo link; no pagamento ganha a role de aluno e segue o wizard do aluno (grupo clients)."""
