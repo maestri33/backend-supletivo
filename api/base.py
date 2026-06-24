@@ -33,6 +33,14 @@ class WhoamiOut(Schema):
     name: str | None = None  # do Profile — o front saúda pelo nome
 
 
+class HealthOut(Schema):
+    """Resposta padrão do liveness de cada grupo da API."""
+
+    group: str
+    version: str
+    status: str
+
+
 def build_group(name: str, description: str) -> NinjaAPI:
     """Cria o `NinjaAPI` de um público: versionado, auth JWT default, com health + whoami."""
     api = NinjaAPI(
@@ -84,7 +92,7 @@ def build_group(name: str, description: str) -> NinjaAPI:
             {"detail": "Erro interno do servidor.", "code": "INTERNAL"}, status=500
         )
 
-    @api.get("/health", auth=None, tags=["health"])
+    @api.get("/health", response=HealthOut, auth=None, tags=["health"])
     def health(request):
         """Liveness público do grupo (sem auth)."""
         return {"group": name, "version": API_VERSION, "status": "ok"}

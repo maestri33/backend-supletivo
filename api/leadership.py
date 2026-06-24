@@ -182,10 +182,196 @@ class HubLeadDetailOut(Schema):
     checkout: LeadCheckoutOut | None = None
 
 
+class CandidateProfileOut(Schema):
+    """Perfil do candidato como aparece no /me (inclui name/birth_date que o CPFHub manda)."""
+
+    mother_name: str | None = None
+    father_name: str | None = None
+    birthplace: str | None = None
+    marital_status: str | None = None
+    nationality: str | None = None
+    name: str | None = None
+    birth_date: str | None = None
+
+
+class CandidateDocumentSubOut(Schema):
+    """Sub-documento genérico (RG/CNH/certidão/militar) — foto + número básico."""
+
+    number: str | None = None
+    issuing_agency: str | None = None
+    issue_date: str | None = None
+    front_photo: str | None = None
+    back_photo: str | None = None
+    full_photo: str | None = None
+    validation_status: str | None = None
+    validation_reason: str | None = None
+    category: str | None = None
+    date_of_birth: str | None = None
+    expires_on: str | None = None
+    national_register: str | None = None
+    kind: str | None = None
+    registry_office: str | None = None
+    book: str | None = None
+    page: str | None = None
+    entry: str | None = None
+    photo: str | None = None
+    series: str | None = None
+    ra: str | None = None
+
+
+class CandidateDocumentsOut(Schema):
+    """Bloco de documentos do candidato (mesmo shape do `documents` service)."""
+
+    external_id: str
+    rg: CandidateDocumentSubOut | None = None
+    cnh: CandidateDocumentSubOut | None = None
+    certificate: CandidateDocumentSubOut | None = None
+    military: CandidateDocumentSubOut | None = None
+
+
+class CandidateMeOut(Schema):
+    """/me RICO do candidato — devolvido por toda mutação do wizard (decide/reset de documento)."""
+
+    external_id: str
+    status: str
+    hub_external_id: str
+    pix_validated: bool
+    selfie_verified: bool
+    selfie_status: str | None = None
+    profile: CandidateProfileOut | None = None
+    address: EnrollmentAddressOut | None = None
+    documents: CandidateDocumentsOut | None = None
+    selfie: EnrollmentSelfieOut | None = None
+
+
+class CandidateSelfieDetailOut(Schema):
+    """Tela de detalhe da selfie do candidato em revisão (foto + análise + se ainda está em revisão)."""
+
+    external_id: str
+    user: CandidateUserOut
+    selfie: EnrollmentSelfieOut
+    in_review: bool
+
+
 class FeeFactsOut(Schema):
     first_paid: bool = False
     second_scheduled: bool = False
     # `first`/`second` são opacos do finance (id/status/amount quando existem); ficam `dict`.
+
+
+class EnrollmentFeeDictOut(Schema):
+    """Uma parcela da taxa (read-only do finance)."""
+
+    status: str
+    amount: str
+    scheduled_for: str | None = None
+    paid: bool
+    last_error: str | None = None
+
+
+class EnrollmentFeesOut(Schema):
+    first: EnrollmentFeeDictOut | None = None
+    second: EnrollmentFeeDictOut | None = None
+    first_paid: bool = False
+    second_scheduled: bool = False
+
+
+class EnrollmentProfileOut(Schema):
+    """Campos de identidade extraídos dos documentos (CPFHub é autoridade)."""
+
+    mother_name: str | None = None
+    father_name: str | None = None
+    marital_status: str | None = None
+    birthplace: str | None = None
+    nationality: str | None = None
+
+
+class EnrollmentRgOut(Schema):
+    number: str | None = None
+    issuing_agency: str | None = None
+    issue_date: str | None = None
+    front_photo: str | None = None
+    back_photo: str | None = None
+    full_photo: str | None = None
+    analysis_status: str | None = None
+    analysis_reason: str | None = None
+    validation_status: str | None = None
+    validation_reason: str | None = None
+    missing_fields: list[str] = []
+
+
+class EnrollmentEducationOut(Schema):
+    level: str | None = None
+    grade: int | None = None
+    completed: bool | None = None
+    last_school: str | None = None
+    city: str | None = None
+    state: str | None = None
+    last_year_when: str | None = None
+
+
+class EnrollmentAddressOut(Schema):
+    cep: str | None = None
+    zipcode: str | None = None
+    street: str | None = None
+    number: str | None = None
+    complement: str | None = None
+    neighborhood: str | None = None
+    city: str | None = None
+    state: str | None = None
+    country: str | None = None
+    missing_fields: list[str] = []
+
+
+class EnrollmentSelfieOut(Schema):
+    exists: bool
+    photo: str | None = None
+    taken_at: str | None = None
+    status: str | None = None
+    analysis_status: str | None = None
+    analysis_reason: str | None = None
+    expires_at: str | None = None
+    verified: bool
+    description: str | None = None
+
+
+class HubEnrollmentDetailOut(Schema):
+    """Detalhe COMPLETO da matrícula pro coordenador: /me + status real + fatos da taxa.
+    Espelha 1:1 o `detail_for_hub` (Victor 2026-06-24)."""
+
+    external_id: str
+    status: str
+    hub_external_id: str
+    selfie_verified: bool
+    selfie_status: str | None = None
+    analysis_status: str | None = None
+    profile: EnrollmentProfileOut | None = None
+    address_complete: bool = False
+    address: EnrollmentAddressOut | None = None
+    selfie: EnrollmentSelfieOut | None = None
+    rg: EnrollmentRgOut | None = None
+    education: EnrollmentEducationOut | None = None
+    fees: EnrollmentFeesOut
+
+
+class EnrollmentActionOut(Schema):
+    """Resultado de ações da taxa/decisões na matrícula."""
+
+    external_id: str
+    status: str
+
+
+class EnrollmentRgDecideOut(Schema):
+    external_id: str
+    status: str
+    rg_validation_status: str
+
+
+class EnrollmentSelfieDecideOut(Schema):
+    external_id: str
+    status: str
+    selfie_status: str
+    selfie_verified: bool
 
 
 class HubEnrollmentRowOut(Schema):
@@ -193,7 +379,7 @@ class HubEnrollmentRowOut(Schema):
     name: str | None = None
     phone: str | None = None
     status: str  # status REAL (sem máscara) — visão do coordenador
-    fees: dict
+    fees: EnrollmentFeesOut
     created_at: str
 
 
@@ -241,6 +427,15 @@ class PaginatedOut(Schema):
     """Envelope de paginação padronizado (A5): toda lista do leadership passa a devolver isto."""
 
     items: list
+    total: int
+    limit: int
+    offset: int
+
+
+class PaginatedStudentsOut(Schema):
+    """Envelope tipado da lista de alunos do polo."""
+
+    items: list[HubStudentRowOut]
     total: int
     limit: int
     offset: int
@@ -298,6 +493,36 @@ class CandidateActionOut(Schema):
 
     external_id: str
     status: str
+
+
+class ExamOut(Schema):
+    """Resultado da correção de uma prova do aluno."""
+
+    external_id: str
+    result: str
+
+
+class DocDecisionOut(Schema):
+    """Resultado da decisão de um documento do aluno em revisão."""
+
+    external_id: str
+    validation_status: str
+
+
+class DiplomaIssueOut(Schema):
+    """Resultado da emissão do diploma (certificado + histórico)."""
+
+    external_id: str
+    issued_at: str | None = None
+
+
+class RgPhotoUploadOut(Schema):
+    """Ack de upload de foto do RG: path salvo + instruções de polling (proposta #2)."""
+
+    stored: str
+    analysis_status: str | None = None
+    poll_after_ms: int
+    expires_at: str | None = None
 
 
 class CandidateSelfieDecideOut(Schema):
@@ -448,7 +673,9 @@ def list_hub_enrollments(request, status: str | None = None):
     return enrollment_iface.list_for_hub(hub=hub, status=status)
 
 
-@api.get("/enrollments/{external_id}", tags=["enrollment"])
+@api.get(
+    "/enrollments/{external_id}", response=HubEnrollmentDetailOut, tags=["enrollment"]
+)
 def get_hub_enrollment(request, external_id: str):
     """Detalhe COMPLETO de uma matrícula do polo: todas as seções do wizard (visão rica do /me) +
     status REAL (sem máscara) + situação das 2 parcelas da taxa."""
@@ -546,7 +773,11 @@ class ConcludeIn(Schema):
     platform_notes: str | None = None
 
 
-@api.post("/enrollments/{external_id}/fee/pay", tags=["enrollment"])
+@api.post(
+    "/enrollments/{external_id}/fee/pay",
+    response=EnrollmentFeesOut,
+    tags=["enrollment"],
+)
 def pay_enrollment_fee(request, external_id: str, payload: FeeIn):
     """1ª parcela da taxa (À VISTA): valida o QR e dispara o PIX imediato pela fila. O status do
     matriculado muda quando o pagamento CONFIRMAR pago (`fee_paid`) — e o coordenador é avisado
@@ -561,7 +792,11 @@ def pay_enrollment_fee(request, external_id: str, payload: FeeIn):
     )
 
 
-@api.post("/enrollments/{external_id}/fee/schedule", tags=["enrollment"])
+@api.post(
+    "/enrollments/{external_id}/fee/schedule",
+    response=EnrollmentFeesOut,
+    tags=["enrollment"],
+)
 def schedule_enrollment_fee(request, external_id: str, payload: FeeIn):
     """2ª parcela da taxa (AGENDADA): o vencimento vem de DENTRO do QR (cobrança com vencimento);
     QR sem vencimento → 422. O status muda NA HORA pra `fee_scheduled`; o PIX dispara sozinho no
@@ -575,7 +810,11 @@ def schedule_enrollment_fee(request, external_id: str, payload: FeeIn):
     )
 
 
-@api.post("/enrollments/{external_id}/conclude", tags=["enrollment"])
+@api.post(
+    "/enrollments/{external_id}/conclude",
+    response=EnrollmentActionOut,
+    tags=["enrollment"],
+)
 def conclude_enrollment(request, external_id: str, payload: ConcludeIn):
     """CONCLUSÃO da matrícula: com a 1ª parcela PAGA e a 2ª AGENDADA, o coordenador cadastra o
     login/senha da plataforma (fornecidos pela instituição) → o aluno vira `student` (promoção
@@ -600,7 +839,11 @@ class SelfieDecideIn(Schema):
 
 
 # ── RG em revisão (IA em dúvida — plan/12) → coordenador decide o sim/não ────
-@api.post("/enrollments/{external_id}/rg/decide", tags=["enrollment"])
+@api.post(
+    "/enrollments/{external_id}/rg/decide",
+    response=EnrollmentRgDecideOut,
+    tags=["enrollment"],
+)
 def decide_enrollment_rg(request, external_id: str, payload: SelfieDecideIn):
     """Coordenador decide o RG de uma matrícula que a IA mandou pra REVISÃO (sim/não dele é FINAL).
 
@@ -615,7 +858,11 @@ def decide_enrollment_rg(request, external_id: str, payload: SelfieDecideIn):
     )
 
 
-@api.post("/enrollments/{external_id}/selfie/decide", tags=["enrollment"])
+@api.post(
+    "/enrollments/{external_id}/selfie/decide",
+    response=EnrollmentSelfieDecideOut,
+    tags=["enrollment"],
+)
 def decide_enrollment_selfie(request, external_id: str, payload: SelfieDecideIn):
     """Coordenador decide a selfie de uma matrícula que a IA mandou pra REVISÃO."""
     coordinator = _coordinator(request)
@@ -628,6 +875,7 @@ def decide_enrollment_selfie(request, external_id: str, payload: SelfieDecideIn)
     return {
         "external_id": str(enr.external_id),
         "selfie_status": enr.selfie_status,
+        "selfie_verified": enr.selfie_verified,
         "status": enr.status,
     }
 
@@ -653,7 +901,11 @@ def decide_candidate_selfie(request, external_id: str, payload: SelfieDecideIn):
     }
 
 
-@api.get("/candidates/{external_id}/selfie", response=dict, tags=["candidate"])
+@api.get(
+    "/candidates/{external_id}/selfie",
+    response=CandidateSelfieDetailOut,
+    tags=["candidate"],
+)
 def get_candidate_selfie_for_coordinator(request, external_id: str):
     """Tela de DETALHE da selfie do candidato em REVISÃO pro coordenador decidir (plan/15 D2):
     foto + `analysis_status`/`analysis_reason` (motivo da IA). O coord decide VENDO, não às
@@ -664,7 +916,11 @@ def get_candidate_selfie_for_coordinator(request, external_id: str):
     )
 
 
-@api.post("/candidates/{external_id}/document/decide", tags=["candidate"])
+@api.post(
+    "/candidates/{external_id}/document/decide",
+    response=CandidateMeOut,
+    tags=["candidate"],
+)
 def decide_candidate_document(request, external_id: str, payload: SelfieDecideIn):
     """Coordenador decide o documento (RG ou CNH) de um candidato que a IA mandou pra REVISÃO
     (plan/15 B3). Decisão humana é FINAL.
@@ -681,7 +937,11 @@ def decide_candidate_document(request, external_id: str, payload: SelfieDecideIn
     )
 
 
-@api.post("/candidates/{external_id}/document/reset", tags=["candidate"])
+@api.post(
+    "/candidates/{external_id}/document/reset",
+    response=CandidateMeOut,
+    tags=["candidate"],
+)
 def reset_candidate_doc_type(request, external_id: str):
     """Coordenador DESTRAVA o candidato que fixou o tipo de documento errado (escolheu RG, só tem
     CNH — ou vice-versa): zera o `doc_type` e volta pra etapa `documents`, perfil/endereço/pix
@@ -713,7 +973,7 @@ def _student_action(external_id: str, coordinator, fn, **kw):
     return fn(student_external_id=external_id, coordinator=coordinator, **kw)
 
 
-@api.post("/students/{external_id}/exam/grade", tags=["student"])
+@api.post("/students/{external_id}/exam/grade", response=ExamOut, tags=["student"])
 def grade_exam(request, external_id: str, payload: ExamGradeIn):
     """Coordenador do hub corrige a prova: passou → conferência; reprovou → refazer."""
     coordinator = _coordinator(request)
@@ -728,7 +988,9 @@ def grade_exam(request, external_id: str, payload: ExamGradeIn):
 
 
 @api.post(
-    "/students/{external_id}/documents/{document_external_id}/decide", tags=["student"]
+    "/students/{external_id}/documents/{document_external_id}/decide",
+    response=DocDecisionOut,
+    tags=["student"],
 )
 def decide_document(
     request, external_id: str, document_external_id: str, payload: DocDecideIn
@@ -749,7 +1011,11 @@ def decide_document(
     }
 
 
-@api.post("/students/{external_id}/pendencies", tags=["student"])
+@api.post(
+    "/students/{external_id}/pendencies",
+    response=StudentPendencyOut,
+    tags=["student"],
+)
 def open_pendency(request, external_id: str, payload: PendencyIn):
     """Coordenador lança uma pendência (documento OU taxa) → aluno vai pra PENDING."""
     coordinator = _coordinator(request)
@@ -761,10 +1027,20 @@ def open_pendency(request, external_id: str, payload: PendencyIn):
         description=payload.description,
         amount_cents=payload.amount_cents,
     )
-    return {"external_id": str(pend.external_id), "kind": pend.kind}
+    return {
+        "external_id": str(pend.external_id),
+        "kind": pend.kind,
+        "description": pend.description,
+        "amount_cents": pend.amount_cents,
+        "resolved": pend.resolved_at is not None,
+    }
 
 
-@api.post("/pendencies/{external_id}/resolve", tags=["student"])
+@api.post(
+    "/pendencies/{external_id}/resolve",
+    response=StudentPendencyOut,
+    tags=["student"],
+)
 def resolve_pendency(request, external_id: str):
     """Coordenador resolve a pendência; sem pendência aberta o aluno segue pro diploma."""
     coordinator = _coordinator(request)
@@ -773,11 +1049,18 @@ def resolve_pendency(request, external_id: str):
     )
     return {
         "external_id": str(pend.external_id),
+        "kind": pend.kind,
+        "description": pend.description,
+        "amount_cents": pend.amount_cents,
         "resolved": pend.resolved_at is not None,
     }
 
 
-@api.post("/students/{external_id}/documentation/clear", tags=["student"])
+@api.post(
+    "/students/{external_id}/documentation/clear",
+    response=EnrollmentActionOut,
+    tags=["student"],
+)
 def clear_documentation(request, external_id: str):
     """Coordenador confirma que não há pendência → libera a emissão do diploma."""
     coordinator = _coordinator(request)
@@ -785,7 +1068,11 @@ def clear_documentation(request, external_id: str):
     return {"external_id": str(s.external_id), "status": s.status}
 
 
-@api.post("/students/{external_id}/diploma/issue", tags=["student"])
+@api.post(
+    "/students/{external_id}/diploma/issue",
+    response=DiplomaIssueOut,
+    tags=["student"],
+)
 def issue_diploma(request, external_id: str):
     """Coordenador emite o diploma (certificado + histórico) → aluno fica AGUARDANDO RETIRADA."""
     coordinator = _coordinator(request)
@@ -798,7 +1085,25 @@ def issue_diploma(request, external_id: str):
 
 # ── funil do colaborador: autoria de matéria (coordenador também — Victor) ──
 # MaterialIn/MaterialUpdateIn vêm do módulo compartilhado (plan/15 A7; mesmo contrato do staff).
-@api.get("/training/materials", tags=["training"])
+class MaterialOut(Schema):
+    """Matéria do treino (visão de autoria): conteúdo + questão + gabarito."""
+
+    external_id: str
+    title: str
+    text_content: str = ""
+    content_blocks: list[dict] = []
+    question: str
+    video: str | None = None
+    photo: str | None = None
+    kind: str
+    blocking: bool
+    ephemeral: bool
+    order: int
+    active: bool
+    expected_answer: str
+
+
+@api.get("/training/materials", response=list[MaterialOut], tags=["training"])
 def list_materials(request):
     """Lista todas as matérias COM gabarito (visão de autoria — o coordenador também autora)."""
     _coordinator(request)
@@ -808,14 +1113,14 @@ def list_materials(request):
     ]
 
 
-@api.post("/training/materials", tags=["training"])
+@api.post("/training/materials", response=MaterialOut, tags=["training"])
 def create_material(request, payload: MaterialIn):
     _coordinator(request)
     m = training_iface.create_material(**payload.dict())
     return training_iface.material_to_dict(m, include_answer=True)
 
 
-@api.put("/training/materials/{external_id}", tags=["training"])
+@api.put("/training/materials/{external_id}", response=MaterialOut, tags=["training"])
 def update_material(request, external_id: str, payload: MaterialUpdateIn):
     _coordinator(request)
     m = training_iface.update_material(external_id, **payload.dict())
@@ -825,6 +1130,14 @@ def update_material(request, external_id: str, payload: MaterialUpdateIn):
 # ── funil do colaborador: aprovar candidato → PROMOTOR (Victor 2026-06-16) ──
 # A entrevista/Trainee saiu: o coordenador aprova o candidato (que concluiu a coleta) e ele vira
 # PROMOTOR direto. O treino passou a ser uma trava pós-promotor por matérias.
+class MaterialApproveOut(Schema):
+    """Resultado da aprovação de uma matéria em aberto pelo coordenador."""
+
+    promoter_external_id: str
+    material_external_id: str
+    locked: bool
+
+
 class RejectIn(Schema):
     reason: str
 
@@ -874,6 +1187,7 @@ def reject_candidate(request, external_id: str, payload: RejectIn):
 
 @api.post(
     "/promoters/{external_id}/materials/{material_external_id}/approve",
+    response=MaterialApproveOut,
     tags=["training"],
 )
 def approve_open_material(request, external_id: str, material_external_id: str):
@@ -896,23 +1210,47 @@ def list_hub_promoters(request):
     return promoter_iface.list_for_hub(hub)
 
 
-@api.post("/promoters/{external_id}/suspend", tags=["promoter"])
+@api.post(
+    "/promoters/{external_id}/suspend",
+    response=HubPromoterRowOut,
+    tags=["promoter"],
+)
 def suspend_promoter(request, external_id: str):
     """Suspende um promotor do polo (não capta nem recebe). `external_id` = do User-promotor."""
     coordinator = _coordinator(request)
     p = promoter_iface.suspend(user_external_id=external_id, coordinator=coordinator)
-    return {"external_id": external_id, "status": p.status}
+    from users.profiles import interface as profiles
+
+    profile = profiles.get(p.user)
+    return {
+        "external_id": external_id,
+        "name": profile.name if profile else None,
+        "status": p.status,
+        "locked": False,
+    }
 
 
-@api.post("/promoters/{external_id}/reactivate", tags=["promoter"])
+@api.post(
+    "/promoters/{external_id}/reactivate",
+    response=HubPromoterRowOut,
+    tags=["promoter"],
+)
 def reactivate_promoter(request, external_id: str):
     """Reativa um promotor SUSPENSO do polo (volta a captar) — destrava quem ficou preso."""
     coordinator = _coordinator(request)
     p = promoter_iface.reactivate(user_external_id=external_id, coordinator=coordinator)
-    return {"external_id": external_id, "status": p.status}
+    from users.profiles import interface as profiles
+
+    profile = profiles.get(p.user)
+    return {
+        "external_id": external_id,
+        "name": profile.name if profile else None,
+        "status": p.status,
+        "locked": False,
+    }
 
 
-@api.get("/students", response=PaginatedOut, tags=["student"])
+@api.get("/students", response=PaginatedStudentsOut, tags=["student"])
 def list_hub_students(
     request, status: str | None = None, limit: int = 200, offset: int = 0
 ):
@@ -964,7 +1302,11 @@ def _proxy_user(request, external_id: str):
     return coordinator, user_ext
 
 
-@api.post("/enrollments/{external_id}/address", tags=["enrollment"])
+@api.post(
+    "/enrollments/{external_id}/address",
+    response=HubEnrollmentDetailOut,
+    tags=["enrollment"],
+)
 def coord_proxy_address(request, external_id: str, payload: ProxyCepIn):
     """Coordenador grava o ENDEREÇO (por CEP, ViaCEP) NO LUGAR do cliente. Auditado."""
     coordinator, user_ext = _proxy_user(request, external_id)
@@ -977,7 +1319,11 @@ def coord_proxy_address(request, external_id: str, payload: ProxyCepIn):
     return enrollment_iface.set_address_cep(user_external_id=user_ext, cep=payload.cep)
 
 
-@api.post("/enrollments/{external_id}/documents/rg/photo/{slot}", tags=["enrollment"])
+@api.post(
+    "/enrollments/{external_id}/documents/rg/photo/{slot}",
+    response=RgPhotoUploadOut,
+    tags=["enrollment"],
+)
 def coord_proxy_rg_photo(
     request, external_id: str, slot: str, file: UploadedFile = File(...)
 ):
@@ -996,7 +1342,11 @@ def coord_proxy_rg_photo(
     )
 
 
-@api.post("/enrollments/{external_id}/selfie", tags=["enrollment"])
+@api.post(
+    "/enrollments/{external_id}/selfie",
+    response=HubEnrollmentDetailOut,
+    tags=["enrollment"],
+)
 def coord_proxy_selfie(request, external_id: str, file: UploadedFile = File(...)):
     """Coordenador ENVIA a selfie (assinatura) NO LUGAR do cliente. IA + biometria validam normal;
     review → decide pelo `/selfie/decide`. Auditado."""
@@ -1016,7 +1366,11 @@ def coord_proxy_selfie(request, external_id: str, file: UploadedFile = File(...)
     return {**enrollment_iface.me_dict(enr), **enrollment_iface.selfie_ack(enr)}
 
 
-@api.patch("/enrollments/{external_id}/profile", tags=["enrollment"])
+@api.patch(
+    "/enrollments/{external_id}/profile",
+    response=HubEnrollmentDetailOut,
+    tags=["enrollment"],
+)
 def coord_correct_identity(request, external_id: str, payload: CorrectIdentityIn):
     """Coordenador CORRIGE a identidade que o OCR extraiu torta (filiação/estado civil/naturalidade/
     nacionalidade) — sem isso o dado errado fica gravado pra sempre e só um db-edit conserta. NÃO
