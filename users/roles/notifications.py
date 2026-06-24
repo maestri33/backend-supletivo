@@ -195,6 +195,7 @@ _MESSAGES: dict[str, str] = {
     "student.document_rejected": (
         "{name}, seu documento ({doc_type}) precisa ser reenviado. "
         "Envie uma nova foto, nítida e legível, {name}."
+        "{reason_text}"
     ),
     "student.document_in_review": (
         "{name}, um documento de aluno ({doc_type}) precisa da sua análise — a IA ficou em dúvida. "
@@ -265,6 +266,11 @@ def text(event: str, **ctx) -> str:
     if template is None:
         raise KeyError(f"notify event sem teor no catálogo: {event}")
     ctx.setdefault("name", _FALLBACK_NAME)
+    # compat: alguns notifies recebem `reason`; quem não usa o placeholder ignora via .format()
+    # (format só exige chaves presentes no template). Adicionamos `reason_text` vazio por padrão.
+    if "reason" in ctx and "reason_text" not in ctx:
+        reason = ctx.get("reason")
+        ctx["reason_text"] = f" Motivo: {reason}." if reason else ""
     return template.format(**ctx)
 
 

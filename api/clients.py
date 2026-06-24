@@ -197,6 +197,15 @@ class StudentDocumentOut(Schema):
     doc_type: str
     validation_status: str
     has_photo: bool
+    analysis_status: AnalysisStatus | None = Field(
+        None,
+        description="pending (analisando) | approved | rejected (refazer — motivo em analysis_reason) "
+        "| review (coordenador vai decidir)",
+    )
+    analysis_reason: str | None = None
+    expires_at: str | None = Field(
+        None, description="Até quando o `pending` vale; depois vira `review` (TTL)."
+    )
 
 
 class PendencyOut(Schema):
@@ -667,6 +676,17 @@ class ExamScheduleIn(Schema):
     scheduled_at: str  # ISO 8601 (ex.: 2026-06-10T14:00:00-03:00)
 
 
+class StudentDocumentUploadAck(Schema):
+    """Ack do upload de documento do aluno: a análise por IA roda em 2º plano; o front acompanha
+    `analysis_status` no `GET /student/me`, voltando a perguntar a cada `poll_after_ms`."""
+
+    doc_type: str
+    stored: bool
+    analysis_status: AnalysisStatus
+    poll_after_ms: int
+    expires_at: str | None = None
+
+
 def _student_guard(request) -> str:
     """Gate role student + devolve o external_id do aluno logado."""
     require_roles(request.auth, "student")
@@ -692,16 +712,24 @@ def student_blood_type(request, payload: BloodTypeIn):
     return _student_dict(ext)
 
 
-@api.post("/student/documents/{doc_type}", response=StudentMeOut, tags=["student"])
+@api.post(
+    "/student/documents/{doc_type}", response=StudentDocumentUploadAck, tags=["student"]
+)
 def student_document(request, doc_type: str, file: UploadedFile = File(...)):
     ext = _student_guard(request)
-    student_iface.upload_document(
+    doc, ack = student_iface.upload_document(
         user_external_id=ext,
         doc_type=doc_type,
         image_bytes=file.read(),
         content_type=getattr(file, "content_type", "image/jpeg"),
     )
-    return _student_dict(ext)
+    return {
+        "doc_type": doc_type,
+        "stored": bool(doc.photo),
+        "analysis_status": ack["analysis_status"],
+        "poll_after_ms": ack["poll_after_ms"],
+        "expires_at": ack["expires_at"],
+    }
 
 
 @api.post("/student/exam/schedule", response=StudentMeOut, tags=["student"])
