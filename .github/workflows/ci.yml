@@ -36,3 +36,6 @@ jobs:
         run: |
           /usr/local/bin/uvx ruff@0.15.14 check .
           /usr/local/bin/uvx ruff@0.15.14 format --check .
+
+      - name: Testes automatizados (pytest — banco SQLite em memória, integrações mockadas)
+        run: .venv/bin/pytest tests/ -q --tb=short

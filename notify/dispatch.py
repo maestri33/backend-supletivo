@@ -137,10 +137,14 @@ def _send_email(notif: Notification) -> None:
 
 def _send_tts(notif: Notification) -> None:
     try:
+        # TTS precisa de texto limpo: sem emojis/markdown (want_sanitize sempre True pra TTS).
+        from notify.sanitize import sanitize_for_tts
+
+        text = sanitize_for_tts(notif.text)
         # ai.tts gera o mp3 e devolve o caminho RELATIVO a MEDIA_ROOT (ex.: "ai/audio/<uuid>.mp3").
         # gender (M/F) escolhe a voz — a resolução gênero→voz mora no integrations.ai (§7 do plano).
         rel_path = ai_service.tts(
-            notif.text, caller=f"notify:{notif.caller}", gender=notif.gender or None
+            text, caller=f"notify:{notif.caller}", gender=notif.gender or None
         )
         notif.tts_audio_path = rel_path
         # a Evolution busca a URL: usa a base LAN (IP interno, mesma sub-rede, sem egress/TLS —

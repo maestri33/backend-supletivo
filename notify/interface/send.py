@@ -106,7 +106,14 @@ def send(
             )
     except IntegrityError:
         # corrida na idempotency_key (unique): outra chamada criou primeiro — devolve a dela.
-        existing = Notification.objects.get(idempotency_key=idempotency_key)
+        # Usa filter().first() em vez de get(): idempotency_key pode ser None (sem unique no PG
+        # para NULLs), e get() levantaria MultipleObjectsReturned com múltiplos registros NULL.
+        if not idempotency_key:
+            logger.warning("notify.integrity_error_no_key", caller=caller)
+            raise  # sem chave não há como deduplicar — propaga o erro
+        existing = Notification.objects.filter(idempotency_key=idempotency_key).first()
+        if existing is None:
+            raise  # não era corrida de idempotência — propaga
         logger.info(
             "notify.idempotent_race",
             external_id=str(existing.external_id),

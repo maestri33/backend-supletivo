@@ -17,7 +17,16 @@ from ninja.files import UploadedFile
 
 from api.auth import require_roles
 from api.base import add_auth_refresh, build_group
-from api.schemas import TokenOut
+from api.schemas import (
+    SharedAnalysisAckOut,
+    SharedAddressOut,
+    SharedCandidateDocumentsOut,
+    SharedCandidateDocSubOut,
+    SharedCandidateMeOut,
+    SharedCandidateProfileOut,
+    SharedCandidateSelfieOut,
+    TokenOut,
+)
 from users.auth import interface as auth_iface
 from users.auth.models import User
 from users.exceptions import Forbidden, NotFound
@@ -152,87 +161,14 @@ class SubmissionIn(Schema):
 
 
 # ── schemas de SAÍDA (response=) — espelham o snake_case real dos services (candidate/promoter/training)
-class CandidateProfileOut(Schema):
-    """Perfil do candidato como aparece no /me (inclui name/birth_date que o CPFHub manda)."""
-
-    mother_name: str | None = None
-    father_name: str | None = None
-    birthplace: str | None = None
-    marital_status: str | None = None
-    nationality: str | None = None
-    name: str | None = None
-    birth_date: str | None = None
-
-
-class CandidateAddressOut(Schema):
-    """Endereço do candidato (público) com `cep`/`zipcode` e `missing_fields`."""
-
-    cep: str | None = None
-    zipcode: str | None = None
-    street: str | None = None
-    number: str | None = None
-    complement: str | None = None
-    neighborhood: str | None = None
-    city: str | None = None
-    state: str | None = None
-    country: str | None = None
-    missing_fields: list[str] = []
-
-
-class CandidateDocumentSubOut(Schema):
-    """Sub-documento genérico (RG/CNH/certidão/militar) — foto + número básico + validação."""
-
-    number: str | None = None
-    issuing_agency: str | None = None
-    issue_date: str | None = None
-    category: str | None = None
-    date_of_birth: str | None = None
-    expires_on: str | None = None
-    national_register: str | None = None
-    front_photo: str | None = None
-    back_photo: str | None = None
-    full_photo: str | None = None
-    validation_status: str | None = None
-    validation_reason: str | None = None
-
-
-class CandidateDocumentsOut(Schema):
-    """Bloco de documentos do candidato."""
-
-    external_id: str
-    rg: CandidateDocumentSubOut | None = None
-    cnh: CandidateDocumentSubOut | None = None
-    certificate: CandidateDocumentSubOut | None = None
-    military: CandidateDocumentSubOut | None = None
-
-
-class CandidateSelfieOut(Schema):
-    """Bloco da selfie no /me e no GET /candidate/selfie."""
-
-    exists: bool
-    photo: str | None = None
-    taken_at: str | None = None
-    status: str | None = None
-    analysis_status: str | None = None
-    analysis_reason: str | None = None
-    expires_at: str | None = None
-    verified: bool
-    description: str | None = None
-
-
-class CandidateMeOut(Schema):
-    """/me RICO do candidato — devolvido por TODA mutação do wizard."""
-
-    external_id: str
-    status: str
-    hub_external_id: str
-    pix_validated: bool
-    selfie_verified: bool
-    selfie_status: str | None = None
-    profile: CandidateProfileOut | None = None
-    address: CandidateAddressOut | None = None
-    documents: CandidateDocumentsOut | None = None
-    selfie: CandidateSelfieOut | None = None
+# Aliases dos schemas centrais (api/schemas.py) — fonte única, sem drift entre collaborators/leadership.
+CandidateProfileOut = SharedCandidateProfileOut
+CandidateAddressOut = SharedAddressOut
+CandidateDocumentSubOut = SharedCandidateDocSubOut
+CandidateDocumentsOut = SharedCandidateDocumentsOut
+CandidateSelfieOut = SharedCandidateSelfieOut
+CandidateMeOut = SharedCandidateMeOut
+AnalysisAckOut = SharedAnalysisAckOut
 
 
 class CandidateDocumentSectionOut(Schema):
@@ -255,15 +191,6 @@ class CandidateDocumentSectionOut(Schema):
     analysis_reason: str | None = None
     extracted: dict = {}
     missing_fields: list[str] = []
-
-
-class AnalysisAckOut(Schema):
-    """Ack de upload que dispara análise assíncrona (documento ou selfie)."""
-
-    stored: bool | str
-    analysis_status: str | None = None
-    poll_after_ms: int
-    expires_at: str | None = None
 
 
 class TrainingMaterialOut(Schema):

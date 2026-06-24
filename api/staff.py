@@ -9,11 +9,11 @@ from __future__ import annotations
 
 from django.conf import settings
 from ninja import Schema
-from ninja.errors import HttpError
 
 from api.auth import require_superuser
 from api.base import build_group
 from api.schemas import MaterialIn, MaterialUpdateIn
+from users.exceptions import Conflict, NotFound, ValidationError as DomainValidationError
 from finance import interface as finance_iface
 from hub import interface as hub_iface
 from integrations import status as integ_status
@@ -81,7 +81,7 @@ def create_hub(request, payload: HubCreateIn):
             coordinator_external_id=payload.coordinator_external_id,
         )
     except hub_iface.HubError as exc:
-        raise HttpError(422, str(exc)) from exc
+        raise DomainValidationError(str(exc), code="HUB_ERROR") from exc
     return _hub_out(hub)
 
 
@@ -120,8 +120,9 @@ def set_coordinator(request, external_id: str, payload: SetCoordinatorIn):
             coordinator_external_id=payload.coordinator_external_id,
         )
     except hub_iface.HubError as exc:
-        status = 404 if exc.args and exc.args[0] == "hub_not_found" else 422
-        raise HttpError(status, str(exc)) from exc
+        if exc.args and exc.args[0] == "hub_not_found":
+            raise NotFound(str(exc), code="HUB_NOT_FOUND") from exc
+        raise DomainValidationError(str(exc), code="HUB_ERROR") from exc
     return _hub_out(hub)
 
 
@@ -132,8 +133,9 @@ def set_default_hub(request, external_id: str):
     try:
         hub = hub_iface.set_default(external_id)
     except hub_iface.HubError as exc:
-        status = 404 if exc.args and exc.args[0] == "hub_not_found" else 422
-        raise HttpError(status, str(exc)) from exc
+        if exc.args and exc.args[0] == "hub_not_found":
+            raise NotFound(str(exc), code="HUB_NOT_FOUND") from exc
+        raise DomainValidationError(str(exc), code="HUB_ERROR") from exc
     return _hub_out(hub)
 
 
@@ -150,7 +152,7 @@ def set_hub_address(request, external_id: str, payload: HubAddressIn):
             complement=payload.complement,
         )
     except hub_iface.HubError as exc:
-        raise HttpError(404, str(exc)) from exc
+        raise NotFound(str(exc), code="HUB_NOT_FOUND") from exc
     return _hub_out(hub)
 
 
@@ -205,10 +207,9 @@ def list_all_leads(request, hub: str | None = None, status: str | None = None):
     require_superuser(request.auth)
     hub_obj = None
     if hub:
-        # hub passado mas inexistente → 404 (não cair silenciosamente em "todos os leads")
         hub_obj = hub_iface.get_by_external_id(hub)
         if hub_obj is None:
-            raise HttpError(404, "hub_not_found")
+            raise NotFound("Polo não encontrado.", code="HUB_NOT_FOUND")
     leads = lead_iface.list_leads(hub=hub_obj, status=status)
     return [lead_iface.lead_to_dict(lead) for lead in leads]
 
@@ -256,7 +257,7 @@ def integration_detail(request, name: str):
     require_superuser(request.auth)
     data = integ_status.integration_detail(name)
     if data is None:
-        raise HttpError(404, "integration_not_found")
+        raise NotFound("Integração não encontrada.", code="INTEGRATION_NOT_FOUND")
     return data
 
 
@@ -266,7 +267,7 @@ def integration_setup(request, name: str):
     require_superuser(request.auth)
     data = integ_status.run_setup(name)
     if data is None:
-        raise HttpError(404, "integration_not_found")
+        raise NotFound("Integração não encontrada.", code="INTEGRATION_NOT_FOUND")
     return data
 
 
@@ -276,7 +277,7 @@ def integration_test(request, name: str):
     require_superuser(request.auth)
     data = integ_status.run_test(name)
     if data is None:
-        raise HttpError(404, "integration_not_found")
+        raise NotFound("Integração não encontrada.", code="INTEGRATION_NOT_FOUND")
     return data
 
 

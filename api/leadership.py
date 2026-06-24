@@ -21,7 +21,11 @@ from ninja.files import UploadedFile
 
 from api.auth import require_roles
 from api.base import add_auth_refresh, build_group, resolve_rg_slot
-from api.schemas import MaterialIn, MaterialUpdateIn, TokenOut
+from api.schemas import (
+    MaterialIn,
+    MaterialUpdateIn,
+    TokenOut,
+)
 from users.auth import interface as auth_iface
 from users.auth.models import User
 from users.exceptions import Forbidden, NotFound

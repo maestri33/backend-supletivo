@@ -40,6 +40,15 @@ jobs:
           systemctl restart backend-web backend-qcluster
           # health no LOOPBACK (a URL pública de dentro do server pode ser bloqueada — egress)
           curl -fsS -o /dev/null --retry 5 --retry-delay 2 http://127.0.0.1:8000/api/v1/clients/health
+          # valida qcluster: /staff/system expõe qcluster_alive; falha aqui = worker não subiu
+          SYSTEM_JSON=$(curl -fsS --retry 3 --retry-delay 2 \
+            -H "Authorization: Bearer $STAFF_HEALTH_TOKEN" \
+            http://127.0.0.1:8000/api/v1/staff/system 2>/dev/null || echo '{}')
+          QCLUSTER=$(echo "$SYSTEM_JSON" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('qcluster_alive',''))" 2>/dev/null || echo "")
+          if [ "$QCLUSTER" != "True" ]; then
+            echo "WARN: qcluster não reportou alive após restart — tasks assíncronas podem estar paradas"
+            echo "  system response: $SYSTEM_JSON"
+          fi
           echo "deploy OK @ ${{ github.event.workflow_run.head_sha }}"
 
       - name: Rollback de código em falha
