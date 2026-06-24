@@ -3,6 +3,22 @@
 > Nota viva. O backend muda aqui primeiro; cada item abaixo é algo que o app/landing
 > precisa ajustar. O Victor repassa pro time de frontend. Datas em AAAA-MM-DD.
 
+## 2026-06-24 — Leadership 100% tipado no OpenAPI + guia de integração
+
+- **Todos os endpoints de `leadership` agora têm `response=Schema`** (`/api/v1/leadership/openapi.json` 
+  publica 63 schemas, 41 paths, nenhum endpoint sem response schema).
+- **Novos schemas importantes pro front:**
+  - `CandidateMeOut` — `/candidates/{id}/document/decide` e `/document/reset` devolvem o /me rico do candidato.
+  - `CandidateSelfieDetailOut` — `GET /candidates/{id}/selfie` agora tem foto + análise + `in_review`.
+  - `ExamOut`, `DocDecisionOut`, `DiplomaIssueOut`, `RgPhotoUploadOut`, `MaterialOut`, `MaterialApproveOut`.
+  - `PaginatedStudentsOut` — `GET /students` retorna `{items:[HubStudentRowOut], total, limit, offset}` tipado.
+- **Retornos ajustados:** suspender/reativar promotor devolvem `HubPromoterRowOut` (com `name` e `locked`);
+  abertura/resolução de pendência devolvem `StudentPendencyOut` completo; listagem de matrículas tem
+  `fees: EnrollmentFeesOut` tipado ao invés de `dict` solto.
+- **Health base tipado:** `GET /health` de todos os grupos devolve `HealthOut {group, version, status}`.
+- **Guia completo:** ver `wiki/frontend-integracao.md` para instruções pontuais de como os apps
+  **Clientes** e **Colaboradores** (promotor + coordenador) devem conversar com a API.
+
 ## 2026-06-23 — Fase "matrícula": credenciais ao virar aluno + edição staff + bot (mock)
 
 - **Notify de credenciais (NOVO):** ao concluir a matrícula (`POST /leadership/enrollments/{id}/conclude`),
