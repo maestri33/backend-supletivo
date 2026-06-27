@@ -23,16 +23,12 @@ class Migration(migrations.Migration):
         migrations.AddField(
             model_name="educationaldata",
             name="completed",
-            field=models.BooleanField(
-                blank=True, null=True, verbose_name="concluiu o nível?"
-            ),
+            field=models.BooleanField(blank=True, null=True, verbose_name="concluiu o nível?"),
         ),
         migrations.AddField(
             model_name="educationaldata",
             name="grade",
-            field=models.PositiveSmallIntegerField(
-                blank=True, null=True, verbose_name="série/ano"
-            ),
+            field=models.PositiveSmallIntegerField(blank=True, null=True, verbose_name="série/ano"),
         ),
         migrations.AddField(
             model_name="educationaldata",

@@ -27,8 +27,6 @@ def grade_submission(submission_id: int) -> None:
             caller="training.grade",
         )
     except Exception as exc:  # noqa: BLE001 — IA fora → fica pending (degrade gracioso)
-        logger.warning(
-            "training.grade_failed", submission_id=submission_id, error=str(exc)
-        )
+        logger.warning("training.grade_failed", submission_id=submission_id, error=str(exc))
         return
     training_service.apply_grade(submission_id, grading.grade, grading.justification)

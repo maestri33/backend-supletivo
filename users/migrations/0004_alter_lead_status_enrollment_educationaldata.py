@@ -115,15 +115,11 @@ class Migration(migrations.Migration):
                 ),
                 (
                     "last_year_studied",
-                    models.CharField(
-                        max_length=64, verbose_name="último ano/série cursado"
-                    ),
+                    models.CharField(max_length=64, verbose_name="último ano/série cursado"),
                 ),
                 (
                     "last_year_when",
-                    models.CharField(
-                        blank=True, max_length=64, null=True, verbose_name="quando"
-                    ),
+                    models.CharField(blank=True, max_length=64, null=True, verbose_name="quando"),
                 ),
                 (
                     "last_school",

@@ -25,9 +25,7 @@ class Migration(migrations.Migration):
                 ),
                 (
                     "zipcode",
-                    models.CharField(
-                        blank=True, max_length=8, null=True, verbose_name="CEP"
-                    ),
+                    models.CharField(blank=True, max_length=8, null=True, verbose_name="CEP"),
                 ),
                 (
                     "street",
@@ -37,9 +35,7 @@ class Migration(migrations.Migration):
                 ),
                 (
                     "number",
-                    models.CharField(
-                        blank=True, max_length=20, null=True, verbose_name="número"
-                    ),
+                    models.CharField(blank=True, max_length=20, null=True, verbose_name="número"),
                 ),
                 (
                     "complement",
@@ -52,21 +48,15 @@ class Migration(migrations.Migration):
                 ),
                 (
                     "neighborhood",
-                    models.CharField(
-                        blank=True, max_length=100, null=True, verbose_name="bairro"
-                    ),
+                    models.CharField(blank=True, max_length=100, null=True, verbose_name="bairro"),
                 ),
                 (
                     "city",
-                    models.CharField(
-                        blank=True, max_length=100, null=True, verbose_name="cidade"
-                    ),
+                    models.CharField(blank=True, max_length=100, null=True, verbose_name="cidade"),
                 ),
                 (
                     "state",
-                    models.CharField(
-                        blank=True, max_length=2, null=True, verbose_name="UF"
-                    ),
+                    models.CharField(blank=True, max_length=2, null=True, verbose_name="UF"),
                 ),
                 (
                     "country",
@@ -90,23 +80,17 @@ class Migration(migrations.Migration):
         migrations.AddField(
             model_name="profile",
             name="birth_date",
-            field=models.DateField(
-                blank=True, null=True, verbose_name="data de nascimento"
-            ),
+            field=models.DateField(blank=True, null=True, verbose_name="data de nascimento"),
         ),
         migrations.AddField(
             model_name="profile",
             name="name",
-            field=models.CharField(
-                blank=True, max_length=200, null=True, verbose_name="nome"
-            ),
+            field=models.CharField(blank=True, max_length=200, null=True, verbose_name="nome"),
         ),
         migrations.AddField(
             model_name="profile",
             name="pix_key",
-            field=models.CharField(
-                blank=True, max_length=140, null=True, verbose_name="chave Pix"
-            ),
+            field=models.CharField(blank=True, max_length=140, null=True, verbose_name="chave Pix"),
         ),
         migrations.AddField(
             model_name="profile",
@@ -168,21 +152,15 @@ class Migration(migrations.Migration):
                 ),
                 (
                     "number",
-                    models.CharField(
-                        blank=True, max_length=30, null=True, verbose_name="número"
-                    ),
+                    models.CharField(blank=True, max_length=30, null=True, verbose_name="número"),
                 ),
                 (
                     "category",
-                    models.CharField(
-                        blank=True, max_length=5, null=True, verbose_name="categoria"
-                    ),
+                    models.CharField(blank=True, max_length=5, null=True, verbose_name="categoria"),
                 ),
                 (
                     "date_of_birth",
-                    models.DateField(
-                        blank=True, null=True, verbose_name="data de nascimento"
-                    ),
+                    models.DateField(blank=True, null=True, verbose_name="data de nascimento"),
                 ),
                 (
                     "expires_on",
@@ -255,9 +233,7 @@ class Migration(migrations.Migration):
                 ),
                 (
                     "number",
-                    models.CharField(
-                        blank=True, max_length=50, null=True, verbose_name="número"
-                    ),
+                    models.CharField(blank=True, max_length=50, null=True, verbose_name="número"),
                 ),
                 (
                     "registry_office",
@@ -267,33 +243,23 @@ class Migration(migrations.Migration):
                 ),
                 (
                     "book",
-                    models.CharField(
-                        blank=True, max_length=20, null=True, verbose_name="livro"
-                    ),
+                    models.CharField(blank=True, max_length=20, null=True, verbose_name="livro"),
                 ),
                 (
                     "page",
-                    models.CharField(
-                        blank=True, max_length=20, null=True, verbose_name="folha"
-                    ),
+                    models.CharField(blank=True, max_length=20, null=True, verbose_name="folha"),
                 ),
                 (
                     "entry",
-                    models.CharField(
-                        blank=True, max_length=20, null=True, verbose_name="termo"
-                    ),
+                    models.CharField(blank=True, max_length=20, null=True, verbose_name="termo"),
                 ),
                 (
                     "issue_date",
-                    models.DateField(
-                        blank=True, null=True, verbose_name="data de emissão"
-                    ),
+                    models.DateField(blank=True, null=True, verbose_name="data de emissão"),
                 ),
                 (
                     "photo",
-                    models.CharField(
-                        blank=True, max_length=500, null=True, verbose_name="foto"
-                    ),
+                    models.CharField(blank=True, max_length=500, null=True, verbose_name="foto"),
                 ),
                 (
                     "document",
@@ -324,15 +290,11 @@ class Migration(migrations.Migration):
                 ),
                 (
                     "number",
-                    models.CharField(
-                        blank=True, max_length=30, null=True, verbose_name="número"
-                    ),
+                    models.CharField(blank=True, max_length=30, null=True, verbose_name="número"),
                 ),
                 (
                     "series",
-                    models.CharField(
-                        blank=True, max_length=20, null=True, verbose_name="série"
-                    ),
+                    models.CharField(blank=True, max_length=20, null=True, verbose_name="série"),
                 ),
                 (
                     "category",
@@ -342,15 +304,11 @@ class Migration(migrations.Migration):
                 ),
                 (
                     "ra",
-                    models.CharField(
-                        blank=True, max_length=20, null=True, verbose_name="RA"
-                    ),
+                    models.CharField(blank=True, max_length=20, null=True, verbose_name="RA"),
                 ),
                 (
                     "photo",
-                    models.CharField(
-                        blank=True, max_length=500, null=True, verbose_name="foto"
-                    ),
+                    models.CharField(blank=True, max_length=500, null=True, verbose_name="foto"),
                 ),
                 (
                     "document",
@@ -381,9 +339,7 @@ class Migration(migrations.Migration):
                 ),
                 (
                     "number",
-                    models.CharField(
-                        blank=True, max_length=30, null=True, verbose_name="número"
-                    ),
+                    models.CharField(blank=True, max_length=30, null=True, verbose_name="número"),
                 ),
                 (
                     "issuing_agency",
@@ -396,9 +352,7 @@ class Migration(migrations.Migration):
                 ),
                 (
                     "issue_date",
-                    models.DateField(
-                        blank=True, null=True, verbose_name="data de emissão"
-                    ),
+                    models.DateField(blank=True, null=True, verbose_name="data de emissão"),
                 ),
                 (
                     "front_photo",

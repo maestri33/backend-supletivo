@@ -318,9 +318,7 @@ _STORY_INSTRUCTIONS = {
 }
 
 
-def story_text(
-    event: str, *, name: str, fallback: str, age: int | None = None, **_ctx
-) -> str:
+def story_text(event: str, *, name: str, fallback: str, age: int | None = None, **_ctx) -> str:
     """Texto caloroso gerado por 1 LLM (temperatura baixa) nos marcos especiais; cai no `fallback`
     fixo se o evento não for de história, se a IA falhar, ou se o texto vier ruim (curto/sem o nome).
     Enriquece com a DATA de hoje e adapta o tom à IDADE (Victor 2026-06-21). Roda síncrono no caller;

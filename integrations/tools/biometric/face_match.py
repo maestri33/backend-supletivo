@@ -38,9 +38,7 @@ def _get_app():
         try:
             from insightface.app import FaceAnalysis
         except Exception as exc:  # noqa: BLE001 — deps pesadas opcionais ausentes
-            raise ModelUnavailable(
-                f"deps de biometria ausentes (insightface): {exc}"
-            ) from exc
+            raise ModelUnavailable(f"deps de biometria ausentes (insightface): {exc}") from exc
         try:
             app = FaceAnalysis(
                 name=settings.BIOMETRIC_MODEL_NAME,
@@ -49,9 +47,7 @@ def _get_app():
             )
             app.prepare(ctx_id=-1, det_size=(640, 640))
         except Exception as exc:  # noqa: BLE001 — falha de download/carga do modelo
-            raise ModelUnavailable(
-                f"falha ao carregar o modelo InsightFace: {exc}"
-            ) from exc
+            raise ModelUnavailable(f"falha ao carregar o modelo InsightFace: {exc}") from exc
         _app = app
         logger.info("biometric.model_loaded", model=settings.BIOMETRIC_MODEL_NAME)
         return _app

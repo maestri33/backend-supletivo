@@ -12,8 +12,8 @@ from ninja import Schema
 
 from api.auth import require_superuser
 from api.base import build_group
-from api.schemas import MaterialIn, MaterialUpdateIn
-from users.exceptions import Conflict, NotFound, ValidationError as DomainValidationError
+from api.schemas import MaterialIn, MaterialOut, MaterialUpdateIn
+from users.exceptions import NotFound, ValidationError as DomainValidationError
 from finance import interface as finance_iface
 from hub import interface as hub_iface
 from integrations import status as integ_status
@@ -26,9 +26,7 @@ from users.roles.lead import interface as lead_iface
 from users.roles.student import interface as student_iface
 from users.roles.training import interface as training_iface
 
-api = build_group(
-    "staff", "Administração da plataforma: hub, coordenador, saúde dos serviços."
-)
+api = build_group("staff", "Administração da plataforma: hub, coordenador, saúde dos serviços.")
 
 
 # ── schemas ──────────────────────────────────────────────────────────────
@@ -59,13 +57,170 @@ class PromoterOut(Schema):
     name: str | None
 
 
+# ── schemas de SAÍDA (response=) — espelham 1:1 o snake_case real das interfaces que o staff chama.
+# Antes vários GET devolviam dict solto e o front tipava no escuro; agora o OpenAPI publica o
+# contrato (mesma régua do grupo leadership). Shapes dinâmicos (saldo Asaas, setup/test) seguem dict.
+class MaterialPublishOut(Schema):
+    """Ack de publicar matéria transitória (`training_iface.publish_transitory`)."""
+
+    external_id: str
+    assigned: int
+
+
+class MaterialDeletedOut(Schema):
+    """Ack de descarte de matéria efêmera."""
+
+    deleted: str
+
+
+class StaffLeadRowOut(Schema):
+    """Lead na visão global do staff (`lead_iface.lead_to_dict`)."""
+
+    external_id: str
+    status: str
+    name: str | None = None
+    phone: str | None = None
+    promoter_external_id: str
+    payment_link: str | None = None
+    receipt_url: str | None = None
+
+
+class FinanceSummaryOut(Schema):
+    """Resumo financeiro: por status → `{count, total}`. As chaves de status são dinâmicas
+    (dependem dos status existentes), por isso os buckets ficam `dict` (honesto)."""
+
+    commissions: dict
+    payment_requests: dict
+
+
+class CommissionRowOut(Schema):
+    """Comissão (`finance_iface.list_commissions`). `amount` = Decimal em string (reais)."""
+
+    external_id: str
+    payee_external_id: str | None = None
+    payee_role: str
+    source_type: str
+    amount: str
+    status: str
+    external_reference: str | None = None
+    created_at: str
+
+
+class PaymentRequestRowOut(Schema):
+    """Solicitação de pagamento/payout (`finance_iface.list_payment_requests`)."""
+
+    external_id: str
+    kind: str
+    method: str
+    amount: str
+    status: str
+    supplier_name: str | None = None
+    week_of: str | None = None
+    scheduled_for: str | None = None
+    asaas_status: str | None = None
+    external_reference: str | None = None
+    created_at: str
+
+
+class IntegrationOut(Schema):
+    """Saúde/config de uma integração (`integrations.status`). `config` (bool por env — NUNCA o
+    valor do secret), `checks` (ledger) e `live` (asaas ao vivo) têm chaves dinâmicas → dict/list."""
+
+    name: str
+    configured: bool
+    config: dict
+    flow: str
+    checks: list = []
+    live: dict | None = None
+
+
+class SystemStatusOut(Schema):
+    """Saúde do servidor (`/system`)."""
+
+    db_ok: bool
+    migrations_pending: list[str] = []
+    qcluster_alive: bool
+    qcluster_count: int
+    queued_tasks: int | None = None
+    debug: bool
+    external_url: str | None = None
+
+
+class UnroutedEventOut(Schema):
+    """Evento sem consumidor (fallback rastreável do core)."""
+
+    source: str
+    event: str
+    reason: str | None = None
+    resolved: bool
+    received_at: str
+
+
+class AiCallOut(Schema):
+    """Chamada de IA do ledger `AiCall`. `cost` = Decimal em string (ou null)."""
+
+    provider: str
+    model: str
+    operation: str
+    caller: str | None = None
+    status: str
+    cost: str | None = None
+    latency_ms: int | None = None
+    error: str | None = None
+    created_at: str
+
+
+class ValidationCheckOut(Schema):
+    """Linha do ledger de validação (`ValidationCheck`)."""
+
+    scope: str
+    name: str
+    passed: bool
+    mode: str | None = None
+    detail: str | None = None
+    checked_at: str
+
+
+class StaffFunnelRowOut(Schema):
+    """Linha de matrícula/aluno na visão global do staff (`enrollment`/`student.list_for_staff`)."""
+
+    external_id: str
+    status: str
+    self_study: bool
+    hub_external_id: str
+    name: str | None = None
+
+
+class StaffUserRowOut(Schema):
+    """Usuário + roles ativas (visão read-only do staff)."""
+
+    external_id: str
+    name: str | None = None
+    cpf: str | None = None
+    phone: str | None = None
+    is_superuser: bool
+    roles: list[str] = []
+
+
+class ExternalIdStatusOut(Schema):
+    """Ack genérico `{external_id, status}` (ex.: platform-credentials)."""
+
+    external_id: str
+    status: str
+
+
+class PhoneChangedOut(Schema):
+    """Ack do resgate de telefone (`auth_iface.change_phone`)."""
+
+    external_id: str
+    phone: str
+
+
 def _hub_out(hub) -> dict:
     return {
         "external_id": str(hub.external_id),
         "brand": hub.brand,
-        "coordinator_external_id": (
-            str(hub.coordinator.external_id) if hub.coordinator else None
-        ),
+        "coordinator_external_id": (str(hub.coordinator.external_id) if hub.coordinator else None),
         "is_default": hub.is_default,
     }
 
@@ -158,7 +313,7 @@ def set_hub_address(request, external_id: str, payload: HubAddressIn):
 
 # ── autoria de matéria do treino (staff — também o coordenador, no grupo leadership) ──
 # MaterialIn/MaterialUpdateIn vêm do módulo compartilhado (plan/15 A7; mesmo contrato do leadership).
-@api.post("/training/materials", tags=["staff"])
+@api.post("/training/materials", response=MaterialOut, tags=["staff"])
 def create_material(request, payload: MaterialIn):
     """Cria uma matéria do treino (texto+questão+gabarito)."""
     require_superuser(request.auth)
@@ -166,7 +321,7 @@ def create_material(request, payload: MaterialIn):
     return training_iface.material_to_dict(m, include_answer=True)
 
 
-@api.put("/training/materials/{external_id}", tags=["staff"])
+@api.put("/training/materials/{external_id}", response=MaterialOut, tags=["staff"])
 def update_material(request, external_id: str, payload: MaterialUpdateIn):
     """Edita uma matéria (campos enviados; `active=False` desativa)."""
     require_superuser(request.auth)
@@ -174,7 +329,7 @@ def update_material(request, external_id: str, payload: MaterialUpdateIn):
     return training_iface.material_to_dict(m, include_answer=True)
 
 
-@api.get("/training/materials", tags=["staff"])
+@api.get("/training/materials", response=list[MaterialOut], tags=["staff"])
 def list_materials(request):
     """Lista todas as matérias (com gabarito — visão de autoria)."""
     require_superuser(request.auth)
@@ -184,7 +339,11 @@ def list_materials(request):
     ]
 
 
-@api.post("/training/materials/{external_id}/publish", tags=["staff"])
+@api.post(
+    "/training/materials/{external_id}/publish",
+    response=MaterialPublishOut,
+    tags=["staff"],
+)
 def publish_material(request, external_id: str):
     """Publica uma matéria TRANSITÓRIA → atribui aos promotores JÁ existentes + re-trava + notifica.
     (As FIXAS não precisam: entram em cada novo promotor ao ser aprovado.)"""
@@ -192,7 +351,7 @@ def publish_material(request, external_id: str):
     return training_iface.publish_transitory(external_id)
 
 
-@api.delete("/training/materials/{external_id}", tags=["staff"])
+@api.delete("/training/materials/{external_id}", response=MaterialDeletedOut, tags=["staff"])
 def delete_material(request, external_id: str):
     """Descarta uma matéria EFÊMERA (descartável). Não-efêmera → desative com update `active=False`."""
     require_superuser(request.auth)
@@ -201,7 +360,7 @@ def delete_material(request, external_id: str):
 
 
 # ── leads (staff vê TODOS; filtra por polo) ──────────────────────────────────
-@api.get("/leads", tags=["lead"])
+@api.get("/leads", response=list[StaffLeadRowOut], tags=["lead"])
 def list_all_leads(request, hub: str | None = None, status: str | None = None):
     """Lista TODOS os leads (link de pagamento + comprovante). Filtros: `hub` (external_id) e `status`."""
     require_superuser(request.auth)
@@ -222,21 +381,21 @@ def finance_balance(request):
     return asaas_onboarding.account_balance()
 
 
-@api.get("/finance/summary", tags=["staff"])
+@api.get("/finance/summary", response=FinanceSummaryOut, tags=["staff"])
 def finance_summary(request):
     """Resumo por status (contagem + total em reais) de comissões e da fila de saída."""
     require_superuser(request.auth)
     return finance_iface.summary()
 
 
-@api.get("/finance/commissions", tags=["staff"])
+@api.get("/finance/commissions", response=list[CommissionRowOut], tags=["staff"])
 def finance_commissions(request, status: str | None = None):
     """Comissões (filtro opcional por status: pending/processed/paid/failed)."""
     require_superuser(request.auth)
     return finance_iface.list_commissions(status=status)
 
 
-@api.get("/finance/payouts", tags=["staff"])
+@api.get("/finance/payouts", response=list[PaymentRequestRowOut], tags=["staff"])
 def finance_payouts(request, status: str | None = None, kind: str | None = None):
     """Solicitações de pagamento / payouts (filtros: status; kind=commission|fee)."""
     require_superuser(request.auth)
@@ -244,14 +403,14 @@ def finance_payouts(request, status: str | None = None, kind: str | None = None)
 
 
 # ── integrações (WP6: status/config + fluxo + ações setup/test) ─────────────
-@api.get("/integrations", tags=["staff"])
+@api.get("/integrations", response=list[IntegrationOut], tags=["staff"])
 def list_integrations(request):
     """Saúde/config de TODAS as integrações (read-only): env presente + fluxo + último do ledger."""
     require_superuser(request.auth)
     return integ_status.list_integrations()
 
 
-@api.get("/integrations/{name}", tags=["staff"])
+@api.get("/integrations/{name}", response=IntegrationOut, tags=["staff"])
 def integration_detail(request, name: str):
     """Detalhe de uma integração (asaas faz run_checks AO VIVO: saldo + webhook)."""
     require_superuser(request.auth)
@@ -282,7 +441,7 @@ def integration_test(request, name: str):
 
 
 # ── status do servidor (WP6) ─────────────────────────────────────────────────
-@api.get("/system", tags=["staff"])
+@api.get("/system", response=SystemStatusOut, tags=["staff"])
 def system_status(request):
     """Saúde do servidor: DB, migrações pendentes, qcluster (Django-Q) + fila, DEBUG, EXTERNAL_URL."""
     require_superuser(request.auth)
@@ -319,7 +478,7 @@ def system_status(request):
 
 
 # ── logs / ledgers (WP6) ─────────────────────────────────────────────────────
-@api.get("/logs/unrouted", tags=["staff"])
+@api.get("/logs/unrouted", response=list[UnroutedEventOut], tags=["staff"])
 def logs_unrouted(request, resolved: bool | None = None, limit: int = 100):
     """Eventos que chegaram mas não tinham consumidor (fallback rastreável do core)."""
     require_superuser(request.auth)
@@ -340,7 +499,7 @@ def logs_unrouted(request, resolved: bool | None = None, limit: int = 100):
     ]
 
 
-@api.get("/logs/ai-calls", tags=["staff"])
+@api.get("/logs/ai-calls", response=list[AiCallOut], tags=["staff"])
 def logs_ai_calls(request, status: str | None = None, limit: int = 100):
     """Chamadas de IA (provider/modelo/operação/custo/erro/latência) — o ledger `AiCall`."""
     require_superuser(request.auth)
@@ -365,7 +524,7 @@ def logs_ai_calls(request, status: str | None = None, limit: int = 100):
     ]
 
 
-@api.get("/logs/checks", tags=["staff"])
+@api.get("/logs/checks", response=list[ValidationCheckOut], tags=["staff"])
 def logs_checks(request, scope: str | None = None, limit: int = 100):
     """Histórico do ledger de validação (`ValidationCheck` — testes carimbados)."""
     require_superuser(request.auth)
@@ -388,14 +547,14 @@ def logs_checks(request, scope: str | None = None, limit: int = 100):
 
 
 # ── visão global (todos os polos) — WP6-D ────────────────────────────────────
-@api.get("/enrollments", tags=["enrollment"])
+@api.get("/enrollments", response=list[StaffFunnelRowOut], tags=["enrollment"])
 def list_all_enrollments(request, hub: str | None = None, status: str | None = None):
     """Matrículas de TODOS os polos (filtros: `hub` external_id, `status`)."""
     require_superuser(request.auth)
     return enrollment_iface.list_for_staff(hub_external_id=hub, status=status)
 
 
-@api.get("/students", tags=["student"])
+@api.get("/students", response=list[StaffFunnelRowOut], tags=["student"])
 def list_all_students(request, hub: str | None = None, status: str | None = None):
     """Alunos de TODOS os polos (filtros: `hub` external_id, `status`)."""
     require_superuser(request.auth)
@@ -410,10 +569,12 @@ class PlatformCredentialsIn(Schema):
     platform_notes: str | None = None
 
 
-@api.put("/students/{external_id}/platform-credentials", tags=["student"])
-def set_student_platform_credentials(
-    request, external_id: str, payload: PlatformCredentialsIn
-):
+@api.put(
+    "/students/{external_id}/platform-credentials",
+    response=ExternalIdStatusOut,
+    tags=["student"],
+)
+def set_student_platform_credentials(request, external_id: str, payload: PlatformCredentialsIn):
     """Staff corrige login/senha (e url/notes) da plataforma de um aluno JÁ concluído. SÓ staff
     altera depois de concluído (Victor 2026-06-23: coordenador/bot não mexem). Login é ÚNICO por
     matrícula → 409 `PLATFORM_LOGIN_TAKEN` se repetir; aluno inexistente → 404."""
@@ -450,7 +611,7 @@ def bot_matriculador(request, payload: BotMatriculadorIn):
 
 
 # ── usuários da plataforma (read-only; mutação de role = «PENDÊNCIA» Victor) ──
-@api.get("/users", tags=["staff"])
+@api.get("/users", response=list[StaffUserRowOut], tags=["staff"])
 def list_users(request, role: str | None = None, limit: int = 200):
     """Usuários + roles ativas (filtro opcional por `role`). Read-only — a mudança de role pelo staff
     fica pra depois (regra do Victor: "dentro do cabível")."""
@@ -482,13 +643,11 @@ class PhoneIn(Schema):
     phone: str
 
 
-@api.put("/users/{external_id}/phone", tags=["staff"])
+@api.put("/users/{external_id}/phone", response=PhoneChangedOut, tags=["staff"])
 def set_user_phone(request, external_id: str, payload: PhoneIn):
     """RESGATE DE LOGIN (Victor 2026-06-17): o usuário perdeu o número/chip e não recebe mais o OTP
     → fica trancado fora, sem rota nem pro coordenador. O staff troca o telefone (valida formato +
     WhatsApp ativo no novo número + unicidade). É a ponta da hierarquia de resgate user→coord→staff;
     trocar o canal de login é poder do staff, não do coordenador. Auditado."""
     require_superuser(request.auth)
-    return auth_iface.change_phone(
-        user_external_id=external_id, new_phone=payload.phone
-    )
+    return auth_iface.change_phone(user_external_id=external_id, new_phone=payload.phone)

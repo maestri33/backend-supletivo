@@ -26,9 +26,5 @@ class Command(BaseCommand):
         )
 
     def handle(self, *args, **options):
-        result = async_to_sync(validate_email)(
-            options["email"], smtp_check=options["smtp"]
-        )
-        self.stdout.write(
-            json.dumps(dataclasses.asdict(result), ensure_ascii=False, indent=2)
-        )
+        result = async_to_sync(validate_email)(options["email"], smtp_check=options["smtp"])
+        self.stdout.write(json.dumps(dataclasses.asdict(result), ensure_ascii=False, indent=2))

@@ -42,9 +42,7 @@ def assign(user, role: str) -> list[str]:
                 f"é promoção a partir de '{any_rule.from_role}'.",
                 code="INVALID_ROLE_ASSIGNMENT",
             )
-        raise NotFound(
-            f"Regra para role '{role}' não encontrada", code="ROLE_NOT_FOUND"
-        )
+        raise NotFound(f"Regra para role '{role}' não encontrada", code="ROLE_NOT_FOUND")
 
     current = active_roles(user)
 
@@ -88,9 +86,7 @@ def promote(user, to_role: str) -> list[str]:
             code="INVALID_ROLE_PROMOTION",
         )
     if to_role in current:
-        raise Conflict(
-            f"Usuário já possui a role '{to_role}'.", code="ROLE_ALREADY_HELD"
-        )
+        raise Conflict(f"Usuário já possui a role '{to_role}'.", code="ROLE_ALREADY_HELD")
 
     with transaction.atomic():
         _active_qs(user).filter(role=from_role).update(revoked_at=timezone.now())
@@ -108,9 +104,7 @@ def grant(user, role: str) -> list[str]:
     if role in active_roles(user):
         return active_roles(user)
     try:
-        with (
-            transaction.atomic()
-        ):  # savepoint: IntegrityError não quebra a transação externa
+        with transaction.atomic():  # savepoint: IntegrityError não quebra a transação externa
             UserRole.objects.create(user=user, role=role)
     except IntegrityError:
         # corrida: outra transação concedeu a MESMA role ativa (constraint de role ativa única) — no-op.

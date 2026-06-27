@@ -19,9 +19,7 @@ from django.conf import settings
 
 
 class InfinitePayError(Exception):
-    def __init__(
-        self, message: str, *, payload: Any = None, status_code: int | None = None
-    ):
+    def __init__(self, message: str, *, payload: Any = None, status_code: int | None = None):
         super().__init__(message)
         self.payload = payload
         self.status_code = status_code
@@ -68,9 +66,7 @@ class InfinitePayClient:
         if data.get("success") is False:
             raise InfinitePayError("InfinitePay returned success=false", payload=data)
         if not (data.get("url") or data.get("checkout_url") or data.get("link")):
-            raise InfinitePayError(
-                "InfinitePay response missing checkout URL", payload=data
-            )
+            raise InfinitePayError("InfinitePay response missing checkout URL", payload=data)
         return data
 
     async def payment_check(

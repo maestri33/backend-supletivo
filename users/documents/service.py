@@ -47,12 +47,8 @@ _PHOTO_SLOTS = {
 
 # MIME aceito → extensão do arquivo salvo.
 _ALLOWED_IMAGE = {"image/jpeg": "jpg", "image/png": "png", "image/webp": "webp"}
-_PDF_MIME = (
-    "application/pdf"  # aceito em qualquer slot: convertido pra JPEG antes de salvar
-)
-_PDF_MAX_PAGES = (
-    2  # scan comum: pág 1 = frente, pág 2 = verso; >2 páginas → usa as 2 primeiras
-)
+_PDF_MIME = "application/pdf"  # aceito em qualquer slot: convertido pra JPEG antes de salvar
+_PDF_MAX_PAGES = 2  # scan comum: pág 1 = frente, pág 2 = verso; >2 páginas → usa as 2 primeiras
 
 
 def create_empty(user) -> Document:
@@ -72,9 +68,7 @@ def _get_document(external_id: str) -> Document:
         .first()
     )
     if document is None:
-        raise NotFound(
-            "Documentos não encontrados para este usuário.", code="DOCUMENT_NOT_FOUND"
-        )
+        raise NotFound("Documentos não encontrados para este usuário.", code="DOCUMENT_NOT_FOUND")
     return document
 
 
@@ -84,9 +78,7 @@ def _parse_date(value):
     try:
         return date.fromisoformat(value)
     except (ValueError, TypeError) as exc:
-        raise ValidationError(
-            "Data inválida (use AAAA-MM-DD).", code="DATE_INVALID"
-        ) from exc
+        raise ValidationError("Data inválida (use AAAA-MM-DD).", code="DATE_INVALID") from exc
 
 
 def as_dict(document: Document) -> dict:
@@ -114,9 +106,7 @@ def as_dict(document: Document) -> dict:
         "cnh": {
             "number": cnh.number,
             "category": cnh.category,
-            "date_of_birth": cnh.date_of_birth.isoformat()
-            if cnh.date_of_birth
-            else None,
+            "date_of_birth": cnh.date_of_birth.isoformat() if cnh.date_of_birth else None,
             "expires_on": cnh.expires_on.isoformat() if cnh.expires_on else None,
             "national_register": cnh.national_register,
             **_photo(cnh, "front_photo", "back_photo", "full_photo"),
@@ -192,9 +182,7 @@ def update(external_id: str, payload: dict) -> dict:
                 setattr(sub, field, _parse_date(sub_payload[field]))
         sub.save()
 
-    logger.info(
-        "documents.updated", external_id=external_id, parts=list(payload.keys())
-    )
+    logger.info("documents.updated", external_id=external_id, parts=list(payload.keys()))
     return as_dict(document)
 
 
@@ -223,10 +211,7 @@ def _pdf_to_jpeg(data: bytes) -> bytes:
 
     try:
         pdf = pdfium.PdfDocument(data)
-        pages = [
-            pdf[i].render(scale=2.0).to_pil()
-            for i in range(min(len(pdf), _PDF_MAX_PAGES))
-        ]
+        pages = [pdf[i].render(scale=2.0).to_pil() for i in range(min(len(pdf), _PDF_MAX_PAGES))]
     except Exception as exc:  # noqa: BLE001 — PDF corrompido/protegido
         raise ValidationError(
             "Arquivo não é um PDF válido (corrompido ou protegido).",
@@ -259,9 +244,7 @@ def upload_photo(external_id: str, slot: str, upload) -> str:
 
     content_type = getattr(upload, "content_type", "")
     if content_type not in _ALLOWED_IMAGE and content_type != _PDF_MIME:
-        raise ValidationError(
-            "Arquivo deve ser JPEG, PNG, WEBP ou PDF.", code="IMAGE_TYPE_INVALID"
-        )
+        raise ValidationError("Arquivo deve ser JPEG, PNG, WEBP ou PDF.", code="IMAGE_TYPE_INVALID")
 
     max_bytes = settings.MAX_UPLOAD_MB * 1024 * 1024
     if upload.size > max_bytes:

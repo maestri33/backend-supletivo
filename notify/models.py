@@ -17,9 +17,7 @@ from core.models import ExternalIdModel
 STATUS_PENDING = "pending"
 STATUS_SENT = "sent"
 STATUS_FAILED = "failed"
-STATUS_SKIPPED = (
-    "skipped"  # canal não pedido, ou pedido sem destinatário — nada a enviar
-)
+STATUS_SKIPPED = "skipped"  # canal não pedido, ou pedido sem destinatário — nada a enviar
 
 _STATUS_CHOICES = [
     (STATUS_PENDING, "pendente"),
@@ -36,9 +34,7 @@ class Notification(ExternalIdModel):
     """Uma notificação despachada — pode atingir vários canais (whatsapp / email / tts)."""
 
     # dedup opcional: o caller passa uma chave estável; a mesma chave devolve a notificação já criada.
-    idempotency_key = models.CharField(
-        max_length=255, unique=True, null=True, blank=True
-    )
+    idempotency_key = models.CharField(max_length=255, unique=True, null=True, blank=True)
     # quem emitiu a notificação (ex.: "asaas.charge") — auditoria/telemetria.
     caller = models.CharField(max_length=100)
 
@@ -66,12 +62,8 @@ class Notification(ExternalIdModel):
     whatsapp_status = models.CharField(
         max_length=10, choices=_STATUS_CHOICES, default=STATUS_PENDING
     )
-    email_status = models.CharField(
-        max_length=10, choices=_STATUS_CHOICES, default=STATUS_PENDING
-    )
-    tts_status = models.CharField(
-        max_length=10, choices=_STATUS_CHOICES, default=STATUS_PENDING
-    )
+    email_status = models.CharField(max_length=10, choices=_STATUS_CHOICES, default=STATUS_PENDING)
+    tts_status = models.CharField(max_length=10, choices=_STATUS_CHOICES, default=STATUS_PENDING)
 
     whatsapp_error = models.TextField(null=True, blank=True)
     email_error = models.TextField(null=True, blank=True)

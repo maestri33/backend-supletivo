@@ -14,9 +14,7 @@ def copy_otp_notification(apps, schema_editor):
     OtpCode = apps.get_model("users", "OtpCode")
     Notification = apps.get_model("notify", "Notification")
     for otp in OtpCode.objects.exclude(notification_external_id__isnull=True):
-        notif = Notification.objects.filter(
-            external_id=otp.notification_external_id
-        ).first()
+        notif = Notification.objects.filter(external_id=otp.notification_external_id).first()
         if notif is not None:
             otp.notification_id = notif.id
             otp.save(update_fields=["notification"])

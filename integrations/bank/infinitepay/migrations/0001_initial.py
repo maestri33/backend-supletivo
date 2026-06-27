@@ -29,9 +29,7 @@ class Migration(migrations.Migration):
                 ("checkout_url", models.TextField(blank=True, null=True)),
                 (
                     "slug",
-                    models.CharField(
-                        blank=True, db_index=True, max_length=128, null=True
-                    ),
+                    models.CharField(blank=True, db_index=True, max_length=128, null=True),
                 ),
                 (
                     "status",
@@ -52,9 +50,7 @@ class Migration(migrations.Migration):
                 ),
                 (
                     "transaction_nsu",
-                    models.CharField(
-                        blank=True, db_index=True, max_length=128, null=True
-                    ),
+                    models.CharField(blank=True, db_index=True, max_length=128, null=True),
                 ),
                 ("receipt_url", models.TextField(blank=True, null=True)),
                 ("request_payload", models.JSONField(default=dict)),
@@ -78,9 +74,7 @@ class Migration(migrations.Migration):
                 ("received_at", models.DateTimeField(auto_now_add=True, db_index=True)),
                 (
                     "order_nsu",
-                    models.CharField(
-                        blank=True, db_index=True, max_length=128, null=True
-                    ),
+                    models.CharField(blank=True, db_index=True, max_length=128, null=True),
                 ),
                 ("payload", models.JSONField(default=dict)),
                 ("forwarded_ok", models.BooleanField(default=False)),

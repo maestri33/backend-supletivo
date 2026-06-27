@@ -50,9 +50,7 @@ def _resolve_due_date(due_date: str | None) -> date:
     return parsed
 
 
-async def _create_payment_and_qr(
-    customer_asaas_id, value, due, description, pid, success_url=None
-):
+async def _create_payment_and_qr(customer_asaas_id, value, due, description, pid, success_url=None):
     async with get_client() as c:
         payload = {
             "customer": customer_asaas_id,
@@ -71,9 +69,7 @@ async def _create_payment_and_qr(
             qr = await c.get_payment_pix_qr_code(created["id"])
         except AsaasError as e:
             # não bloqueia a criação — persistimos sem QR e dá pra rebuscar
-            logger.warning(
-                "charge_qr_fetch_failed", asaas_id=created.get("id"), body=str(e.body)
-            )
+            logger.warning("charge_qr_fetch_failed", asaas_id=created.get("id"), body=str(e.body))
         return created, qr
 
 
@@ -99,9 +95,7 @@ def create_charge(
 
     try:
         created, qr = asyncio.run(
-            _create_payment_and_qr(
-                cust.asaas_id, float(amt), due, description, pid, success_url
-            )
+            _create_payment_and_qr(cust.asaas_id, float(amt), due, description, pid, success_url)
         )
     except AsaasError as e:
         raise ChargeError(f"asaas_charge_create_failed: {e.body}") from e
@@ -127,16 +121,12 @@ def create_charge(
     )
     # invoiceUrl = página hospedada do Asaas (alvo do link curto). Transiente: não persistimos no Payment.
     row.invoice_url = created.get("invoiceUrl")
-    logger.info(
-        "charge_created", payment_id=pid, asaas_id=created["id"], amount=str(amt)
-    )
+    logger.info("charge_created", payment_id=pid, asaas_id=created["id"], amount=str(amt))
     return row
 
 
 def get_charge(payment_id: str) -> Payment:
-    row = Payment.objects.filter(
-        payment_id=payment_id, kind=Payment.Kind.CHARGE
-    ).first()
+    row = Payment.objects.filter(payment_id=payment_id, kind=Payment.Kind.CHARGE).first()
     if row is None:
         raise ChargeError("not_found")
     return row

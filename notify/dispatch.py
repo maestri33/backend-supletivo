@@ -95,9 +95,7 @@ def _send_whatsapp(notif: Notification) -> None:
     except Exception as exc:  # noqa: BLE001 — um canal não pode derrubar os outros (§12)
         notif.whatsapp_status = STATUS_FAILED
         notif.whatsapp_error = f"{type(exc).__name__}: {exc}"
-        logger.warning(
-            "notify.whatsapp_failed", external_id=str(notif.external_id), error=str(exc)
-        )
+        logger.warning("notify.whatsapp_failed", external_id=str(notif.external_id), error=str(exc))
 
 
 def _send_email(notif: Notification) -> None:
@@ -105,9 +103,7 @@ def _send_email(notif: Notification) -> None:
         subject = notif.subject or notif.title or "(sem assunto)"
         if notif.media_url:
             # e-mail embute a mídia pela URL PÚBLICA (destinatário busca pela internet).
-            content_html = mail_templates.text_to_html(
-                notif.text
-            ) + mail_templates.media_html(
+            content_html = mail_templates.text_to_html(notif.text) + mail_templates.media_html(
                 notif.media_url,
                 notif.media_type or "document",
                 caption=notif.title or "",
@@ -130,9 +126,7 @@ def _send_email(notif: Notification) -> None:
     except Exception as exc:  # noqa: BLE001 — isola a falha do canal (§12)
         notif.email_status = STATUS_FAILED
         notif.email_error = f"{type(exc).__name__}: {exc}"
-        logger.warning(
-            "notify.email_failed", external_id=str(notif.external_id), error=str(exc)
-        )
+        logger.warning("notify.email_failed", external_id=str(notif.external_id), error=str(exc))
 
 
 def _send_tts(notif: Notification) -> None:
@@ -162,6 +156,4 @@ def _send_tts(notif: Notification) -> None:
     except Exception as exc:  # noqa: BLE001 — isola a falha do canal (§12)
         notif.tts_status = STATUS_FAILED
         notif.tts_error = f"{type(exc).__name__}: {exc}"
-        logger.warning(
-            "notify.tts_failed", external_id=str(notif.external_id), error=str(exc)
-        )
+        logger.warning("notify.tts_failed", external_id=str(notif.external_id), error=str(exc))

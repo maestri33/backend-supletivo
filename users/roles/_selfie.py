@@ -41,16 +41,12 @@ _PROMPT = (
 )
 
 
-def verify(
-    image_bytes: bytes, content_type: str, *, caller: str
-) -> tuple[str, str | None]:
+def verify(image_bytes: bytes, content_type: str, *, caller: str) -> tuple[str, str | None]:
     """(status, justificativa). status ∈ approved|rejected|review. IA fora/ambígua → review (humano decide)."""
     from integrations.ai import service as ai
 
     try:
-        desc = ai.describe_image(
-            image_bytes, caller=caller, mime_type=content_type, prompt=_PROMPT
-        )
+        desc = ai.describe_image(image_bytes, caller=caller, mime_type=content_type, prompt=_PROMPT)
     except Exception as exc:  # noqa: BLE001 — IA fora do ar → review (coordenador resolve)
         logger.warning("selfie_ai_failed", caller=caller, error=str(exc))
         return (
@@ -100,14 +96,10 @@ def add_face_match(
 
     from integrations.tools.biometric import service as biometric
 
-    fm = biometric.verify_identity(
-        user=user, selfie_image_path=selfie_image_path, caller=caller
-    )
+    fm = biometric.verify_identity(user=user, selfie_image_path=selfie_image_path, caller=caller)
     status = combine(liveness_status, fm.status)
     score = "—" if fm.score is None else f"{fm.score:.3f}"
-    desc = f"{liveness_desc or ''} | biometria[{fm.status} score={score}]: {fm.reason}".strip(
-        " |"
-    )
+    desc = f"{liveness_desc or ''} | biometria[{fm.status} score={score}]: {fm.reason}".strip(" |")
     return status, desc
 
 
@@ -130,11 +122,7 @@ def instructions(
         "Seja específico pro problema DESTA imagem; não repita o motivo, diga o que FAZER."
     )
     try:
-        return ai.describe_image(
-            image_bytes, caller=caller, mime_type=content_type, prompt=prompt
-        )
+        return ai.describe_image(image_bytes, caller=caller, mime_type=content_type, prompt=prompt)
     except Exception as exc:  # noqa: BLE001 — instrução é apoio; o motivo já foi guardado
-        logger.warning(
-            "selfie_instructions_failed", caller=caller, error=str(exc)[:200]
-        )
+        logger.warning("selfie_instructions_failed", caller=caller, error=str(exc)[:200])
         return None

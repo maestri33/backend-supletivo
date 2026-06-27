@@ -38,9 +38,7 @@ def fallback_chain(model: str | None = None) -> list[tuple[str, str]]:
         return chain
     filtered = [(p, m) for (p, m) in chain if m == model]
     if not filtered:
-        raise LLMError(
-            f"model {model!r} não está na IA_FALLBACK_CHAIN", retryable=False
-        )
+        raise LLMError(f"model {model!r} não está na IA_FALLBACK_CHAIN", retryable=False)
     return filtered
 
 

@@ -56,17 +56,13 @@ class Migration(migrations.Migration):
                 ("payload", models.JSONField(default=dict)),
                 (
                     "external_id",
-                    models.CharField(
-                        blank=True, db_index=True, max_length=255, null=True
-                    ),
+                    models.CharField(blank=True, db_index=True, max_length=255, null=True),
                 ),
                 ("attempts", models.IntegerField(default=0)),
                 ("max_attempts", models.IntegerField(default=6)),
                 (
                     "next_attempt_at",
-                    models.DateTimeField(
-                        db_index=True, default=django.utils.timezone.now
-                    ),
+                    models.DateTimeField(db_index=True, default=django.utils.timezone.now),
                 ),
                 ("delivered_at", models.DateTimeField(blank=True, null=True)),
                 ("last_error", models.TextField(blank=True, null=True)),
@@ -167,9 +163,7 @@ class Migration(migrations.Migration):
                 ("status", models.CharField(db_index=True, max_length=20)),
                 (
                     "asaas_id",
-                    models.CharField(
-                        blank=True, db_index=True, max_length=255, null=True
-                    ),
+                    models.CharField(blank=True, db_index=True, max_length=255, null=True),
                 ),
                 ("last_error", models.TextField(blank=True, null=True)),
                 ("created_at", models.DateTimeField(auto_now_add=True)),

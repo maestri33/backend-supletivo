@@ -199,9 +199,7 @@ def pending_materials(user) -> list[dict]:
     ]
 
 
-def assigned_materials(
-    user_external_id: str, *, include_content: bool = True
-) -> list[dict]:
+def assigned_materials(user_external_id: str, *, include_content: bool = True) -> list[dict]:
     """Matérias ATRIBUÍDAS ao colaborador (não todas as ativas) + status + última submissão.
 
     É o que o promotor em treino vê (`GET /training/materials`): conteúdo da matéria (sem gabarito) +
@@ -320,9 +318,7 @@ def _recheck_lock(user, *, trigger=None) -> None:
 # ── submissão (autenticado, role promoter) ──────────────────────────────────
 
 
-def submit(
-    *, user_external_id: str, material_external_id: str, answer: str
-) -> Submission:
+def submit(*, user_external_id: str, material_external_id: str, answer: str) -> Submission:
     from users.auth.models import User
 
     user = User.objects.filter(external_id=user_external_id).first()
@@ -332,9 +328,7 @@ def submit(
     if not material.active:
         raise TrainingError("Matéria inativa.", code="MATERIAL_INACTIVE")
     if _assignment(user, material) is None:
-        raise TrainingError(
-            "Esta matéria não está atribuída a você.", code="MATERIAL_NOT_ASSIGNED"
-        )
+        raise TrainingError("Esta matéria não está atribuída a você.", code="MATERIAL_NOT_ASSIGNED")
     # bloqueia 2ª pending na mesma matéria (não gasta IA em dobro)
     if Submission.objects.filter(
         user=user, material=material, status=Submission.Status.PENDING
@@ -372,19 +366,13 @@ def submission_to_dict(s: Submission) -> dict:
 
 
 def apply_grade(submission_id: int, grade_value, justification: str) -> None:
-    sub = (
-        Submission.objects.select_related("material", "user")
-        .filter(id=submission_id)
-        .first()
-    )
+    sub = Submission.objects.select_related("material", "user").filter(id=submission_id).first()
     if sub is None or sub.status != Submission.Status.PENDING:
         return  # idempotente (re-grade não re-aplica)
     sub.grade = Decimal(str(grade_value))
     sub.justification = justification
     sub.status = (
-        Submission.Status.APPROVED
-        if sub.grade >= pass_score()
-        else Submission.Status.REJECTED
+        Submission.Status.APPROVED if sub.grade >= pass_score() else Submission.Status.REJECTED
     )
     sub.save(update_fields=["grade", "justification", "status", "updated_at"])
     logger.info(
@@ -415,9 +403,7 @@ def coordinator_approve_material(
     if promoter is None:
         raise NotFound("Promotor não encontrado.", code="PROMOTER_NOT_FOUND")
     if promoter.hub.coordinator_id != coordinator.id:
-        raise Forbidden(
-            "Você não coordena o polo deste promotor.", code="NOT_HUB_COORDINATOR"
-        )
+        raise Forbidden("Você não coordena o polo deste promotor.", code="NOT_HUB_COORDINATOR")
     material = _material(material_external_id)
     if _assignment(user, material) is None:
         raise TrainingError(
@@ -444,9 +430,7 @@ def list_locked_promoters_for_hub(*, hub) -> list[dict]:
     from users.roles.promoter.models import Promoter
 
     out = []
-    promoters = (
-        Promoter.objects.filter(hub=hub).select_related("user").order_by("created_at")
-    )
+    promoters = Promoter.objects.filter(hub=hub).select_related("user").order_by("created_at")
     for promoter in promoters:
         pending = pending_materials(promoter.user)
         if not any(p["blocking"] for p in pending):

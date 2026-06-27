@@ -65,9 +65,7 @@ def ack(status: str | None, started_at: datetime | None) -> dict:
     o prazo estourou, o `analysis_status` devolvido é `review`."""
     exp = expires_at(started_at)
     return {
-        "analysis_status": REVIEW
-        if is_stale(status, started_at)
-        else (status or PENDING),
+        "analysis_status": REVIEW if is_stale(status, started_at) else (status or PENDING),
         "poll_after_ms": poll_after_ms(),
         "expires_at": exp.isoformat() if exp else None,
     }

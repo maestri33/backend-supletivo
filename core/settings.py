@@ -239,9 +239,7 @@ FRONTEND_URL = env("FRONTEND_URL", default="")
 ENROLLMENT_RESUME_PATH = env("ENROLLMENT_RESUME_PATH", default="/matricula")
 # URL de login da instituição parceira (SIGA) — vai no notify de credenciais quando o cliente
 # vira ALUNO (login/senha/link). A partir daí é a única coisa que ele recebe (Victor 2026-06-23).
-INSTITUTION_LOGIN_URL = env(
-    "INSTITUTION_LOGIN_URL", default="https://cbi.sistemasiga.net/login/"
-)
+INSTITUTION_LOGIN_URL = env("INSTITUTION_LOGIN_URL", default="https://cbi.sistemasiga.net/login/")
 # Prazo default (dias) da cobrança PIX quando o caller não passa due_date.
 ASAAS_CHARGE_DUE_DAYS = env.int("ASAAS_CHARGE_DUE_DAYS", default=3)
 # Onboarding/auto-cadastro do webhook (1a-v): nome do webhook que gerenciamos no Asaas (casamos por
@@ -304,9 +302,7 @@ IA_TIMEOUT = env.float("IA_TIMEOUT", default=60.0)
 # AVISA (ai.W001/W002/W003), não trava como a cadeia LLM (que é o núcleo). Keys AIza/sk_ (sem "$").
 # Gemini = visão (descrever imagem) + geração de imagem; ElevenLabs = TTS; Google Vision = OCR.
 GEMINI_API_KEY = env("GEMINI_API_KEY", default="")
-GEMINI_BASE_URL = env(
-    "GEMINI_BASE_URL", default="https://generativelanguage.googleapis.com/v1beta"
-)
+GEMINI_BASE_URL = env("GEMINI_BASE_URL", default="https://generativelanguage.googleapis.com/v1beta")
 GEMINI_VISION_MODEL = env("GEMINI_VISION_MODEL", default="gemini-3-flash-preview")
 GEMINI_IMAGE_MODEL = env("GEMINI_IMAGE_MODEL", default="gemini-3.1-flash-image-preview")
 
@@ -329,13 +325,9 @@ ELEVENLABS_VOICE_FEMALE = env("ELEVENLABS_VOICE_FEMALE", default="JBFqnCBsd6RMkj
 ELEVENLABS_VOICE_MALE = env("ELEVENLABS_VOICE_MALE", default="JBFqnCBsd6RMkjVDRZzb")
 
 GOOGLE_VISION_API_KEY = env("GOOGLE_VISION_API_KEY", default="")
-GOOGLE_VISION_BASE_URL = env(
-    "GOOGLE_VISION_BASE_URL", default="https://vision.googleapis.com"
-)
+GOOGLE_VISION_BASE_URL = env("GOOGLE_VISION_BASE_URL", default="https://vision.googleapis.com")
 # Alternativa de auth (prod, mais robusto): path pro JSON do service-account. Vazio => usa a api-key.
-GOOGLE_VISION_SERVICE_ACCOUNT_JSON = env(
-    "GOOGLE_VISION_SERVICE_ACCOUNT_JSON", default=""
-)
+GOOGLE_VISION_SERVICE_ACCOUNT_JSON = env("GOOGLE_VISION_SERVICE_ACCOUNT_JSON", default="")
 
 # MiniMax — mídia: TTS (t2a_v2) e visão (descrever imagem com MiniMax-M3). Hoje é o PRIMÁRIO de TTS
 # (ElevenLabs vira fallback) e de visão (Gemini vira fallback) — Victor 2026-06-05. Reusa a key do
@@ -399,12 +391,8 @@ Q_CLUSTER = {
 # ── JWT (users.auth.jwt): RS256, par de chaves PEM. As chaves são geradas no 1º uso se faltarem
 # (users/auth/jwt/keys.py) num diretório gitignored — a privada NUNCA vai pro git. Paths relativos
 # ao BASE_DIR. issuer/audience e expirações são config (defaults = porte do legado).
-JWT_PRIVATE_KEY_PATH = BASE_DIR / env(
-    "JWT_PRIVATE_KEY_PATH", default="keys/jwt_private.pem"
-)
-JWT_PUBLIC_KEY_PATH = BASE_DIR / env(
-    "JWT_PUBLIC_KEY_PATH", default="keys/jwt_public.pem"
-)
+JWT_PRIVATE_KEY_PATH = BASE_DIR / env("JWT_PRIVATE_KEY_PATH", default="keys/jwt_private.pem")
+JWT_PUBLIC_KEY_PATH = BASE_DIR / env("JWT_PUBLIC_KEY_PATH", default="keys/jwt_public.pem")
 JWT_ALGORITHM = env("JWT_ALGORITHM", default="RS256")
 JWT_ACCESS_EXPIRE_MINUTES = env.int("JWT_ACCESS_EXPIRE_MINUTES", default=30)
 JWT_REFRESH_EXPIRE_MINUTES = env.int("JWT_REFRESH_EXPIRE_MINUTES", default=1440)
@@ -501,9 +489,7 @@ ENROLLMENT_PRICE_PIX = env("ENROLLMENT_PRICE_PIX", default="5")
 ENROLLMENT_PRICE_PROMOTER_CARD_CENTS = env.int(
     "ENROLLMENT_PRICE_PROMOTER_CARD_CENTS", default=ENROLLMENT_PRICE_CARD_CENTS
 )
-ENROLLMENT_PRICE_PROMOTER_PIX = env(
-    "ENROLLMENT_PRICE_PROMOTER_PIX", default=ENROLLMENT_PRICE_PIX
-)
+ENROLLMENT_PRICE_PROMOTER_PIX = env("ENROLLMENT_PRICE_PROMOTER_PIX", default=ENROLLMENT_PRICE_PIX)
 ENROLLMENT_DESCRIPTION = env("ENROLLMENT_DESCRIPTION", default="Matrícula Supletivo")
 
 # treino (LMS do funil do colaborador, §4 item 7) — nota de corte (0–10) p/ aprovar uma submissão da IA.

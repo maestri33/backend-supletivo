@@ -36,9 +36,7 @@ class LeadError(DomainError):
     status = 422
 
 
-def create_lead(
-    *, cpf: str, phone: str, email: str, payment_method=None, ref=None
-) -> dict:
+def create_lead(*, cpf: str, phone: str, email: str, payment_method=None, ref=None) -> dict:
     """Cria o lead: register + Lead(PENDING) + Checkout síncrono. Retorna external_id+status+checkout.
 
     Mínimo (Victor 2026-06-04): método (default cartão), cpf, phone, email. `ref` = external_id do
@@ -234,9 +232,7 @@ def _enqueue_provider_build(checkout: Checkout) -> None:
 
         async_task("users.roles.lead.tasks.build_checkout", checkout.pk)
     except Exception as exc:  # noqa: BLE001 — o clique no link curto cobre (lazy build)
-        logger.warning(
-            "lead.checkout_enqueue_failed", checkout=checkout.pk, error=str(exc)
-        )
+        logger.warning("lead.checkout_enqueue_failed", checkout=checkout.pk, error=str(exc))
 
 
 def fill_checkout_from_provider(checkout: Checkout) -> None:
@@ -351,9 +347,7 @@ def _checkout_dict(c: Checkout) -> dict:
         "amount": str(c.amount),
         "is_paid": c.is_paid,
         "checkout_url": c.checkout_url,
-        "short_url": checkout_links.short_url(
-            c.short_token
-        ),  # link curto p/ mandar por WhatsApp
+        "short_url": checkout_links.short_url(c.short_token),  # link curto p/ mandar por WhatsApp
         "qrcode_payload": c.qrcode_payload,
         "qrcode_image": c.qrcode_image,
         "due_date": c.due_date.isoformat() if c.due_date else None,
@@ -473,9 +467,7 @@ def create_self_study_lead(*, user, payment_method=None) -> dict:
     )
     checkout = _create_checkout_row(lead, method)
     _enqueue_provider_build(checkout)
-    _notify_captured(
-        lead
-    )  # boas-vindas ao próprio promotor (sem "novo lead" a ninguém)
+    _notify_captured(lead)  # boas-vindas ao próprio promotor (sem "novo lead" a ninguém)
     logger.info("lead.self_study_created", external_id=str(lead.external_id))
     return {
         "external_id": str(lead.external_id),
@@ -574,9 +566,7 @@ def _notify_paid(lead: Lead, hub, checkout: Checkout | None = None) -> None:
         try:
             send(**kw)
         except Exception as exc:  # noqa: BLE001
-            logger.warning(
-                f"lead.notify_{label}_failed", external_id=base, error=str(exc)
-            )
+            logger.warning(f"lead.notify_{label}_failed", external_id=base, error=str(exc))
 
     # PAGAMENTO CONFIRMADO → o LEAD. Momento especial = parabéns por VOZ (sem URL na voz). O comprovante
     # vai numa mensagem SEPARADA de texto (URL não se lê em áudio).
@@ -612,9 +602,7 @@ def _notify_paid(lead: Lead, hub, checkout: Checkout | None = None) -> None:
         coord_profile = profiles.get(coord)
         _safe(
             "coordinator",
-            text=msgs.text(
-                "lead.paid.coordinator", name=msgs.first_name(coord_profile.name)
-            )
+            text=msgs.text("lead.paid.coordinator", name=msgs.first_name(coord_profile.name))
             if coord_profile
             else msgs.text("lead.paid.coordinator"),
             caller="lead.paid.coordinator",
@@ -627,9 +615,7 @@ def _notify_paid(lead: Lead, hub, checkout: Checkout | None = None) -> None:
         promoter_profile = profiles.get(lead.promoter)
         _safe(
             "promoter",
-            text=msgs.text(
-                "lead.paid.promoter", name=msgs.first_name(promoter_profile.name)
-            )
+            text=msgs.text("lead.paid.promoter", name=msgs.first_name(promoter_profile.name))
             if promoter_profile
             else msgs.text("lead.paid.promoter"),
             caller="lead.paid.promoter",
@@ -653,15 +639,11 @@ def list_leads(*, hub=None, status=None) -> list[Lead]:
     (`Enrollment.hub`, pós-pagamento). Sem hub → todos (staff). Coordenador passa o seu hub."""
     from django.db.models import Q
 
-    qs = Lead.objects.select_related("user", "promoter", "checkout").order_by(
-        "-created_at"
-    )
+    qs = Lead.objects.select_related("user", "promoter", "checkout").order_by("-created_at")
     if status:
         qs = qs.filter(status=status)
     if hub is not None:
-        qs = qs.filter(
-            Q(promoter__promoter__hub=hub) | Q(user__enrollment__hub=hub)
-        ).distinct()
+        qs = qs.filter(Q(promoter__promoter__hub=hub) | Q(user__enrollment__hub=hub)).distinct()
     return list(qs)
 
 

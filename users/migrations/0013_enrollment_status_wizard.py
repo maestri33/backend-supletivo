@@ -12,9 +12,7 @@ _FORWARD = {
     "documents": "education",
     "education": "selfie",
 }
-_BACKWARD = {
-    v: k for k, v in _FORWARD.items()
-}  # selfie volta pra education (aprox. fiel)
+_BACKWARD = {v: k for k, v in _FORWARD.items()}  # selfie volta pra education (aprox. fiel)
 
 
 def _remap(apps, mapping):

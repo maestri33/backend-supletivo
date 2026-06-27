@@ -34,6 +34,4 @@ def validate_phone(phone: str) -> str:
         return clean
     if len(clean) in (10, 11):
         return "55" + clean
-    raise ValueError(
-        f"Telefone deve ter 10 ou 11 dígitos (DDD+número), encontrados {len(clean)}."
-    )
+    raise ValueError(f"Telefone deve ter 10 ou 11 dígitos (DDD+número), encontrados {len(clean)}.")

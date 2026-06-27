@@ -5,32 +5,17 @@ para a mesma classe (não há drift).
 
 from __future__ import annotations
 
-import pytest
-
 
 def test_schemas_centrais_existem():
     """api/schemas.py exporta todos os schemas compartilhados."""
-    from api.schemas import (
-        MaterialIn,
-        MaterialUpdateIn,
-        RefreshIn,
-        TokenOut,
-        SharedCandidateProfileOut,
-        SharedCandidateDocSubOut,
-        SharedCandidateDocumentsOut,
-        SharedCandidateSelfieOut,
-        SharedAddressOut,
-        SharedCandidateMeOut,
-        SharedAnalysisAckOut,
-    )
     # Se chegou aqui, todos importaram sem erro
     assert True
 
 
 def test_schemas_collaborators_importam_centrais():
     """collaborators usa os schemas centrais (sem redefinição local)."""
-    import django
     import os
+
     os.environ.setdefault("DJANGO_SETTINGS_MODULE", "core.settings")
 
     from api.schemas import (
@@ -38,8 +23,10 @@ def test_schemas_collaborators_importam_centrais():
         SharedAddressOut,
         SharedAnalysisAckOut,
     )
+
     # verifica que os aliases em collaborators apontam pra classe central
     from api import collaborators as col
+
     assert col.CandidateMeOut is SharedCandidateMeOut
     assert col.CandidateAddressOut is SharedAddressOut
     assert col.AnalysisAckOut is SharedAnalysisAckOut

@@ -20,46 +20,26 @@ from notify.models import Notification
 
 
 class Command(BaseCommand):
-    help = (
-        "Dispara uma notificação real (whatsapp/email/tts) e mostra o status por canal."
-    )
+    help = "Dispara uma notificação real (whatsapp/email/tts) e mostra o status por canal."
 
     def add_arguments(self, parser):
-        parser.add_argument(
-            "--phone", default=None, help="Destinatário whatsapp/tts (DDI+DDD+nº)"
-        )
+        parser.add_argument("--phone", default=None, help="Destinatário whatsapp/tts (DDI+DDD+nº)")
         parser.add_argument("--email", default=None, help="Destinatário do e-mail")
-        parser.add_argument(
-            "--title", default=None, help="Título (negrito no whatsapp / subject)"
-        )
-        parser.add_argument(
-            "--subject", default=None, help="Assunto do e-mail (fallback: título)"
-        )
+        parser.add_argument("--title", default=None, help="Título (negrito no whatsapp / subject)")
+        parser.add_argument("--subject", default=None, help="Assunto do e-mail (fallback: título)")
         parser.add_argument("--text", required=True, help="Corpo da mensagem")
-        parser.add_argument(
-            "--mail-template", default="default", help="Slug do template do mail"
-        )
-        parser.add_argument(
-            "--media-url", default=None, help="URL pública da mídia (imagem etc.)"
-        )
+        parser.add_argument("--mail-template", default="default", help="Slug do template do mail")
+        parser.add_argument("--media-url", default=None, help="URL pública da mídia (imagem etc.)")
         parser.add_argument(
             "--media-type",
             default=None,
             help="image/video/audio/document (auto-detect pela extensão se omitido)",
         )
-        parser.add_argument(
-            "--gender", default=None, help="M/F — voz do TTS (default: voz padrão)"
-        )
-        parser.add_argument(
-            "--whatsapp", action="store_true", help="ligar canal whatsapp"
-        )
-        parser.add_argument(
-            "--email-channel", action="store_true", help="ligar canal e-mail"
-        )
+        parser.add_argument("--gender", default=None, help="M/F — voz do TTS (default: voz padrão)")
+        parser.add_argument("--whatsapp", action="store_true", help="ligar canal whatsapp")
+        parser.add_argument("--email-channel", action="store_true", help="ligar canal e-mail")
         parser.add_argument("--tts", action="store_true", help="ligar voice-note (TTS)")
-        parser.add_argument(
-            "--caller", default="notify_send", help="quem emitiu (auditoria)"
-        )
+        parser.add_argument("--caller", default="notify_send", help="quem emitiu (auditoria)")
 
     def handle(self, *args, **o):
         # nenhum canal explícito => liga whatsapp por default.

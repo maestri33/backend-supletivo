@@ -39,9 +39,7 @@ _AMOUNT_BY_SOURCE = {
 }
 
 
-def credit_commission(
-    *, payee, payee_role, source_type, source_external_id
-) -> Commission:
+def credit_commission(*, payee, payee_role, source_type, source_external_id) -> Commission:
     """Credita uma comissão (valor do .env) ao beneficiário. Idempotente pela fonte.
 
     `payee` é o objeto `users.User` (o caller já tem a FK em mãos — sem ida-e-volta por external_id,
@@ -118,9 +116,7 @@ def run_weekly_closing(*, reference_date=None) -> dict:
     for user, count in lead_count.values():
         if count < threshold:
             continue
-        bonus_source = uuid.uuid5(
-            _BONUS_NAMESPACE, f"{monday.isoformat()}:{user.external_id}"
-        )
+        bonus_source = uuid.uuid5(_BONUS_NAMESPACE, f"{monday.isoformat()}:{user.external_id}")
         bonus, created = Commission.objects.get_or_create(
             source_type=Commission.Source.BONUS,
             source_external_id=bonus_source,
@@ -134,9 +130,7 @@ def run_weekly_closing(*, reference_date=None) -> dict:
             bonuses += 1
         # inclui o bônus no lote desta semana mesmo que o created_at real caia fora da janela
         # simulada (teste de semana passada): agrupa pela lista, não por re-query.
-        if bonus.status == Commission.Status.PENDING and bonus.pk not in {
-            c.pk for c in pending
-        }:
+        if bonus.status == Commission.Status.PENDING and bonus.pk not in {c.pk for c in pending}:
             pending.append(bonus)
 
     # 2) AGRUPA por beneficiário e cria 1 PaymentRequest por pessoa.
@@ -167,9 +161,7 @@ def run_weekly_closing(*, reference_date=None) -> dict:
 
         profile = get_profile(payee)
         pix = (profile.pix_key if profile else None) or ""
-        status = (
-            PaymentRequest.Status.QUEUED if pix else PaymentRequest.Status.AWAITING_PIX
-        )
+        status = PaymentRequest.Status.QUEUED if pix else PaymentRequest.Status.AWAITING_PIX
         try:
             with transaction.atomic():
                 pr = PaymentRequest.objects.create(

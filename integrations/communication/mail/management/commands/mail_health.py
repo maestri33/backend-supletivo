@@ -24,6 +24,4 @@ class Command(BaseCommand):
             self.stderr.write(self.style.ERROR(f"Falha ao falar com o SMTP: {exc!r}"))
             return
 
-        self.stdout.write(
-            self.style.SUCCESS(f"SMTP ok (auth válida): {client.from_header}")
-        )
+        self.stdout.write(self.style.SUCCESS(f"SMTP ok (auth válida): {client.from_header}"))

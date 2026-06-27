@@ -30,9 +30,7 @@ class UnroutedEvent(models.Model):
 
     source = models.CharField(max_length=64, db_index=True)  # ex.: "asaas"
     event = models.CharField(max_length=255, db_index=True)
-    reason = models.CharField(
-        max_length=255
-    )  # por que não roteou (ex.: no_matching_charge)
+    reason = models.CharField(max_length=255)  # por que não roteou (ex.: no_matching_charge)
     payload = models.JSONField(default=dict)
     received_at = models.DateTimeField(auto_now_add=True, db_index=True)
     resolved = models.BooleanField(default=False, db_index=True)

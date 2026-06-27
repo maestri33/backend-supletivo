@@ -27,9 +27,7 @@ class AsaasClient:
     # default 10s: a charge PIX roda DENTRO do request do register — timeout alto = stall do serviço
     # inteiro (auditoria do front 2026-06-10). A API do Asaas responde em ~1-2s; o money-path (payout)
     # já trata falha incerta sem re-submeter.
-    def __init__(
-        self, api_key: str, *, base_url: str | None = None, timeout: float = 10.0
-    ):
+    def __init__(self, api_key: str, *, base_url: str | None = None, timeout: float = 10.0):
         if not api_key:
             raise ValueError("api_key is required")
         self._client = httpx.AsyncClient(
@@ -66,9 +64,7 @@ class AsaasClient:
         # — nunca duplica; já respostas de erro (4xx) não gravam a chave, então um pagamento
         # que falhou (saldo, chave inválida) pode ser re-tentado normalmente.
         headers = {"Idempotency-Key": idempotency_key} if idempotency_key else None
-        r = await self._client.request(
-            method, path, json=json, params=params, headers=headers
-        )
+        r = await self._client.request(method, path, json=json, params=params, headers=headers)
         if r.status_code == 204 or not r.content:
             data: Any = None
         else:
@@ -99,9 +95,7 @@ class AsaasClient:
         return await self._request("DELETE", f"/v3/webhooks/{webhook_id}")
 
     # ---------- transfers (PIX out) ----------
-    async def create_transfer(
-        self, payload: dict, *, idempotency_key: str | None = None
-    ) -> dict:
+    async def create_transfer(self, payload: dict, *, idempotency_key: str | None = None) -> dict:
         return await self._request(
             "POST", "/v3/transfers", json=payload, idempotency_key=idempotency_key
         )
@@ -120,9 +114,7 @@ class AsaasClient:
         # Decodifica um BR Code no Asaas (resolve o payload dinâmico de cobrança no servidor deles).
         # Campos úteis: type, value, totalValue, dueDate, canBePaid, cannotBePaidReason, receiver.
         # dueDate=None para QR estático/imediato.
-        return await self._request(
-            "POST", "/v3/pix/qrCodes/decode", json={"payload": payload}
-        )
+        return await self._request("POST", "/v3/pix/qrCodes/decode", json={"payload": payload})
 
     async def pay_qr_code(
         self,
@@ -147,9 +139,7 @@ class AsaasClient:
         return await self._request("GET", f"/v3/pix/transactions/{transaction_id}")
 
     async def cancel_pix_transaction(self, transaction_id: str) -> Any:
-        return await self._request(
-            "POST", f"/v3/pix/transactions/{transaction_id}/cancel"
-        )
+        return await self._request("POST", f"/v3/pix/transactions/{transaction_id}/cancel")
 
     # ---------- customers ----------
     async def create_customer(self, payload: dict) -> dict:
@@ -161,12 +151,8 @@ class AsaasClient:
     async def list_customers(self, params: dict | None = None) -> dict:
         return await self._request("GET", "/v3/customers", params=params)
 
-    async def find_customer_by_external_reference(
-        self, external_reference: str
-    ) -> dict | None:
-        res = await self.list_customers(
-            {"externalReference": external_reference, "limit": 1}
-        )
+    async def find_customer_by_external_reference(self, external_reference: str) -> dict | None:
+        res = await self.list_customers({"externalReference": external_reference, "limit": 1})
         data = res.get("data") or []
         return data[0] if data else None
 
@@ -186,12 +172,8 @@ class AsaasClient:
     async def delete_payment(self, payment_id: str) -> Any:
         return await self._request("DELETE", f"/v3/payments/{payment_id}")
 
-    async def refund_payment(
-        self, payment_id: str, payload: dict | None = None
-    ) -> dict:
-        return await self._request(
-            "POST", f"/v3/payments/{payment_id}/refund", json=payload or {}
-        )
+    async def refund_payment(self, payment_id: str, payload: dict | None = None) -> dict:
+        return await self._request("POST", f"/v3/payments/{payment_id}/refund", json=payload or {})
 
     async def get_payment_pix_qr_code(self, payment_id: str) -> dict:
         """BR Code (copia-e-cola) + PNG base64 da cobrança PIX."""

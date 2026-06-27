@@ -55,13 +55,9 @@ def check_student_document_photo(
         "APROVADO ou REPROVADO, seguida de um motivo curto e claro."
     )
     try:
-        desc = ai.describe_image(
-            image_bytes, caller=caller, mime_type=mime_type, prompt=prompt
-        )
+        desc = ai.describe_image(image_bytes, caller=caller, mime_type=mime_type, prompt=prompt)
     except Exception as exc:  # noqa: BLE001 — IA fora do ar → review
-        logger.warning(
-            "student_doc_ai.vision_failed", caller=caller, error=str(exc)[:200]
-        )
+        logger.warning("student_doc_ai.vision_failed", caller=caller, error=str(exc)[:200])
         return REVIEW, _AI_DOWN
     head = (desc or "").strip().upper()[:24]
     if "REPROVADO" in head:  # antes de APROVADO — "REPROVADO" contém "APROVADO"
@@ -122,9 +118,7 @@ def extract_student_document(
             schema_description=schema,
         )
     except Exception as exc:  # noqa: BLE001 — erro de IA na extração sobe
-        logger.warning(
-            "student_doc_ai.extract_failed", caller=caller, error=str(exc)[:200]
-        )
+        logger.warning("student_doc_ai.extract_failed", caller=caller, error=str(exc)[:200])
         raise
     if not isinstance(data, dict):
         data = {}

@@ -58,9 +58,7 @@ def resolve(token: str) -> str | None:
 
     c = Checkout.objects.filter(short_token=token).first()
     if c and c.is_paid:
-        return (
-            c.receipt_url or None
-        )  # pago: vai pro recibo (sem recibo → 404, link já consumido)
+        return c.receipt_url or None  # pago: vai pro recibo (sem recibo → 404, link já consumido)
     url = cache.get(_PREFIX + token)
     if url:
         return url

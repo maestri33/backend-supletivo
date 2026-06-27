@@ -12,14 +12,14 @@ from integrations.ai.client import LLMError
 
 
 class Command(BaseCommand):
-    help = "Valida cada provider de IA (GET /models real) e lista alguns modelos — prova a key (§8)."
+    help = (
+        "Valida cada provider de IA (GET /models real) e lista alguns modelos — prova a key (§8)."
+    )
 
     def handle(self, *args, **options):
         names = providers.enabled_providers()
         if not names:
-            self.stderr.write(
-                self.style.ERROR("Nenhum provider habilitado (IA_PROVIDERS vazio).")
-            )
+            self.stderr.write(self.style.ERROR("Nenhum provider habilitado (IA_PROVIDERS vazio)."))
             return
         for name in names:
             client = providers.get_client(name)
@@ -29,9 +29,7 @@ class Command(BaseCommand):
                 self.stdout.write(self.style.ERROR(f"[{name}] FAIL: {exc}"))
                 continue
             except Exception as exc:  # noqa: BLE001 — diagnóstico: reporta qualquer falha por provider
-                self.stdout.write(
-                    self.style.ERROR(f"[{name}] FAIL ({type(exc).__name__}): {exc}")
-                )
+                self.stdout.write(self.style.ERROR(f"[{name}] FAIL ({type(exc).__name__}): {exc}"))
                 continue
             sample = ", ".join(models[:10]) if models else "(lista vazia)"
             self.stdout.write(

@@ -113,9 +113,7 @@ class MaterialAssignment(ExternalIdModel):
         verbose_name = "atribuição de matéria"
         verbose_name_plural = "atribuições de matéria"
         constraints = [
-            models.UniqueConstraint(
-                fields=["user", "material"], name="uniq_material_per_user"
-            )
+            models.UniqueConstraint(fields=["user", "material"], name="uniq_material_per_user")
         ]
 
     def __str__(self) -> str:
@@ -141,9 +139,7 @@ class Submission(ExternalIdModel):
         related_name="submissions",
     )
     answer = models.TextField()
-    grade = models.DecimalField(
-        max_digits=4, decimal_places=1, null=True, blank=True
-    )  # 0-10
+    grade = models.DecimalField(max_digits=4, decimal_places=1, null=True, blank=True)  # 0-10
     justification = models.TextField(null=True, blank=True)
     status = models.CharField(
         max_length=10,

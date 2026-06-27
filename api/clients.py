@@ -77,9 +77,7 @@ class CheckoutOut(Schema):
 
 
 class LeadOut(Schema):
-    external_id: str = Field(
-        description="external_id do LEAD (≠ do user — proposta #8)"
-    )
+    external_id: str = Field(description="external_id do LEAD (≠ do user — proposta #8)")
     user_external_id: str = Field(
         description="external_id do USER — é o que o POST /auth/login espera (proposta #8). "
         "O register cria o lead E o user na mesma transação; o login é por USER, não por lead."
@@ -91,9 +89,7 @@ class LeadOut(Schema):
 class CheckIn(Schema):
     cpf: str | None = None
     phone: str | None = None
-    external_id: str | None = (
-        None  # re-dispara OTP de usuário já conhecido (o service já aceitava)
-    )
+    external_id: str | None = None  # re-dispara OTP de usuário já conhecido (o service já aceitava)
 
 
 class CheckOut(Schema):
@@ -156,9 +152,7 @@ class LeadSelfCheckoutOut(Schema):
 
 
 class LeadMeOut(Schema):
-    external_id: str = Field(
-        description="external_id do LEAD (≠ do user — proposta #8)"
-    )
+    external_id: str = Field(description="external_id do LEAD (≠ do user — proposta #8)")
     status: str = Field(description="pending | paid | failed")
     failed_reason: str | None = None
     created_at: str
@@ -169,9 +163,7 @@ class LeadMeOut(Schema):
 
 class AddressOut(Schema):
     cep: str | None = None
-    zipcode: str | None = Field(
-        None, description="DEPRECATED — use `cep` (alias temporário)"
-    )
+    zipcode: str | None = Field(None, description="DEPRECATED — use `cep` (alias temporário)")
     street: str | None = None
     number: str | None = None
     complement: str | None = None
@@ -276,9 +268,7 @@ def register(request, payload: LeadCreateIn):
 def check(request, payload: CheckIn):
     """Dispara OTP por cpf/phone e **VAZA existência** (CONVENTION §5): devolve `found`+`roles` honestos —
     o front decide cadastro novo × login e pra qual fase do funil mandar."""
-    return auth_iface.check(
-        cpf=payload.cpf, phone=payload.phone, external_id=payload.external_id
-    )
+    return auth_iface.check(cpf=payload.cpf, phone=payload.phone, external_id=payload.external_id)
 
 
 @auth_router.post("/login", response=TokenOut, auth=None)
@@ -291,12 +281,8 @@ def login(request, payload: LoginIn):
     active = roles.active_roles(user)
     funnel_role = next((r for r in _FUNNEL_ROLES if r in active), None)
     if funnel_role is None:
-        raise Forbidden(
-            "Usuário não faz parte do funil do aluno.", code="NOT_IN_FUNNEL"
-        )
-    return auth_iface.login(
-        external_id=payload.external_id, role=funnel_role, otp=payload.otp
-    )
+        raise Forbidden("Usuário não faz parte do funil do aluno.", code="NOT_IN_FUNNEL")
+    return auth_iface.login(external_id=payload.external_id, role=funnel_role, otp=payload.otp)
 
 
 add_auth_refresh(auth_router)
@@ -363,9 +349,7 @@ class EducationIn(Schema):
 
 # enums canônicos no OpenAPI (proposta #6): em vez de `"string"`, o schema declara os valores.
 AnalysisStatus = Literal["pending", "approved", "rejected", "review"]
-WizardStatus = Literal[
-    "rg", "address", "education", "selfie", "awaiting_release", "completed"
-]
+WizardStatus = Literal["rg", "address", "education", "selfie", "awaiting_release", "completed"]
 
 
 class EnrollmentOut(Schema):
@@ -382,9 +366,7 @@ class EnrollmentOut(Schema):
     analysis_status: AnalysisStatus | None = Field(
         None, description="Análise da selfie: pending | approved | rejected | review"
     )
-    selfie_status: str = Field(
-        description="[DEPRECATED — use analysis_status] alias de compat"
-    )
+    selfie_status: str = Field(description="[DEPRECATED — use analysis_status] alias de compat")
     # ack de polling (proposta #2): preenchidos SÓ na resposta do POST /selfie (que dispara análise).
     poll_after_ms: int | None = Field(
         None,
@@ -475,9 +457,7 @@ class RgOut(Schema):
     issue_date: str | None = None
     front_photo: str | None = None
     back_photo: str | None = None
-    full_photo: str | None = (
-        None  # RG inteiro (frente+verso numa imagem) — alternativa ao par
-    )
+    full_photo: str | None = None  # RG inteiro (frente+verso numa imagem) — alternativa ao par
     # canônico unificado (proposta #4): `analysis_status`/`analysis_reason`.
     analysis_status: AnalysisStatus | None = Field(
         None,
@@ -507,9 +487,7 @@ class EnrollmentMeOut(EnrollmentOut):
     devolvem este shape completo — o front roteia pelo `status` sem re-fetch. Bloco None = vazio."""
 
     profile: EnrollmentProfileOut | None = None
-    address_complete: bool = Field(
-        description="[DEPRECATED — use address.missing_fields]"
-    )
+    address_complete: bool = Field(description="[DEPRECATED — use address.missing_fields]")
     address: AddressOut | None = None
     rg: RgOut | None = None
     education: EducationOut | None = None
@@ -548,14 +526,10 @@ class RgUploadAck(Schema):
     analysis_status: AnalysisStatus
     poll_after_ms: int
     expires_at: str | None = None
-    analysis: str = Field(
-        description="[DEPRECATED — use analysis_status] alias de compat"
-    )
+    analysis: str = Field(description="[DEPRECATED — use analysis_status] alias de compat")
 
 
-@api.post(
-    "/enrollment/documents/rg/photo/{slot}", response=RgUploadAck, tags=["enrollment"]
-)
+@api.post("/enrollment/documents/rg/photo/{slot}", response=RgUploadAck, tags=["enrollment"])
 def enrollment_rg_photo(request, slot: str, file: UploadedFile = File(...)):
     """Foto do RG — `slot` aceita **`front`**, **`back`** ou **`full`** (documento inteiro numa
     imagem). Arquivo: JPEG/PNG/WEBP ou **PDF** (convertido internamente). A análise por IA roda
@@ -563,9 +537,7 @@ def enrollment_rg_photo(request, slot: str, file: UploadedFile = File(...)):
     `GET /enrollment/documents/rg`, voltando a perguntar a cada `poll_after_ms`."""
     ext = _enr_guard(request)
     real_slot = resolve_rg_slot(slot)
-    ack = enrollment_iface.upload_rg_photo(
-        user_external_id=ext, slot=real_slot, upload=file
-    )
+    ack = enrollment_iface.upload_rg_photo(user_external_id=ext, slot=real_slot, upload=file)
     return {"slot": slot, "analysis": ack["analysis_status"], **ack}
 
 
@@ -712,9 +684,7 @@ def student_blood_type(request, payload: BloodTypeIn):
     return _student_dict(ext)
 
 
-@api.post(
-    "/student/documents/{doc_type}", response=StudentDocumentUploadAck, tags=["student"]
-)
+@api.post("/student/documents/{doc_type}", response=StudentDocumentUploadAck, tags=["student"])
 def student_document(request, doc_type: str, file: UploadedFile = File(...)):
     ext = _student_guard(request)
     doc, ack = student_iface.upload_document(

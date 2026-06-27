@@ -67,18 +67,14 @@ class Enrollment(ExternalIdModel):
     # 3 estados + revisão. `taken_at` = quando o aluno enviou (GET /selfie, plan/13).
     selfie_image = models.CharField(max_length=255, null=True, blank=True)
     selfie_taken_at = models.DateTimeField("selfie enviada em", null=True, blank=True)
-    selfie_verified = models.BooleanField(
-        default=False
-    )  # = selfie_status aprovado (compat)
+    selfie_verified = models.BooleanField(default=False)  # = selfie_status aprovado (compat)
     selfie_status = models.CharField(
         max_length=20,
         choices=SelfieStatus.choices,
         default=SelfieStatus.PENDING,
         db_index=True,
     )
-    selfie_description = models.TextField(
-        null=True, blank=True
-    )  # justificativa da IA/coordenador
+    selfie_description = models.TextField(null=True, blank=True)  # justificativa da IA/coordenador
     created_at = models.DateTimeField("criado em", auto_now_add=True)
     updated_at = models.DateTimeField("atualizado em", auto_now=True)
 
@@ -112,9 +108,7 @@ class EducationalData(models.Model):
         on_delete=models.CASCADE,
         related_name="educational_data",
     )
-    level = models.CharField(
-        "nível", max_length=16, choices=Level.choices, null=True, blank=True
-    )
+    level = models.CharField("nível", max_length=16, choices=Level.choices, null=True, blank=True)
     grade = models.PositiveSmallIntegerField("série/ano", null=True, blank=True)
     completed = models.BooleanField("concluiu o nível?", null=True, blank=True)
     last_school = models.CharField("qual escola", max_length=255, null=True, blank=True)

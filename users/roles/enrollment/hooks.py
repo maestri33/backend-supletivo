@@ -26,9 +26,7 @@ def on_fee_paid(
     enr = service.get_by_external_id(source_external_id)
     if enr is None:
         return False
-    return service.apply_fee_paid(
-        enr, external_reference=external_reference, amount=amount
-    )
+    return service.apply_fee_paid(enr, external_reference=external_reference, amount=amount)
 
 
 def on_fee_problem(

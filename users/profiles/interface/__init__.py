@@ -65,11 +65,7 @@ def fill_identity(user, **fields) -> Profile | None:
         return None
     changed = []
     for field, value in fields.items():
-        if (
-            field in _IDENTITY_FIELDS
-            and value is not None
-            and not getattr(p, field, None)
-        ):
+        if field in _IDENTITY_FIELDS and value is not None and not getattr(p, field, None):
             setattr(p, field, value)
             changed.append(field)
     if changed:
@@ -137,9 +133,7 @@ def get_address(external_id: str):
     return profile.address if profile else None
 
 
-def set_pix(
-    external_id: str, pix_key: str, pix_key_type: str | None = None
-) -> Profile | None:
+def set_pix(external_id: str, pix_key: str, pix_key_type: str | None = None) -> Profile | None:
     """Grava a chave Pix (+ tipo) no profile — o lugar canônico (finance usa no payout)."""
     profile = find_by_external_id(external_id)
     if profile is None:

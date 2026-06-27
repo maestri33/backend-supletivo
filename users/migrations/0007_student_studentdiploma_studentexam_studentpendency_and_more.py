@@ -350,9 +350,7 @@ class Migration(migrations.Migration):
                 ),
                 (
                     "photo",
-                    models.CharField(
-                        blank=True, max_length=500, null=True, verbose_name="foto"
-                    ),
+                    models.CharField(blank=True, max_length=500, null=True, verbose_name="foto"),
                 ),
                 (
                     "validation_status",

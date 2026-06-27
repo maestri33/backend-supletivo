@@ -50,13 +50,9 @@ class RG(models.Model):
         REJECTED = "rejected", "reprovado (refazer)"
         REVIEW = "review", "em revisão (coordenador decide)"
 
-    document = models.OneToOneField(
-        Document, on_delete=models.CASCADE, related_name="rg"
-    )
+    document = models.OneToOneField(Document, on_delete=models.CASCADE, related_name="rg")
     number = models.CharField("número", max_length=30, null=True, blank=True)
-    issuing_agency = models.CharField(
-        "órgão emissor", max_length=50, null=True, blank=True
-    )
+    issuing_agency = models.CharField("órgão emissor", max_length=50, null=True, blank=True)
     issue_date = models.DateField("data de emissão", null=True, blank=True)
     front_photo = models.CharField("foto frente", max_length=500, null=True, blank=True)
     back_photo = models.CharField("foto verso", max_length=500, null=True, blank=True)
@@ -69,9 +65,7 @@ class RG(models.Model):
         default=Validation.PENDING,
         db_index=True,
     )
-    validation_result = models.JSONField(
-        "resultado da validação", null=True, blank=True
-    )
+    validation_result = models.JSONField("resultado da validação", null=True, blank=True)
     validated_at = models.DateTimeField("validado em", null=True, blank=True)
 
     class Meta:
@@ -93,16 +87,12 @@ class CNH(models.Model):
         REJECTED = "rejected", "reprovado (refazer)"
         REVIEW = "review", "em revisão (coordenador decide)"
 
-    document = models.OneToOneField(
-        Document, on_delete=models.CASCADE, related_name="cnh"
-    )
+    document = models.OneToOneField(Document, on_delete=models.CASCADE, related_name="cnh")
     number = models.CharField("número", max_length=30, null=True, blank=True)
     category = models.CharField("categoria", max_length=5, null=True, blank=True)
     date_of_birth = models.DateField("data de nascimento", null=True, blank=True)
     expires_on = models.DateField("validade", null=True, blank=True)
-    national_register = models.CharField(
-        "registro nacional", max_length=30, null=True, blank=True
-    )
+    national_register = models.CharField("registro nacional", max_length=30, null=True, blank=True)
     front_photo = models.CharField("foto frente", max_length=500, null=True, blank=True)
     back_photo = models.CharField("foto verso", max_length=500, null=True, blank=True)
     # CNH inteira (frente+verso numa imagem só) — alternativa ao par front/back (plan/15 B2,
@@ -115,9 +105,7 @@ class CNH(models.Model):
         default=Validation.PENDING,
         db_index=True,
     )
-    validation_result = models.JSONField(
-        "resultado da validação", null=True, blank=True
-    )
+    validation_result = models.JSONField("resultado da validação", null=True, blank=True)
     validated_at = models.DateTimeField("validado em", null=True, blank=True)
 
     class Meta:
@@ -136,16 +124,10 @@ class Certificate(models.Model):
         ("obito", "óbito"),
     )
 
-    document = models.OneToOneField(
-        Document, on_delete=models.CASCADE, related_name="certificate"
-    )
-    kind = models.CharField(
-        "tipo", max_length=20, choices=KIND_CHOICES, null=True, blank=True
-    )
+    document = models.OneToOneField(Document, on_delete=models.CASCADE, related_name="certificate")
+    kind = models.CharField("tipo", max_length=20, choices=KIND_CHOICES, null=True, blank=True)
     number = models.CharField("número", max_length=50, null=True, blank=True)
-    registry_office = models.CharField(
-        "cartório", max_length=100, null=True, blank=True
-    )
+    registry_office = models.CharField("cartório", max_length=100, null=True, blank=True)
     book = models.CharField("livro", max_length=20, null=True, blank=True)
     page = models.CharField("folha", max_length=20, null=True, blank=True)
     entry = models.CharField("termo", max_length=20, null=True, blank=True)
@@ -162,9 +144,7 @@ class Certificate(models.Model):
 class Military(models.Model):
     """Documento de serviço militar (reservista). Criado pra todos; só `gender='M'` preenche (Q4)."""
 
-    document = models.OneToOneField(
-        Document, on_delete=models.CASCADE, related_name="military"
-    )
+    document = models.OneToOneField(Document, on_delete=models.CASCADE, related_name="military")
     number = models.CharField("número", max_length=30, null=True, blank=True)
     series = models.CharField("série", max_length=20, null=True, blank=True)
     category = models.CharField("categoria", max_length=20, null=True, blank=True)

@@ -36,12 +36,8 @@ class Checkout(ExternalIdModel):
     paid_amount_cents = models.IntegerField(null=True, blank=True)
     description = models.TextField(null=True, blank=True)
     installments = models.IntegerField(null=True, blank=True)
-    capture_method = models.CharField(
-        max_length=32, null=True, blank=True
-    )  # pix | credit_card
-    transaction_nsu = models.CharField(
-        max_length=128, null=True, blank=True, db_index=True
-    )
+    capture_method = models.CharField(max_length=32, null=True, blank=True)  # pix | credit_card
+    transaction_nsu = models.CharField(max_length=128, null=True, blank=True, db_index=True)
     receipt_url = models.TextField(null=True, blank=True)
     request_payload = models.JSONField(default=dict)
     response_payload = models.JSONField(default=dict)

@@ -29,9 +29,7 @@ def current_version(external_id: str) -> int:
     from users.auth.models import User
 
     return (
-        User.objects.filter(external_id=external_id)
-        .values_list("token_version", flat=True)
-        .first()
+        User.objects.filter(external_id=external_id).values_list("token_version", flat=True).first()
         or 0
     )
 

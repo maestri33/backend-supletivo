@@ -12,7 +12,9 @@ from core.validation import record_check
 
 
 class Command(BaseCommand):
-    help = "Verifica deps + carrega o modelo InsightFace (CPU) + prova de vida; grava ValidationCheck."
+    help = (
+        "Verifica deps + carrega o modelo InsightFace (CPU) + prova de vida; grava ValidationCheck."
+    )
 
     def handle(self, *args, **options):
         from integrations.tools.biometric import face_match
@@ -31,16 +33,10 @@ class Command(BaseCommand):
             record_check("biometric", "health", False, mode="real", detail=str(exc))
             return
         except Exception as exc:  # noqa: BLE001
-            self.stderr.write(
-                self.style.ERROR(f"falha inesperada ao carregar: {exc!r}")
-            )
+            self.stderr.write(self.style.ERROR(f"falha inesperada ao carregar: {exc!r}"))
             record_check("biometric", "health", False, mode="real", detail=repr(exc))
             return
 
         liveness = check_liveness()
-        self.stdout.write(
-            self.style.SUCCESS(f"modelo carregado (CPU) ✓  liveness={liveness}")
-        )
-        record_check(
-            "biometric", "health", True, mode="real", detail=f"liveness={liveness}"
-        )
+        self.stdout.write(self.style.SUCCESS(f"modelo carregado (CPU) ✓  liveness={liveness}"))
+        record_check("biometric", "health", True, mode="real", detail=f"liveness={liveness}")

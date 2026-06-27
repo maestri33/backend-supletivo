@@ -28,12 +28,8 @@ class Command(BaseCommand):
             default=None,
             help="valor em reais (ex.: 1.00). Opcional com --at-due (usa o valor do QR).",
         )
-        parser.add_argument(
-            "--qr", required=True, help="payload copia-e-cola do PIX QR code"
-        )
-        parser.add_argument(
-            "--supplier", default=None, help="nome do fornecedor (texto)"
-        )
+        parser.add_argument("--qr", required=True, help="payload copia-e-cola do PIX QR code")
+        parser.add_argument("--supplier", default=None, help="nome do fornecedor (texto)")
         parser.add_argument("--description", default=None)
         parser.add_argument(
             "--at",
@@ -67,9 +63,9 @@ class Command(BaseCommand):
             scheduled_for = None
             if o["at"]:
                 try:
-                    scheduled_for = datetime.strptime(
-                        o["at"], "%Y-%m-%d %H:%M"
-                    ).replace(tzinfo=SP_TZ)
+                    scheduled_for = datetime.strptime(o["at"], "%Y-%m-%d %H:%M").replace(
+                        tzinfo=SP_TZ
+                    )
                 except ValueError as exc:
                     raise CommandError(
                         f"data inválida: {o['at']} (use 'YYYY-MM-DD HH:MM')"
@@ -90,9 +86,7 @@ class Command(BaseCommand):
                     "amount": str(pr.amount),
                     "status": pr.status,
                     "supplier_name": pr.supplier_name,
-                    "scheduled_for": str(pr.scheduled_for)
-                    if pr.scheduled_for
-                    else None,
+                    "scheduled_for": str(pr.scheduled_for) if pr.scheduled_for else None,
                     "next_attempt_at": str(pr.next_attempt_at),
                 },
                 ensure_ascii=False,

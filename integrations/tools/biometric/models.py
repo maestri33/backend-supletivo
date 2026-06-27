@@ -35,13 +35,9 @@ class FaceBiometric(ExternalIdModel):
     image_path = models.CharField(max_length=500)
     # vetor 512-d (o template). JSONField serve em SQLite (dev) e PostgreSQL (prod).
     embedding = models.JSONField(default=list)
-    det_score = models.FloatField(
-        null=True, blank=True
-    )  # confiança da detecção do rosto
+    det_score = models.FloatField(null=True, blank=True)  # confiança da detecção do rosto
     provider = models.CharField(max_length=32, default="insightface")
-    metadata = models.JSONField(
-        default=dict, blank=True
-    )  # bbox/modelo/erro — nada descartado
+    metadata = models.JSONField(default=dict, blank=True)  # bbox/modelo/erro — nada descartado
     created_at = models.DateTimeField(auto_now_add=True, db_index=True)
 
     class Meta:
@@ -79,14 +75,10 @@ class FaceVerification(ExternalIdModel):
     score = models.FloatField(null=True, blank=True)  # cosseno (null se não comparou)
     threshold = models.FloatField()  # snapshot do BIOMETRIC_MATCH_THRESHOLD vigente
     approved = models.BooleanField(default=False)  # score >= match
-    status = models.CharField(
-        max_length=16, db_index=True
-    )  # approved | rejected | review
+    status = models.CharField(max_length=16, db_index=True)  # approved | rejected | review
     provider = models.CharField(max_length=32, default="insightface")
     liveness = models.JSONField(default=dict, blank=True)  # {passed, provider}
-    metadata = models.JSONField(
-        default=dict, blank=True
-    )  # evidência (det_score/bbox/erro)
+    metadata = models.JSONField(default=dict, blank=True)  # evidência (det_score/bbox/erro)
     created_at = models.DateTimeField(auto_now_add=True, db_index=True)
 
     class Meta:

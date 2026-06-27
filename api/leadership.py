@@ -23,6 +23,7 @@ from api.auth import require_roles
 from api.base import add_auth_refresh, build_group, resolve_rg_slot
 from api.schemas import (
     MaterialIn,
+    MaterialOut,
     MaterialUpdateIn,
     TokenOut,
 )
@@ -87,9 +88,7 @@ _NOT_COORDINATOR_DETAIL = (
 def _coordinator(request) -> User:
     """Gate role coordinator + devolve o User do coordenador logado."""
     require_roles(request.auth, "coordinator")
-    user = User.objects.filter(
-        external_id=request.auth.external_id, is_active=True
-    ).first()
+    user = User.objects.filter(external_id=request.auth.external_id, is_active=True).first()
     if user is None:
         raise Forbidden("Coordenador não encontrado.", code="FORBIDDEN_ROLE")
     return user
@@ -125,9 +124,7 @@ class CoordinatorCheckOut(Schema):
     whatsapp: bool | None = None
     roles: list[str] | None = None
     is_coordinator: bool = False
-    hub: HubOut | None = Field(
-        None, description="o polo que a pessoa coordena (se coordena)"
-    )
+    hub: HubOut | None = Field(None, description="o polo que a pessoa coordena (se coordena)")
     detail: str | None = Field(
         None,
         description="presente quando a pessoa existe mas NÃO coordena polo — o front "
@@ -395,9 +392,7 @@ class ReviewItemOut(Schema):
         description="id do recurso a decidir (matrícula/candidato/documento/student)"
     )
     type: str = Field(description="enrollment | candidate | student | promoter")
-    kind: str = Field(
-        description="rg | selfie | document | awaiting_approval | locked_training"
-    )
+    kind: str = Field(description="rg | selfie | document | awaiting_approval | locked_training")
     name: str | None = None
     doc_type: str | None = None
     since: str | None = None
@@ -405,9 +400,7 @@ class ReviewItemOut(Schema):
     document_external_id: str | None = Field(
         None, description="só kind=document de student (par student+doc)"
     )
-    student_external_id: str | None = Field(
-        None, description="só kind=document de student"
-    )
+    student_external_id: str | None = Field(None, description="só kind=document de student")
     promoter_external_id: str | None = Field(
         None, description="só kind=locked_training (id do promotor)"
     )
@@ -608,14 +601,10 @@ def check(request, payload: CheckIn):
     propósito) e soma a resposta do coordenador: coordena um polo? Quem NÃO coordena recebe
     `detail` + `roles` — o front redireciona pra área certa levando o `external_id`, e a pessoa
     loga lá com o MESMO OTP já enviado (palavra do Victor 2026-06-12)."""
-    result = auth_iface.check(
-        cpf=payload.cpf, phone=payload.phone, external_id=payload.external_id
-    )
+    result = auth_iface.check(cpf=payload.cpf, phone=payload.phone, external_id=payload.external_id)
     if not result.get("found"):
         return result
-    user = User.objects.filter(
-        external_id=result["external_id"], is_active=True
-    ).first()
+    user = User.objects.filter(external_id=result["external_id"], is_active=True).first()
     hub = hub_iface.coordinated_by(user) if user else None
     if hub is None:
         return {**result, "is_coordinator": False, "detail": _NOT_COORDINATOR_DETAIL}
@@ -635,9 +624,7 @@ def login(request, payload: LoginIn):
         raise NotFound("Usuário não encontrado.", code="USER_NOT_FOUND")
     if hub_iface.coordinated_by(user) is None:
         raise Forbidden(_NOT_COORDINATOR_DETAIL, code="NOT_HUB_COORDINATOR")
-    return auth_iface.login(
-        external_id=payload.external_id, role="coordinator", otp=payload.otp
-    )
+    return auth_iface.login(external_id=payload.external_id, role="coordinator", otp=payload.otp)
 
 
 add_auth_refresh(auth_router)
@@ -677,9 +664,7 @@ def list_hub_enrollments(request, status: str | None = None):
     return enrollment_iface.list_for_hub(hub=hub, status=status)
 
 
-@api.get(
-    "/enrollments/{external_id}", response=HubEnrollmentDetailOut, tags=["enrollment"]
-)
+@api.get("/enrollments/{external_id}", response=HubEnrollmentDetailOut, tags=["enrollment"])
 def get_hub_enrollment(request, external_id: str):
     """Detalhe COMPLETO de uma matrícula do polo: todas as seções do wizard (visão rica do /me) +
     status REAL (sem máscara) + situação das 2 parcelas da taxa."""
@@ -710,9 +695,7 @@ def list_reviews(request):
         }
 
     return {
-        "enrollment_rg": [
-            _norm(i, "enrollment", "rg") for i in enrollment_reviews["rg"]
-        ],
+        "enrollment_rg": [_norm(i, "enrollment", "rg") for i in enrollment_reviews["rg"]],
         "enrollment_selfie": [
             _norm(i, "enrollment", "selfie") for i in enrollment_reviews["selfie"]
         ],
@@ -761,12 +744,8 @@ def list_reviews(request):
 # ── funil do aluno: fase da TAXA (2 parcelas) → conclusão (plan/14) ─────────
 # Substitui o `/release` antigo (QRs juntos) — descartado pelo Victor 2026-06-12 ("delírio de IA").
 class FeeIn(Schema):
-    qr_code: str = Field(
-        description="QR code PIX (copia-e-cola) da cobrança do credenciador"
-    )
-    amount: str | None = Field(
-        None, description="opcional — sem ele, usa o valor de DENTRO do QR"
-    )
+    qr_code: str = Field(description="QR code PIX (copia-e-cola) da cobrança do credenciador")
+    amount: str | None = Field(None, description="opcional — sem ele, usa o valor de DENTRO do QR")
 
 
 class ConcludeIn(Schema):
@@ -996,9 +975,7 @@ def grade_exam(request, external_id: str, payload: ExamGradeIn):
     response=DocDecisionOut,
     tags=["student"],
 )
-def decide_document(
-    request, external_id: str, document_external_id: str, payload: DocDecideIn
-):
+def decide_document(request, external_id: str, document_external_id: str, payload: DocDecideIn):
     """Coordenador decide um documento que a IA mandou pra REVISÃO (o sim/não dele)."""
     coordinator = _coordinator(request)
     doc = _student_action(
@@ -1048,9 +1025,7 @@ def open_pendency(request, external_id: str, payload: PendencyIn):
 def resolve_pendency(request, external_id: str):
     """Coordenador resolve a pendência; sem pendência aberta o aluno segue pro diploma."""
     coordinator = _coordinator(request)
-    pend = student_iface.resolve_pendency(
-        pendency_external_id=external_id, coordinator=coordinator
-    )
+    pend = student_iface.resolve_pendency(pendency_external_id=external_id, coordinator=coordinator)
     return {
         "external_id": str(pend.external_id),
         "kind": pend.kind,
@@ -1088,25 +1063,8 @@ def issue_diploma(request, external_id: str):
 
 
 # ── funil do colaborador: autoria de matéria (coordenador também — Victor) ──
-# MaterialIn/MaterialUpdateIn vêm do módulo compartilhado (plan/15 A7; mesmo contrato do staff).
-class MaterialOut(Schema):
-    """Matéria do treino (visão de autoria): conteúdo + questão + gabarito."""
-
-    external_id: str
-    title: str
-    text_content: str = ""
-    content_blocks: list[dict] = []
-    question: str
-    video: str | None = None
-    photo: str | None = None
-    kind: str
-    blocking: bool
-    ephemeral: bool
-    order: int
-    active: bool
-    expected_answer: str
-
-
+# MaterialIn/MaterialUpdateIn/MaterialOut vêm do módulo compartilhado (plan/15 A7; mesmo contrato
+# do staff — fonte única em api/schemas.py, §12).
 @api.get("/training/materials", response=list[MaterialOut], tags=["training"])
 def list_materials(request):
     """Lista todas as matérias COM gabarito (visão de autoria — o coordenador também autora)."""
@@ -1163,9 +1121,7 @@ def get_candidate_for_coordinator(request, external_id: str):
     )
 
 
-@api.post(
-    "/candidates/{external_id}/approve", response=CandidateActionOut, tags=["candidate"]
-)
+@api.post("/candidates/{external_id}/approve", response=CandidateActionOut, tags=["candidate"])
 def approve_candidate(request, external_id: str):
     """Aprova o candidato do seu polo → promove a PROMOTOR (e atribui o treino obrigatório)."""
     coordinator = _coordinator(request)
@@ -1175,9 +1131,7 @@ def approve_candidate(request, external_id: str):
     return {"external_id": str(cand.external_id), "status": cand.status}
 
 
-@api.post(
-    "/candidates/{external_id}/reject", response=CandidateActionOut, tags=["candidate"]
-)
+@api.post("/candidates/{external_id}/reject", response=CandidateActionOut, tags=["candidate"])
 def reject_candidate(request, external_id: str, payload: RejectIn):
     """Rejeita o candidato aguardando aprovação (com motivo) — não promove."""
     coordinator = _coordinator(request)
@@ -1255,16 +1209,12 @@ def reactivate_promoter(request, external_id: str):
 
 
 @api.get("/students", response=PaginatedStudentsOut, tags=["student"])
-def list_hub_students(
-    request, status: str | None = None, limit: int = 200, offset: int = 0
-):
+def list_hub_students(request, status: str | None = None, limit: int = 200, offset: int = 0):
     """Alunos do polo do coordenador (A2 — lista nova, Victor 2026-06-21). Filtro opcional por status,
     paginação `limit`/`offset` + `total`. Cada item traz o `external_id` pra abrir o detalhe."""
     coordinator = _coordinator(request)
     hub = _coordinator_hub(coordinator)
-    items, total = student_iface.list_for_hub(
-        hub=hub, status=status, limit=limit, offset=offset
-    )
+    items, total = student_iface.list_for_hub(hub=hub, status=status, limit=limit, offset=offset)
     return {"items": items, "total": total, "limit": limit, "offset": offset}
 
 
@@ -1328,9 +1278,7 @@ def coord_proxy_address(request, external_id: str, payload: ProxyCepIn):
     response=RgPhotoUploadOut,
     tags=["enrollment"],
 )
-def coord_proxy_rg_photo(
-    request, external_id: str, slot: str, file: UploadedFile = File(...)
-):
+def coord_proxy_rg_photo(request, external_id: str, slot: str, file: UploadedFile = File(...)):
     """Coordenador ENVIA a foto do RG (`front`|`back`|`full`) NO LUGAR do cliente. A IA valida normal;
     se cair em revisão, o coordenador decide pelo `/rg/decide` que já existe. Auditado."""
     coordinator, user_ext = _proxy_user(request, external_id)
@@ -1341,9 +1289,7 @@ def coord_proxy_rg_photo(
         enrollment=external_id,
         by=str(coordinator.external_id),
     )
-    return enrollment_iface.upload_rg_photo(
-        user_external_id=user_ext, slot=real_slot, upload=file
-    )
+    return enrollment_iface.upload_rg_photo(user_external_id=user_ext, slot=real_slot, upload=file)
 
 
 @api.post(

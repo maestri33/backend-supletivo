@@ -72,14 +72,10 @@ class MiniMaxClient:
                 "channel": 1,
             },
         }
-        async with httpx.AsyncClient(
-            timeout=httpx.Timeout(self._timeout, connect=10.0)
-        ) as c:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(self._timeout, connect=10.0)) as c:
             resp = await c.post(url, json=body, headers=self._headers())
         if resp.status_code >= 400:
-            raise MiniMaxError(
-                f"MiniMax TTS HTTP {resp.status_code}: {resp.text[:300]}"
-            )
+            raise MiniMaxError(f"MiniMax TTS HTTP {resp.status_code}: {resp.text[:300]}")
         data = resp.json()
         base = data.get("base_resp") or {}
         if base.get("status_code") not in (0, None):
@@ -108,8 +104,7 @@ class MiniMaxClient:
     ) -> str:
         """Descreve/analisa uma imagem com MiniMax-M3 (visão). Devolve o texto, sem o bloco <think>."""
         instruction = (
-            prompt
-            or "Descreva esta imagem em portugues brasileiro de forma clara e objetiva."
+            prompt or "Descreva esta imagem em portugues brasileiro de forma clara e objetiva."
         )
         data_url = f"data:{mime_type};base64,{base64.b64encode(image_bytes).decode()}"
         body = {
@@ -127,14 +122,10 @@ class MiniMaxClient:
             "max_completion_tokens": 800,
         }
         url = f"{self._base_url}/v1/chat/completions"
-        async with httpx.AsyncClient(
-            timeout=httpx.Timeout(self._timeout, connect=10.0)
-        ) as c:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(self._timeout, connect=10.0)) as c:
             resp = await c.post(url, json=body, headers=self._headers())
         if resp.status_code >= 400:
-            raise MiniMaxError(
-                f"MiniMax visão HTTP {resp.status_code}: {resp.text[:300]}"
-            )
+            raise MiniMaxError(f"MiniMax visão HTTP {resp.status_code}: {resp.text[:300]}")
         data = resp.json()
         choices = data.get("choices") or []
         if not choices:
@@ -172,19 +163,13 @@ class MiniMaxClient:
             "prompt_optimizer": True,
         }
         if subject_image is not None:
-            data_url = (
-                f"data:{subject_mime};base64,{base64.b64encode(subject_image).decode()}"
-            )
+            data_url = f"data:{subject_mime};base64,{base64.b64encode(subject_image).decode()}"
             body["subject_reference"] = [{"type": "character", "image_file": data_url}]
         url = f"{self._base_url}/v1/image_generation"
-        async with httpx.AsyncClient(
-            timeout=httpx.Timeout(self._timeout, connect=10.0)
-        ) as c:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(self._timeout, connect=10.0)) as c:
             resp = await c.post(url, json=body, headers=self._headers())
         if resp.status_code >= 400:
-            raise MiniMaxError(
-                f"MiniMax imagem HTTP {resp.status_code}: {resp.text[:300]}"
-            )
+            raise MiniMaxError(f"MiniMax imagem HTTP {resp.status_code}: {resp.text[:300]}")
         data = resp.json()
         base = data.get("base_resp") or {}
         if base.get("status_code") not in (0, None):
@@ -199,9 +184,7 @@ class MiniMaxClient:
             urls = d.get("image_urls") or []
             if not urls:
                 raise MiniMaxError(f"MiniMax imagem sem retorno: {resp.text[:200]}")
-            async with httpx.AsyncClient(
-                timeout=httpx.Timeout(self._timeout, connect=10.0)
-            ) as c:
+            async with httpx.AsyncClient(timeout=httpx.Timeout(self._timeout, connect=10.0)) as c:
                 got = await c.get(urls[0])
             img_bytes = got.content
         logger.info(

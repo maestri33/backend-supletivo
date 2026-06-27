@@ -55,9 +55,7 @@ class Commission(ExternalIdModel):
         on_delete=models.SET_NULL,
         related_name="commissions",
     )
-    external_reference = models.CharField(
-        max_length=128, null=True, blank=True, db_index=True
-    )
+    external_reference = models.CharField(max_length=128, null=True, blank=True, db_index=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -122,9 +120,7 @@ class PaymentRequest(ExternalIdModel):
     kind = models.CharField(
         max_length=12, choices=Kind.choices, default=Kind.COMMISSION, db_index=True
     )
-    method = models.CharField(
-        max_length=12, choices=Method.choices, default=Method.PIX_KEY
-    )
+    method = models.CharField(max_length=12, choices=Method.choices, default=Method.PIX_KEY)
     # payee/payee_role/week_of só existem pra commission (fee não tem User payee nem semana).
     payee = models.ForeignKey(
         settings.AUTH_USER_MODEL,
@@ -169,6 +165,4 @@ class PaymentRequest(ExternalIdModel):
     updated_at = models.DateTimeField(auto_now=True)
 
     def __str__(self):
-        return (
-            f"PaymentRequest({self.external_reference} R${self.amount} {self.status})"
-        )
+        return f"PaymentRequest({self.external_reference} R${self.amount} {self.status})"

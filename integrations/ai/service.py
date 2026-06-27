@@ -169,9 +169,7 @@ def generate_text(
             max_tokens=max_tokens,
         )
 
-    result, _p, _m = _run(
-        AiCall.Operation.TEXT, caller, attempt, providers.fallback_chain(model)
-    )
+    result, _p, _m = _run(AiCall.Operation.TEXT, caller, attempt, providers.fallback_chain(model))
     return _strip_think(result.content).strip('"')
 
 
@@ -197,9 +195,7 @@ def generate_json(
             max_tokens=max_tokens,
         )
 
-    result, _p, _m = _run(
-        AiCall.Operation.JSON, caller, attempt, providers.fallback_chain(model)
-    )
+    result, _p, _m = _run(AiCall.Operation.JSON, caller, attempt, providers.fallback_chain(model))
     try:
         return json.loads(_strip_think(result.content))
     except json.JSONDecodeError as exc:
@@ -226,9 +222,7 @@ def chat(
             json_mode=json_mode,
         )
 
-    result, _p, _m = _run(
-        AiCall.Operation.CHAT, caller, attempt, providers.fallback_chain(model)
-    )
+    result, _p, _m = _run(AiCall.Operation.CHAT, caller, attempt, providers.fallback_chain(model))
     return _strip_think(result.content)
 
 
@@ -280,9 +274,7 @@ def extract(
     try:
         return json.loads(_strip_think(result.content))
     except json.JSONDecodeError as exc:
-        raise LLMError(
-            f"resposta não é JSON válido na extração: {exc}", retryable=False
-        ) from exc
+        raise LLMError(f"resposta não é JSON válido na extração: {exc}", retryable=False) from exc
 
 
 # ---------------------------------------------------------------------------
@@ -317,17 +309,13 @@ def grade(
             temperature=0.2,
         )
 
-    result, _p, _m = _run(
-        AiCall.Operation.GRADE, caller, attempt, providers.fallback_chain(model)
-    )
+    result, _p, _m = _run(AiCall.Operation.GRADE, caller, attempt, providers.fallback_chain(model))
     try:
         data = json.loads(_strip_think(result.content))
         grade_value = max(0.0, min(10.0, float(data["nota"])))
         justification = str(data["justificativa"]).strip()
     except (json.JSONDecodeError, KeyError, TypeError, ValueError) as exc:
-        raise LLMError(
-            f"resposta fora do contrato de correção: {exc}", retryable=False
-        ) from exc
+        raise LLMError(f"resposta fora do contrato de correção: {exc}", retryable=False) from exc
     if not justification:
         raise LLMError("IA devolveu nota sem justificativa", retryable=False)
     return Grading(grade=grade_value, justification=justification)
@@ -414,9 +402,7 @@ def describe_image(
         gemini = GeminiClient()
 
         async def gemini_coro():
-            return await gemini.describe(
-                image_bytes, mime_type=mime_type, prompt=prompt
-            )
+            return await gemini.describe(image_bytes, mime_type=mime_type, prompt=prompt)
 
         return _media_call(
             operation=AiCall.Operation.VISION,
@@ -443,9 +429,7 @@ def generate_image(prompt: str, *, caller: str) -> str:
         caller=caller,
         coro=coro,
     )
-    ext = {"image/png": "png", "image/jpeg": "jpg", "image/webp": "webp"}.get(
-        mime, "png"
-    )
+    ext = {"image/png": "png", "image/jpeg": "jpg", "image/webp": "webp"}.get(mime, "png")
     return _save_media("image", ext, raw)
 
 
@@ -480,9 +464,7 @@ def _minimax_voice_for_gender(gender: str | None) -> str:
     return settings.MINIMAX_VOICE_FEMALE
 
 
-def tts(
-    text: str, *, caller: str, voice_id: str | None = None, gender: str | None = None
-) -> str:
+def tts(text: str, *, caller: str, voice_id: str | None = None, gender: str | None = None) -> str:
     """TTS: gera áudio a partir do texto. Salva em media/ai/audio/ e devolve o caminho.
 
     ElevenLabs é o PRIMÁRIO (voz mais natural, Victor 2026-06-21); em falha cai pro MiniMax (fallback).

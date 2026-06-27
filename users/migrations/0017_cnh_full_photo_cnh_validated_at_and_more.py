@@ -19,16 +19,12 @@ class Migration(migrations.Migration):
         migrations.AddField(
             model_name="cnh",
             name="validated_at",
-            field=models.DateTimeField(
-                blank=True, null=True, verbose_name="validado em"
-            ),
+            field=models.DateTimeField(blank=True, null=True, verbose_name="validado em"),
         ),
         migrations.AddField(
             model_name="cnh",
             name="validation_result",
-            field=models.JSONField(
-                blank=True, null=True, verbose_name="resultado da validação"
-            ),
+            field=models.JSONField(blank=True, null=True, verbose_name="resultado da validação"),
         ),
         migrations.AddField(
             model_name="cnh",

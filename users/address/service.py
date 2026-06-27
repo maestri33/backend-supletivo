@@ -66,9 +66,7 @@ def _viacep(cep: str) -> dict | None:
 def _require_address(external_id: str) -> Address:
     address = profiles.get_address(external_id)
     if address is None:
-        raise NotFound(
-            "Endereço não encontrado para este usuário.", code="ADDRESS_NOT_FOUND"
-        )
+        raise NotFound("Endereço não encontrado para este usuário.", code="ADDRESS_NOT_FOUND")
     return address
 
 

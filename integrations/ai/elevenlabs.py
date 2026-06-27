@@ -68,14 +68,10 @@ class ElevenLabsClient:
             "model_id": model_id or self._model_id,
             "voice_settings": self._voice_settings(voice_settings),
         }
-        async with httpx.AsyncClient(
-            timeout=httpx.Timeout(self._timeout, connect=10.0)
-        ) as c:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(self._timeout, connect=10.0)) as c:
             resp = await c.post(url, json=body, headers=self._headers())
         if resp.status_code >= 400:
-            raise ElevenLabsError(
-                f"ElevenLabs HTTP {resp.status_code}: {resp.text[:300]}"
-            )
+            raise ElevenLabsError(f"ElevenLabs HTTP {resp.status_code}: {resp.text[:300]}")
         audio = resp.content
         logger.info(
             "elevenlabs.tts_done",

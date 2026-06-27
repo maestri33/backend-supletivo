@@ -12,10 +12,11 @@ from unittest.mock import patch, MagicMock
 
 import pytest
 
-from tests.conftest import auth_headers, _make_user, _jwt_for
+from tests.conftest import auth_headers
 
 
 # ── gate de superuser ─────────────────────────────────────────────────────────
+
 
 @pytest.mark.django_db
 def test_staff_sem_token_retorna_401(client):
@@ -36,6 +37,7 @@ def test_staff_usuario_comum_retorna_403(client, lead_user, lead_token):
 
 
 # ── hubs ──────────────────────────────────────────────────────────────────────
+
 
 @pytest.mark.django_db
 def test_list_hubs_retorna_lista(client, staff_user, staff_token):
@@ -104,6 +106,7 @@ def test_get_hub_inexistente_retorna_404_envelope(client, staff_user, staff_toke
 
 # ── integrações ───────────────────────────────────────────────────────────────
 
+
 @pytest.mark.django_db
 def test_integration_inexistente_retorna_404_envelope(client, staff_user, staff_token):
     """GET /staff/integrations/{name} com nome inválido → 404 com envelope (fix do HttpError)."""
@@ -137,6 +140,7 @@ def test_list_all_leads_hub_inexistente_retorna_404_envelope(client, staff_user,
 
 
 # ── system status ─────────────────────────────────────────────────────────────
+
 
 @pytest.mark.django_db
 def test_system_status_retorna_shape_correto(client, staff_user, staff_token):

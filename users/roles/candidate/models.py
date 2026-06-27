@@ -71,18 +71,14 @@ class Candidate(ExternalIdModel):
     selfie_taken_at = models.DateTimeField(
         null=True, blank=True, db_index=True
     )  # pro TTL do _analysis (plan/15 C)
-    selfie_verified = models.BooleanField(
-        default=False
-    )  # = selfie_status aprovado (compat)
+    selfie_verified = models.BooleanField(default=False)  # = selfie_status aprovado (compat)
     selfie_status = models.CharField(
         max_length=20,
         choices=SelfieStatus.choices,
         default=SelfieStatus.PENDING,
         db_index=True,
     )
-    selfie_description = models.TextField(
-        null=True, blank=True
-    )  # justificativa da IA/coordenador
+    selfie_description = models.TextField(null=True, blank=True)  # justificativa da IA/coordenador
     created_at = models.DateTimeField("criado em", auto_now_add=True)
     updated_at = models.DateTimeField("atualizado em", auto_now=True)
 

@@ -4,15 +4,26 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
-        ('users', '0026_alter_studentdocument_doc_type'),
+        ("users", "0026_alter_studentdocument_doc_type"),
     ]
 
     operations = [
         migrations.AlterField(
-            model_name='studentdocument',
-            name='doc_type',
-            field=models.CharField(choices=[('military_service', 'serviço militar (só homens)'), ('certificate', 'certificado do último ano'), ('transcript', 'histórico escolar'), ('blood_type', 'tipo sanguíneo (foto)'), ('address_proof', 'comprovante de endereço (foto)'), ('id_card', 'documento pessoal / RG (foto)'), ('birth_certificate', 'certidão')], db_index=True, max_length=40),
+            model_name="studentdocument",
+            name="doc_type",
+            field=models.CharField(
+                choices=[
+                    ("military_service", "serviço militar (só homens)"),
+                    ("certificate", "certificado do último ano"),
+                    ("transcript", "histórico escolar"),
+                    ("blood_type", "tipo sanguíneo (foto)"),
+                    ("address_proof", "comprovante de endereço (foto)"),
+                    ("id_card", "documento pessoal / RG (foto)"),
+                    ("birth_certificate", "certidão"),
+                ],
+                db_index=True,
+                max_length=40,
+            ),
         ),
     ]

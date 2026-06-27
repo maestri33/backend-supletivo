@@ -62,9 +62,7 @@ def require_superuser(principal: Principal):
     from django.contrib.auth import get_user_model
 
     user = (
-        get_user_model()
-        .objects.filter(external_id=principal.external_id, is_active=True)
-        .first()
+        get_user_model().objects.filter(external_id=principal.external_id, is_active=True).first()
     )
     if user is None or not user.is_superuser:
         raise Forbidden("Acesso restrito ao staff.", code="STAFF_ONLY")

@@ -77,9 +77,7 @@ class Student(ExternalIdModel):
     platform_password = models.CharField(max_length=255, null=True, blank=True)
     platform_notes = models.TextField(null=True, blank=True)
     # tipo sanguíneo (valor); a foto correspondente é um StudentDocument(BLOOD_TYPE).
-    blood_type = models.CharField(
-        max_length=3, choices=BloodType.choices, null=True, blank=True
-    )
+    blood_type = models.CharField(max_length=3, choices=BloodType.choices, null=True, blank=True)
     created_at = models.DateTimeField("criado em", auto_now_add=True)
     updated_at = models.DateTimeField("atualizado em", auto_now=True)
 
@@ -120,9 +118,7 @@ class StudentDocument(ExternalIdModel):
         REJECTED = "rejected", "reprovado"  # IA ou coordenador → dono refaz
         REVIEW = "review", "em revisão (coordenador decide)"  # IA falhou/em dúvida
 
-    student = models.ForeignKey(
-        Student, on_delete=models.CASCADE, related_name="documents"
-    )
+    student = models.ForeignKey(Student, on_delete=models.CASCADE, related_name="documents")
     doc_type = models.CharField(max_length=40, choices=Type.choices, db_index=True)
     # foto: path relativo no DB (arquivo em media/student/<student_ext>/<doc_type>.<ext>).
     photo = models.CharField("foto", max_length=500, null=True, blank=True)
@@ -144,9 +140,7 @@ class StudentDocument(ExternalIdModel):
         verbose_name = "documento do aluno"
         verbose_name_plural = "documentos do aluno"
         constraints = [
-            models.UniqueConstraint(
-                fields=["student", "doc_type"], name="uniq_student_doc_type"
-            )
+            models.UniqueConstraint(fields=["student", "doc_type"], name="uniq_student_doc_type")
         ]
 
     def __str__(self) -> str:
@@ -164,9 +158,7 @@ class StudentExam(ExternalIdModel):
     subject = models.CharField("matéria", max_length=120)
     scheduled_at = models.DateTimeField("agendada para")
     attempt_number = models.PositiveIntegerField("tentativa", default=1)
-    result = models.CharField(
-        max_length=20, choices=Result.choices, null=True, blank=True
-    )
+    result = models.CharField(max_length=20, choices=Result.choices, null=True, blank=True)
     # coordenador que corrigiu (FK real — §4; é Django/monólito).
     corrected_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
@@ -193,9 +185,7 @@ class StudentExam(ExternalIdModel):
 class StudentDiploma(ExternalIdModel):
     """Diploma: o coordenador emite (certificado + histórico); o aluno retira (foto). 1 por aluno."""
 
-    student = models.OneToOneField(
-        Student, on_delete=models.CASCADE, related_name="diploma"
-    )
+    student = models.OneToOneField(Student, on_delete=models.CASCADE, related_name="diploma")
     issued_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.SET_NULL,
@@ -234,9 +224,7 @@ class StudentPendency(ExternalIdModel):
         DOCUMENT = "document", "documentação"
         FEE = "fee", "taxa/comissão"
 
-    student = models.ForeignKey(
-        Student, on_delete=models.CASCADE, related_name="pendencies"
-    )
+    student = models.ForeignKey(Student, on_delete=models.CASCADE, related_name="pendencies")
     kind = models.CharField(max_length=20, choices=Kind.choices)
     description = models.CharField(max_length=500)
     amount_cents = models.PositiveIntegerField(null=True, blank=True)  # só kind=fee

@@ -135,9 +135,7 @@ def register(*, role: str, phone: str, cpf: str, email: str | None = None) -> di
 
     phone_exists, resolved_phone = _check_phone_whatsapp(phone)
     if not phone_exists:
-        raise ValidationError(
-            "Telefone sem WhatsApp ativo.", code="PHONE_NOT_ON_WHATSAPP"
-        )
+        raise ValidationError("Telefone sem WhatsApp ativo.", code="PHONE_NOT_ON_WHATSAPP")
 
     # resolved_phone pode colidir com outro já salvo (variante 9º dígito) — checa de novo
     if profiles.exists_phone(resolved_phone):
@@ -189,9 +187,7 @@ def change_phone(*, user_external_id: str, new_phone: str) -> dict:
 
     phone_exists, resolved_phone = _check_phone_whatsapp(new_phone)
     if not phone_exists:
-        raise ValidationError(
-            "Telefone sem WhatsApp ativo.", code="PHONE_NOT_ON_WHATSAPP"
-        )
+        raise ValidationError("Telefone sem WhatsApp ativo.", code="PHONE_NOT_ON_WHATSAPP")
     other = profiles.find_by_phone(resolved_phone)
     if other is not None and other.user_id != user.id:
         raise Conflict("Telefone já cadastrado em outra conta.", code="PHONE_EXISTS")
@@ -205,9 +201,7 @@ def change_phone(*, user_external_id: str, new_phone: str) -> dict:
 # ── check / recover ──────────────────────────────────────────────────────
 
 
-def _find_user(
-    *, cpf: str | None = None, phone: str | None = None, external_id: str | None = None
-):
+def _find_user(*, cpf: str | None = None, phone: str | None = None, external_id: str | None = None):
     if external_id:
         return User.objects.filter(external_id=external_id).first()
     if cpf:
@@ -248,9 +242,7 @@ def check(
         except ValueError as exc:
             raise ValidationError(str(exc), code="PHONE_INVALID") from exc
     elif not external_id:
-        raise ValidationError(
-            "Informe cpf, phone ou external_id.", code="MISSING_FIELD"
-        )
+        raise ValidationError("Informe cpf, phone ou external_id.", code="MISSING_FIELD")
 
     user = _find_user(cpf=cpf, phone=phone, external_id=external_id)
     if user is None:
@@ -315,9 +307,7 @@ def login(*, external_id: str, role: str, otp: str) -> dict:
 
     active = roles.active_roles(user)
     if role not in active:
-        logger.warning(
-            "auth.login_role_denied", external_id=external_id, requested=role
-        )
+        logger.warning("auth.login_role_denied", external_id=external_id, requested=role)
         raise Forbidden(f"Usuário não possui a role '{role}'.", code="ROLE_NOT_HELD")
 
     if not otp_service.verify(user, otp):

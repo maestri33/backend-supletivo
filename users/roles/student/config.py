@@ -240,9 +240,7 @@ EXTRACT_FIELDS: dict[str, tuple[str, ...]] = {
 
 # Descrição do tipo de documento para prompts de visão.
 def doc_type_hint(doc_type: str) -> str:
-    return _DOC_TYPE_HINT.get(
-        doc_type, _DOC_DESC.get(doc_type, "o documento solicitado")
-    )
+    return _DOC_TYPE_HINT.get(doc_type, _DOC_DESC.get(doc_type, "o documento solicitado"))
 
 
 def validation_prompt(

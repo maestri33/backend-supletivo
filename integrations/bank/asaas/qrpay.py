@@ -94,9 +94,7 @@ def pay_qr_code(*, amount, qr_payload, payment_id, description=None) -> Payment:
         # falha incerta (timeout/transporte): NÃO sabemos se pagou -> deixa SUBMITTING (idempotency_key resolve).
         row.last_error = f"submit_uncertain: {type(e).__name__}"
         row.save(update_fields=["last_error", "updated_at"])
-        logger.error(
-            "qrpay_submit_uncertain", payment_id=payment_id, error=type(e).__name__
-        )
+        logger.error("qrpay_submit_uncertain", payment_id=payment_id, error=type(e).__name__)
         raise QrPayError("submit_uncertain") from e
 
     row.asaas_id = res.get("id")
@@ -122,9 +120,7 @@ async def _send(qr_payload, amount, payment_id, description) -> dict:
 
 def get_qr_payment(payment_id: str) -> Payment:
     """Lê o Payment local (kind=qrcode)."""
-    row = Payment.objects.filter(
-        payment_id=payment_id, kind=Payment.Kind.QRCODE
-    ).first()
+    row = Payment.objects.filter(payment_id=payment_id, kind=Payment.Kind.QRCODE).first()
     if row is None:
         raise QrPayError("not_found")
     return row

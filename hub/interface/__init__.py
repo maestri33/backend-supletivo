@@ -55,9 +55,7 @@ def _ensure_coordinator_role(user: User) -> None:
     if "coordinator" in roles.active_roles(user):
         return
     if user.is_superuser:
-        roles.grant(
-            user, "coordinator"
-        )  # pula o catálogo + sem bump (overlay de resgate)
+        roles.grant(user, "coordinator")  # pula o catálogo + sem bump (overlay de resgate)
     else:
         roles.assign(user, "coordinator")
     _notify_coordinator_assigned(user)
@@ -72,9 +70,7 @@ def _notify_coordinator_assigned(user: User) -> None:
     p = profiles.get(user)
     try:
         send(
-            text=msgs.text(
-                "hub.coordinator_assigned", name=msgs.first_name(p.name if p else None)
-            ),
+            text=msgs.text("hub.coordinator_assigned", name=msgs.first_name(p.name if p else None)),
             caller="hub.coordinator_assigned",
             phone=p.phone if p else None,
             idempotency_key=f"hub_coord_assigned_{user.external_id}",
@@ -90,9 +86,7 @@ def create_hub(
     if not config.is_valid_brand(brand):
         raise HubError(f"invalid_brand:{brand}")
     coordinator = (
-        _coordinator_by_external_id(coordinator_external_id)
-        if coordinator_external_id
-        else None
+        _coordinator_by_external_id(coordinator_external_id) if coordinator_external_id else None
     )
     with transaction.atomic():
         address = address_iface.create_empty()
@@ -115,16 +109,12 @@ def create_hub(
 
 def list_hubs() -> list[Hub]:
     """Todos os polos (mais antigos primeiro)."""
-    return list(
-        Hub.objects.select_related("coordinator", "address").order_by("created_at")
-    )
+    return list(Hub.objects.select_related("coordinator", "address").order_by("created_at"))
 
 
 def get_by_external_id(external_id: str) -> Hub | None:
     return (
-        Hub.objects.select_related("coordinator", "address")
-        .filter(external_id=external_id)
-        .first()
+        Hub.objects.select_related("coordinator", "address").filter(external_id=external_id).first()
     )
 
 

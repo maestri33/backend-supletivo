@@ -19,14 +19,10 @@ class Command(BaseCommand):
     def add_arguments(self, parser):
         parser.add_argument("scope", help="ex.: asaas")
         parser.add_argument("name", help="ex.: webhook_external")
-        parser.add_argument(
-            "--passed", action="store_true", help="marca como passou (default)"
-        )
+        parser.add_argument("--passed", action="store_true", help="marca como passou (default)")
         parser.add_argument("--failed", action="store_true", help="marca como falhou")
         parser.add_argument("--mode", default="", help="artificial | real | link | ...")
-        parser.add_argument(
-            "--detail", default="", help="o que foi testado / evidência"
-        )
+        parser.add_argument("--detail", default="", help="o que foi testado / evidência")
 
     def handle(self, *args, **opts):
         passed = not opts["failed"]  # só falha se --failed for passado explicitamente

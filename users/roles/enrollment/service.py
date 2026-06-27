@@ -132,9 +132,7 @@ def _reconcile_stale_analyses(enr: Enrollment) -> None:
 
     if _analysis.is_stale(enr.selfie_status, enr.selfie_taken_at):
         enr.selfie_status = _selfie.REVIEW
-        enr.selfie_description = (
-            enr.selfie_description or ""
-        ).strip() or _analysis.stale_reason()
+        enr.selfie_description = (enr.selfie_description or "").strip() or _analysis.stale_reason()
         enr.save(update_fields=["selfie_status", "selfie_description", "updated_at"])
         _notify_selfie_review(enr)
 
@@ -199,9 +197,7 @@ def me_dict(enr: Enrollment) -> dict:
 
     rg_data = (documents_iface.get_by_external_id(user_ext) or {}).get("rg") or {}
     rg = None
-    if any(
-        rg_data.get(k) for k in ("number", "front_photo", "back_photo", "full_photo")
-    ):
+    if any(rg_data.get(k) for k in ("number", "front_photo", "back_photo", "full_photo")):
         rg = {
             "number": rg_data.get("number"),
             "issuing_agency": rg_data.get("issuing_agency"),
@@ -299,9 +295,7 @@ _ADDRESS_FIELDS = (
 
 
 def _address_dict(user_external_id: str) -> dict:
-    data = address_iface.as_public_dict(
-        address_iface.get_by_external_id(user_external_id)
-    )
+    data = address_iface.as_public_dict(address_iface.get_by_external_id(user_external_id))
     data["missing_fields"] = [f for f in _ADDRESS_FIELDS if not data.get(f)]
     return data
 
@@ -385,9 +379,7 @@ def _rg_section_dict(enr: Enrollment) -> dict:
         "analysis_reason": result.get("reason"),
         "validation_status": rg.validation_status if has_photo else None,
         "validation_reason": result.get("reason"),
-        "missing_fields": [
-            k for k in (*_RG_DOC_FIELDS, *_RG_PROFILE_FIELDS) if not fields[k]
-        ],
+        "missing_fields": [k for k in (*_RG_DOC_FIELDS, *_RG_PROFILE_FIELDS) if not fields[k]],
     }
 
 
@@ -407,22 +399,16 @@ def patch_rg_section(*, user_external_id: str, **fields) -> dict:
     doc_payload = {k: fields[k] for k in _RG_DOC_FIELDS if fields.get(k) is not None}
     if doc_payload:
         documents_iface.update(user_external_id, {"rg": doc_payload})
-    profile_payload = {
-        k: fields[k] for k in _RG_PROFILE_FIELDS if fields.get(k) is not None
-    }
+    profile_payload = {k: fields[k] for k in _RG_PROFILE_FIELDS if fields.get(k) is not None}
     if profile_payload:
-        profiles.update_identity(
-            enr.user, **profile_payload
-        )  # identidade → Profile (correção)
+        profiles.update_identity(enr.user, **profile_payload)  # identidade → Profile (correção)
     _advance_rg(enr, user_external_id)
     # destrave do gate #10: selfie já aprovada que só esperava os campos → fecha a coleta agora
     from users.roles import _selfie
 
     if enr.status == _S.SELFIE and enr.selfie_status == _selfie.APPROVED:
         _advance_to_release(enr)
-    return me_dict(
-        enr
-    )  # resposta canônica (proposta #3): o rg detalhado segue no GET da seção
+    return me_dict(enr)  # resposta canônica (proposta #3): o rg detalhado segue no GET da seção
 
 
 def upload_rg_photo(*, user_external_id: str, slot: str, upload) -> dict:
@@ -594,9 +580,7 @@ def _rg_extract_and_finish(enr: Enrollment, rg, result: dict, images: list) -> N
 
     p = profiles.get(enr.user)
     try:
-        ocr_text = doc_ai.ocr_images(
-            [fp.read_bytes() for fp in images], caller="enrollment.rg"
-        )
+        ocr_text = doc_ai.ocr_images([fp.read_bytes() for fp in images], caller="enrollment.rg")
         data = doc_ai.extract_rg(
             ocr_text, holder_name=(p.name if p else None), caller="enrollment.rg"
         )
@@ -680,20 +664,14 @@ def _apply_rg_extracted(enr: Enrollment, rg, data: dict) -> None:
     # 2026-06-16: a identidade mora SÓ no Profile, nunca espalhada no enrollment).
     profiles.fill_identity(
         enr.user,
-        mother_name=_clean(data["mother_name"], 255)
-        if data.get("mother_name")
-        else None,
-        father_name=_clean(data["father_name"], 255)
-        if data.get("father_name")
-        else None,
+        mother_name=_clean(data["mother_name"], 255) if data.get("mother_name") else None,
+        father_name=_clean(data["father_name"], 255) if data.get("father_name") else None,
         birthplace=_clean(data["birthplace"], 128) if data.get("birthplace") else None,
         birth_date=_date(data.get("birth_date")),
     )
 
 
-def _finish_rg(
-    enr: Enrollment, rg, status: str, reason: str | None, result: dict
-) -> None:
+def _finish_rg(enr: Enrollment, rg, status: str, reason: str | None, result: dict) -> None:
     """Grava o veredito (justificativa SEMPRE — plan/9) + dispara o notify do estado."""
     from django.utils import timezone
 
@@ -704,9 +682,7 @@ def _finish_rg(
     rg.validation_result = result
     rg.validated_at = timezone.now()
     rg.save(update_fields=["validation_status", "validation_result", "validated_at"])
-    logger.info(
-        "enrollment.rg_validated", enrollment=str(enr.external_id), status=status
-    )
+    logger.info("enrollment.rg_validated", enrollment=str(enr.external_id), status=status)
     if status == doc_ai.REJECTED:
         _notify_rg_rejected(enr, reason)
     elif status == doc_ai.REVIEW:
@@ -761,11 +737,7 @@ def run_rg_fill(enrollment_id: int) -> None:
 
     from users.roles import _document_ai as doc_ai
 
-    enr = (
-        Enrollment.objects.select_related("user", "hub")
-        .filter(id=enrollment_id)
-        .first()
-    )
+    enr = Enrollment.objects.select_related("user", "hub").filter(id=enrollment_id).first()
     if enr is None:
         return
     user_ext = str(enr.user.external_id)
@@ -1013,9 +985,7 @@ def _notify_resolution(enr: Enrollment, event_key: str, **placeholders) -> None:
             gender=p.gender if (p and tts) else None,
         )
     except Exception as exc:  # noqa: BLE001
-        logger.warning(
-            "enrollment.notify_resolution_failed", event=event_key, error=str(exc)
-        )
+        logger.warning("enrollment.notify_resolution_failed", event=event_key, error=str(exc))
 
 
 def _notify_rg_rejected(enr: Enrollment, reason: str | None) -> None:
@@ -1197,9 +1167,7 @@ def _require_rg_ready_for_selfie(enr: Enrollment) -> None:
     missing = _rg_section_dict(enr)["missing_fields"]
     if missing:
         raise Conflict(
-            "Complete os dados do documento antes da selfie: "
-            + ", ".join(missing)
-            + ".",
+            "Complete os dados do documento antes da selfie: " + ", ".join(missing) + ".",
             code="WRONG_STATUS",
             extra={"expected_status": _S.RG.value, "missing_fields": missing},
         )
@@ -1258,9 +1226,7 @@ def run_selfie_validation(enrollment_id: int) -> None:
             "updated_at",
         ]
     )
-    logger.info(
-        "enrollment.selfie_validated", enrollment=str(enr.external_id), status=status
-    )
+    logger.info("enrollment.selfie_validated", enrollment=str(enr.external_id), status=status)
     _save_selfie_audit(enr, status, desc)
     _resolve_selfie(enr)
 
@@ -1496,9 +1462,7 @@ def fee_facts(enr: Enrollment) -> dict:
     return {
         "first": _fee_dict(first),
         "second": _fee_dict(second),
-        "first_paid": bool(
-            first is not None and first.status == fees.PaymentStatus.PAID
-        ),
+        "first_paid": bool(first is not None and first.status == fees.PaymentStatus.PAID),
         "second_scheduled": second is not None,
     }
 
@@ -1533,9 +1497,7 @@ def _plan_fee_qr(qr_code: str, amount=None) -> dict:
     try:
         return fees.plan_qr_payment(qr_payload=qr_code, amount=amount)
     except ValueError as exc:
-        raise EnrollmentError(
-            f"QR code inválido: {exc}", code="FEE_QR_INVALID"
-        ) from exc
+        raise EnrollmentError(f"QR code inválido: {exc}", code="FEE_QR_INVALID") from exc
 
 
 def _queue_fee(enr: Enrollment, *, qr_code: str, amount, scheduled_for, ref: str):
@@ -1561,9 +1523,7 @@ def _queue_fee(enr: Enrollment, *, qr_code: str, amount, scheduled_for, ref: str
     )
 
 
-def pay_fee(
-    *, enrollment_external_id: str, coordinator, qr_code: str, amount=None
-) -> dict:
+def pay_fee(*, enrollment_external_id: str, coordinator, qr_code: str, amount=None) -> dict:
     """1ª parcela (À VISTA): valida o QR e enfileira o PIX IMEDIATO (mesmo que o QR tenha vencimento —
     à vista é à vista; antecipação já provada real). O status do matriculado NÃO muda aqui: muda quando
     o pagamento CONFIRMAR PAGO (hook `fee.paid` → `fee_paid` — palavra do Victor 2026-06-12).
@@ -1593,9 +1553,7 @@ def pay_fee(
     }
 
 
-def schedule_fee(
-    *, enrollment_external_id: str, coordinator, qr_code: str, amount=None
-) -> dict:
+def schedule_fee(*, enrollment_external_id: str, coordinator, qr_code: str, amount=None) -> dict:
     """2ª parcela (AGENDADA): o vencimento vem de DENTRO do QR (cobrança com vencimento); QR sem
     vencimento → erro claro (não chuta data). O status muda NO ATO do agendamento → `fee_scheduled`
     (Victor 2026-06-12); QR já vencido → paga imediato (o vencimento chegou — semântica provada).
@@ -1604,9 +1562,7 @@ def schedule_fee(
         enrollment_external_id, coordinator, _S.AWAITING_RELEASE, _S.FEE_PAID
     )
     if fee_facts(enr)["second_scheduled"]:
-        raise Conflict(
-            "A 2ª parcela desta taxa já está agendada.", code="FEE_ALREADY_SCHEDULED"
-        )
+        raise Conflict("A 2ª parcela desta taxa já está agendada.", code="FEE_ALREADY_SCHEDULED")
     plan = _plan_fee_qr(qr_code, amount)
     if plan["due_date"] is None:
         raise EnrollmentError(
@@ -1751,18 +1707,14 @@ def apply_fee_problem(
     return True
 
 
-def _notify_fee_event(
-    enr: Enrollment, event: str, idem_suffix: str = "", **placeholders
-) -> None:
+def _notify_fee_event(enr: Enrollment, event: str, idem_suffix: str = "", **placeholders) -> None:
     """Notify do ciclo da taxa → SEMPRE o COORDENADOR, nunca o aluno (política interna). Sem TTS."""
     from notify.interface.send import send
     from users.roles import notifications as msgs
 
     coord = enr.hub.coordinator
     if coord is None:
-        logger.warning(
-            "enrollment.fee_notify_no_coordinator", external_id=str(enr.external_id)
-        )
+        logger.warning("enrollment.fee_notify_no_coordinator", external_id=str(enr.external_id))
         return
     cp = profiles.get(coord)
     sp = profiles.get(enr.user)
@@ -1828,11 +1780,7 @@ def list_for_staff(*, hub_external_id=None, status=None, limit=200) -> list[dict
 def list_for_hub(*, hub, status: str | None = None) -> list[dict]:
     """Matrículas do polo (visão do coordenador): status REAL + resumo das 2 parcelas da taxa.
     `?status=awaiting_release` = quem terminou o wizard e espera ação do coordenador."""
-    qs = (
-        Enrollment.objects.filter(hub=hub)
-        .select_related("user")
-        .order_by("-created_at")
-    )
+    qs = Enrollment.objects.filter(hub=hub).select_related("user").order_by("-created_at")
     if status:
         qs = qs.filter(status=status)
     return [_hub_item_dict(enr) for enr in qs]
@@ -1863,22 +1811,16 @@ _COORD_CORRECTABLE = (
 )
 
 
-def coordinator_correct_identity(
-    *, enrollment_external_id: str, coordinator, **fields
-) -> dict:
+def coordinator_correct_identity(*, enrollment_external_id: str, coordinator, **fields) -> dict:
     """Coordenador corrige campos de identidade do Profile que o OCR extraiu errado (filiação, estado
     civil, naturalidade, nacionalidade) — sem isso uma extração torta fica gravada pra sempre e só um
     db-edit conserta (Victor 2026-06-17: user→coord, sem dev). SOBRESCREVE via `profiles.update_identity`.
 
     NÃO mexe em `name`/`birth_date` (CPFHub manda) nem em `pix`. Gate: coordenar o hub da matrícula."""
     enr = _enrollment_for_coordinator(enrollment_external_id, coordinator)
-    clean = {
-        k: v for k, v in fields.items() if k in _COORD_CORRECTABLE and v is not None
-    }
+    clean = {k: v for k, v in fields.items() if k in _COORD_CORRECTABLE and v is not None}
     if not clean:
-        raise DomainError(
-            "Nenhum campo de identidade corrigível foi informado.", code="NO_FIELDS"
-        )
+        raise DomainError("Nenhum campo de identidade corrigível foi informado.", code="NO_FIELDS")
     profiles.update_identity(enr.user, **clean)
     logger.info(
         "leadership.acted_for",
@@ -1917,9 +1859,7 @@ def _sweep_stale_reviews(hub) -> None:
     )
     # RG: o model não tem `updated_at`; o início vive no JSON (`analysis_started_at`), igual ao flip
     # do /me do aluno (`_rg_started_at`). Loop curto (só os PENDING do polo) — sem referência → não mexe.
-    user_ids = list(
-        Enrollment.objects.filter(hub=hub).values_list("user_id", flat=True)
-    )
+    user_ids = list(Enrollment.objects.filter(hub=hub).values_list("user_id", flat=True))
     for rg in RG.objects.filter(
         document__user_id__in=user_ids, validation_status=_analysis.PENDING
     ):
@@ -1945,9 +1885,7 @@ def list_reviews_for_hub(*, hub) -> dict:
         }
 
     rg_qs = (
-        Enrollment.objects.filter(
-            hub=hub, user__document__rg__validation_status=_analysis.REVIEW
-        )
+        Enrollment.objects.filter(hub=hub, user__document__rg__validation_status=_analysis.REVIEW)
         .select_related("user")
         .order_by("updated_at")
     )
@@ -1966,16 +1904,12 @@ def _notify_released(enr: Enrollment) -> None:
     p = profiles.get(enr.user)
     try:
         send(
-            text=msgs.text(
-                "enrollment.released", name=msgs.first_name(p.name if p else None)
-            ),
+            text=msgs.text("enrollment.released", name=msgs.first_name(p.name if p else None)),
             caller="enrollment.released",
             phone=p.phone if p else None,
             email=p.email if p else None,
             email_channel=bool(p and p.email),
-            tts=msgs.is_tts(
-                "enrollment.released"
-            ),  # virou aluno = momento especial (voz)
+            tts=msgs.is_tts("enrollment.released"),  # virou aluno = momento especial (voz)
             gender=p.gender if p else None,
             idempotency_key=f"enr_released_{enr.external_id}",
         )

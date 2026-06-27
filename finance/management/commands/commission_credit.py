@@ -23,9 +23,7 @@ class Command(BaseCommand):
     help = "Credita uma comissão (valor do .env) a um beneficiário pelo external_id."
 
     def add_arguments(self, parser):
-        parser.add_argument(
-            "--payee", required=True, help="external_id (UUID) do beneficiário"
-        )
+        parser.add_argument("--payee", required=True, help="external_id (UUID) do beneficiário")
         parser.add_argument(
             "--role",
             required=True,

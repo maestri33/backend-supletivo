@@ -89,9 +89,7 @@ class CandidateCreateIn(Schema):
 
 class CandidateOut(Schema):
     external_id: str = Field(description="external_id do CANDIDATO (≠ do user)")
-    user_external_id: str = Field(
-        description="external_id do USER — é o que o /auth/login espera"
-    )
+    user_external_id: str = Field(description="external_id do USER — é o que o /auth/login espera")
     status: str
 
 
@@ -324,9 +322,7 @@ def register(request, payload: CandidateCreateIn):
 def check(request, payload: CheckIn):
     """Dispara OTP por cpf/phone e **VAZA existência** (CONVENTION §5): devolve `found`+`roles`
     honestos — o front decide cadastro novo × login."""
-    return auth_iface.check(
-        cpf=payload.cpf, phone=payload.phone, external_id=payload.external_id
-    )
+    return auth_iface.check(cpf=payload.cpf, phone=payload.phone, external_id=payload.external_id)
 
 
 @auth_router.post("/login", response=TokenOut, auth=None)
@@ -339,12 +335,8 @@ def login(request, payload: LoginIn):
     active = roles.active_roles(user)
     funnel_role = next((r for r in _FUNNEL_ROLES if r in active), None)
     if funnel_role is None:
-        raise Forbidden(
-            "Usuário não faz parte do funil do colaborador.", code="NOT_IN_FUNNEL"
-        )
-    return auth_iface.login(
-        external_id=payload.external_id, role=funnel_role, otp=payload.otp
-    )
+        raise Forbidden("Usuário não faz parte do funil do colaborador.", code="NOT_IN_FUNNEL")
+    return auth_iface.login(external_id=payload.external_id, role=funnel_role, otp=payload.otp)
 
 
 add_auth_refresh(auth_router)
@@ -396,9 +388,7 @@ def candidate_address_patch(request, payload: AddressDataIn):
     """Preenche os demais campos — SÓ os que estão VAZIOS (não sobrescreve o que o CEP trouxe).
     Devolve o `me_dict` canônico."""
     ext = _guard(request, "candidate")
-    return candidate_iface.set_address_data(
-        user_external_id=ext, **payload.dict(exclude_none=True)
-    )
+    return candidate_iface.set_address_data(user_external_id=ext, **payload.dict(exclude_none=True))
 
 
 @api.post("/candidate/documents", response=CandidateMeOut, tags=["candidate"])
@@ -407,14 +397,10 @@ def candidate_documents(request, payload: DocumentsIn):
     ext = _guard(request, "candidate")
     fields = payload.dict()
     doc_type = fields.pop("doc_type")
-    return candidate_iface.set_documents(
-        user_external_id=ext, doc_type=doc_type, **fields
-    )
+    return candidate_iface.set_documents(user_external_id=ext, doc_type=doc_type, **fields)
 
 
-@api.get(
-    "/candidate/document", response=CandidateDocumentSectionOut, tags=["candidate"]
-)
+@api.get("/candidate/document", response=CandidateDocumentSectionOut, tags=["candidate"])
 def candidate_get_document(request):
     """Seção rica do documento (plan/15 B3): `doc_type` + fotos + validação IA canônica
     (`analysis_status`/`analysis_reason`/`analysis_started_at`) + campos extraídos + `missing_fields`
@@ -433,9 +419,7 @@ def candidate_patch_document(request, payload: DocumentsIn):
     return candidate_iface.patch_document_section(user_external_id=ext, **fields)
 
 
-@api.post(
-    "/candidate/documents/photo/{slot}", response=AnalysisAckOut, tags=["candidate"]
-)
+@api.post("/candidate/documents/photo/{slot}", response=AnalysisAckOut, tags=["candidate"])
 def candidate_document_photo(request, slot: str, file: UploadedFile = File(...)):
     """Foto do documento (slots `rg_front`/`rg_back`/`rg_full`/`cnh_front`/`cnh_back`/`cnh_full`).
     Plan/15 B3: na frente o rosto vira biometria do documento (best-effort) e a foto entra no
@@ -446,9 +430,7 @@ def candidate_document_photo(request, slot: str, file: UploadedFile = File(...))
     (`DOC_TYPE_LOCKED`). RG inteiro (`rg_full`) ou CNH inteira (`cnh_full`) cabem numa só foto;
     frente+verso (2 fotos) também."""
     ext = _guard(request, "candidate")
-    return candidate_iface.upload_document_photo(
-        user_external_id=ext, slot=slot, upload=file
-    )
+    return candidate_iface.upload_document_photo(user_external_id=ext, slot=slot, upload=file)
 
 
 @api.post("/candidate/pix", response=CandidateMeOut, tags=["candidate"])
@@ -456,9 +438,7 @@ def candidate_pix(request, payload: PixIn):
     """Valida a chave Pix no Asaas/DICT (confere o titular) e grava. Devolve o `me_dict` canônico.
     ⚠️ MEXE R$0,01 real (DICT)."""
     ext = _guard(request, "candidate")
-    return candidate_iface.set_pix(
-        user_external_id=ext, key=payload.key, key_type=payload.key_type
-    )
+    return candidate_iface.set_pix(user_external_id=ext, key=payload.key, key_type=payload.key_type)
 
 
 @api.post("/candidate/selfie", response=AnalysisAckOut, tags=["candidate"])
@@ -498,9 +478,7 @@ def training_materials(request):
     return training_iface.assigned_materials(ext)
 
 
-@api.get(
-    "/training/progress", response=list[TrainingMaterialProgressOut], tags=["training"]
-)
+@api.get("/training/progress", response=list[TrainingMaterialProgressOut], tags=["training"])
 def training_progress(request):
     ext = _guard(request, "promoter")
     return training_iface.progress(ext)
@@ -536,9 +514,7 @@ def promoter_leads(request):
     return promoter_iface.list_leads(_promoter(request).user)
 
 
-@api.get(
-    "/promoter/me/commissions", response=list[PromoterCommissionOut], tags=["promoter"]
-)
+@api.get("/promoter/me/commissions", response=list[PromoterCommissionOut], tags=["promoter"])
 def promoter_commissions(request):
     return promoter_iface.list_commissions(_promoter(request).user)
 

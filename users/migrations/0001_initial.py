@@ -31,9 +31,7 @@ class Migration(migrations.Migration):
                 ("password", models.CharField(max_length=128, verbose_name="password")),
                 (
                     "last_login",
-                    models.DateTimeField(
-                        blank=True, null=True, verbose_name="last login"
-                    ),
+                    models.DateTimeField(blank=True, null=True, verbose_name="last login"),
                 ),
                 (
                     "is_superuser",
@@ -138,9 +136,7 @@ class Migration(migrations.Migration):
                 ),
                 (
                     "phone",
-                    models.CharField(
-                        max_length=13, unique=True, verbose_name="telefone"
-                    ),
+                    models.CharField(max_length=13, unique=True, verbose_name="telefone"),
                 ),
                 (
                     "email",
@@ -242,15 +238,11 @@ class Migration(migrations.Migration):
                 ("role", models.CharField(max_length=64, verbose_name="papel")),
                 (
                     "assigned_at",
-                    models.DateTimeField(
-                        auto_now_add=True, verbose_name="atribuído em"
-                    ),
+                    models.DateTimeField(auto_now_add=True, verbose_name="atribuído em"),
                 ),
                 (
                     "revoked_at",
-                    models.DateTimeField(
-                        blank=True, null=True, verbose_name="revogado em"
-                    ),
+                    models.DateTimeField(blank=True, null=True, verbose_name="revogado em"),
                 ),
                 (
                     "user",

@@ -34,7 +34,9 @@ logger = structlog.get_logger()
 
 
 class Command(BaseCommand):
-    help = "Cria (idempotente) a conta-mãe (staff superuser + promoter + coordinator) e o hub padrão."
+    help = (
+        "Cria (idempotente) a conta-mãe (staff superuser + promoter + coordinator) e o hub padrão."
+    )
 
     def handle(self, *args, **options):
         cpf = settings.DEFAULT_STAFF_CPF

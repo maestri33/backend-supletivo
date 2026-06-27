@@ -9,7 +9,7 @@ Schemas aqui:
 
 from __future__ import annotations
 
-from ninja import Field, Schema
+from ninja import Schema
 
 
 class MaterialIn(Schema):
@@ -47,6 +47,27 @@ class MaterialUpdateIn(Schema):
     ephemeral: bool | None = None
     video: str | None = None
     photo: str | None = None
+
+
+class MaterialOut(Schema):
+    """Matéria do treino (visão de autoria): conteúdo + questão + gabarito.
+
+    Espelho do `training_iface.material_to_dict(include_answer=True)`. Compartilhado por `staff`
+    e `leadership` (ambos autoram matéria — mesmo shape, fonte única evita drift; §12)."""
+
+    external_id: str
+    title: str
+    text_content: str = ""
+    content_blocks: list[dict] = []
+    question: str
+    video: str | None = None
+    photo: str | None = None
+    kind: str
+    blocking: bool
+    ephemeral: bool
+    order: int
+    active: bool
+    expected_answer: str
 
 
 class RefreshIn(Schema):

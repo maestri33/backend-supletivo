@@ -26,9 +26,7 @@ class Command(BaseCommand):
             self.stderr.write(self.style.ERROR(f"Evolution respondeu erro: {exc}"))
             return
         except Exception as exc:  # rede/DNS/timeout
-            self.stderr.write(
-                self.style.ERROR(f"Falha ao falar com a Evolution: {exc!r}")
-            )
+            self.stderr.write(self.style.ERROR(f"Falha ao falar com a Evolution: {exc!r}"))
             return
 
         self.stdout.write(self.style.SUCCESS("Evolution respondeu (auth ok):"))

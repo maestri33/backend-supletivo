@@ -63,18 +63,14 @@ def classify(score: float) -> tuple[str, bool]:
 def _rel(path: str) -> str:
     """Caminho relativo ao MEDIA_ROOT quando possível (tidiness); senão o caminho cru."""
     try:
-        return str(
-            Path(path).resolve().relative_to(Path(settings.MEDIA_ROOT).resolve())
-        )
+        return str(Path(path).resolve().relative_to(Path(settings.MEDIA_ROOT).resolve()))
     except ValueError:
         return str(path)
 
 
 def enroll_face(*, user, image_path: str, source: str, caller: str) -> FaceBiometric:
     """Detecta o rosto, gera o embedding e SALVA o template ligado ao user. Sem rosto → NoFaceDetected."""
-    emb, meta = face_match.embed(
-        image_path
-    )  # NoFaceDetected / ModelUnavailable sobem pro caller
+    emb, meta = face_match.embed(image_path)  # NoFaceDetected / ModelUnavailable sobem pro caller
     bio = FaceBiometric.objects.create(
         user=user,
         source=source,
@@ -93,9 +89,7 @@ def enroll_face(*, user, image_path: str, source: str, caller: str) -> FaceBiome
     return bio
 
 
-def try_enroll_document(
-    *, user, slot: str, image_path: str, caller: str
-) -> FaceBiometric | None:
+def try_enroll_document(*, user, slot: str, image_path: str, caller: str) -> FaceBiometric | None:
     """BEST-EFFORT: se o slot for a FRENTE do RG/CNH, salva a biometria do documento. Falha NÃO quebra o
     upload (RG com rosto ruim cai em `review` na hora da selfie). Desligado se BIOMETRIC_ENABLED=False."""
     # frente do RG/CNH (rosto visível) — `_full` = RG inteiro numa imagem (a frente está nela, plan/12)
@@ -104,9 +98,7 @@ def try_enroll_document(
     if not getattr(settings, "BIOMETRIC_ENABLED", True):
         return None
     try:
-        return enroll_face(
-            user=user, image_path=image_path, source=Source.DOCUMENT, caller=caller
-        )
+        return enroll_face(user=user, image_path=image_path, source=Source.DOCUMENT, caller=caller)
     except BiometricError as exc:
         logger.warning(
             "biometric.document_enroll_skipped",
@@ -116,9 +108,7 @@ def try_enroll_document(
         )
         return None
     except Exception as exc:  # noqa: BLE001 — biometria é apoio; jamais bloquear o upload do documento
-        logger.warning(
-            "biometric.document_enroll_error", caller=caller, slot=slot, error=str(exc)
-        )
+        logger.warning("biometric.document_enroll_error", caller=caller, slot=slot, error=str(exc))
         return None
 
 

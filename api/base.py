@@ -72,25 +72,19 @@ def build_group(name: str, description: str) -> NinjaAPI:
     @api.exception_handler(NinjaValidationError)
     def schema_error(request, exc: NinjaValidationError):
         """Body/query fora do schema → 422. `detail` mantém a lista do pydantic (aditivo)."""
-        return JsonResponse(
-            {"detail": exc.errors, "code": "VALIDATION_ERROR"}, status=422
-        )
+        return JsonResponse({"detail": exc.errors, "code": "VALIDATION_ERROR"}, status=422)
 
     @api.exception_handler(HttpError)
     def http_error(request, exc: HttpError):
         """HttpError cru (sem code próprio) → ganha o fallback `ERROR` pra manter o envelope."""
-        return JsonResponse(
-            {"detail": str(exc), "code": "ERROR"}, status=exc.status_code
-        )
+        return JsonResponse({"detail": str(exc), "code": "ERROR"}, status=exc.status_code)
 
     @api.exception_handler(Exception)
     def unhandled_error(request, exc: Exception):
         """Erro NÃO tratado → SEMPRE JSON `{detail}` 500 — nunca traceback/URLconf em HTML, nem com
         DEBUG ligado (auditoria do front 2026-06-10). O traceback completo vai pro log do server."""
         logger.exception("api.unhandled_error", group=name, path=request.path)
-        return JsonResponse(
-            {"detail": "Erro interno do servidor.", "code": "INTERNAL"}, status=500
-        )
+        return JsonResponse({"detail": "Erro interno do servidor.", "code": "INTERNAL"}, status=500)
 
     @api.get("/health", response=HealthOut, auth=None, tags=["health"])
     def health(request):
@@ -104,9 +98,7 @@ def build_group(name: str, description: str) -> NinjaAPI:
 
         principal = request.auth
         profile = (
-            Profile.objects.filter(user__external_id=principal.external_id)
-            .only("name")
-            .first()
+            Profile.objects.filter(user__external_id=principal.external_id).only("name").first()
         )
         return {
             "external_id": principal.external_id,
@@ -128,9 +120,7 @@ def resolve_rg_slot(slot: str) -> str:
 
     real = RG_PHOTO_SLOTS.get(slot)
     if real is None:
-        raise ValidationError(
-            "Slot inválido. Aceitos: front, back, full.", code="SLOT_INVALID"
-        )
+        raise ValidationError("Slot inválido. Aceitos: front, back, full.", code="SLOT_INVALID")
     return real
 
 

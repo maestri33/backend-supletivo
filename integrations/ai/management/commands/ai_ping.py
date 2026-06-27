@@ -13,12 +13,12 @@ from integrations.ai.models import AiCall
 
 
 class Command(BaseCommand):
-    help = "Chama a IA de verdade (generate_json) pela cadeia de fallback; mostra resultado + AiCall."
+    help = (
+        "Chama a IA de verdade (generate_json) pela cadeia de fallback; mostra resultado + AiCall."
+    )
 
     def add_arguments(self, parser):
-        parser.add_argument(
-            "--model", default=None, help="fixar um model presente na cadeia"
-        )
+        parser.add_argument("--model", default=None, help="fixar um model presente na cadeia")
 
     def handle(self, *args, **options):
         try:

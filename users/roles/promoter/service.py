@@ -22,9 +22,7 @@ def create_promoter(*, user, hub) -> Promoter:
     existing = Promoter.objects.filter(user=user).first()
     if existing is not None:
         return existing
-    promoter = Promoter.objects.create(
-        user=user, hub=hub, status=Promoter.Status.ACTIVE
-    )
+    promoter = Promoter.objects.create(user=user, hub=hub, status=Promoter.Status.ACTIVE)
     logger.info(
         "promoter.created",
         external_id=str(promoter.external_id),
@@ -39,9 +37,7 @@ def get_for_user(user) -> Promoter | None:
 
 def get_by_user_external_id(external_id: str) -> Promoter | None:
     return (
-        Promoter.objects.filter(user__external_id=external_id)
-        .select_related("user", "hub")
-        .first()
+        Promoter.objects.filter(user__external_id=external_id).select_related("user", "hub").first()
     )
 
 
@@ -56,9 +52,7 @@ def validate_ref(ref: str):
     except (TypeError, ValueError):
         return None
     promoter = (
-        Promoter.objects.filter(
-            user__external_id=ref_uuid, status=Promoter.Status.ACTIVE
-        )
+        Promoter.objects.filter(user__external_id=ref_uuid, status=Promoter.Status.ACTIVE)
         .select_related("user")
         .first()
     )
@@ -73,9 +67,7 @@ def validate_ref(ref: str):
 
 
 def ref_url(user) -> str:
-    base = (
-        getattr(settings, "LANDING_BASE_URL", "") or settings.EXTERNAL_URL or ""
-    ).rstrip("/")
+    base = (getattr(settings, "LANDING_BASE_URL", "") or settings.EXTERNAL_URL or "").rstrip("/")
     return f"{base}/?ref={user.external_id}"
 
 
@@ -135,9 +127,7 @@ def _coordinated_promoter(user_external_id: str, coordinator) -> Promoter:
     if promoter is None:
         raise NotFound("Promotor não encontrado.", code="PROMOTER_NOT_FOUND")
     if promoter.hub.coordinator_id != coordinator.id:
-        raise Forbidden(
-            "Você não coordena o polo deste promotor.", code="NOT_HUB_COORDINATOR"
-        )
+        raise Forbidden("Você não coordena o polo deste promotor.", code="NOT_HUB_COORDINATOR")
     return promoter
 
 
@@ -168,9 +158,7 @@ def list_for_hub(hub) -> list[dict]:
     from users.profiles import interface as profiles
     from users.roles.training import interface as training_iface
 
-    promoters = list(
-        Promoter.objects.filter(hub=hub).select_related("user").order_by("created_at")
-    )
+    promoters = list(Promoter.objects.filter(hub=hub).select_related("user").order_by("created_at"))
     pmap = profiles.get_map([pr.user for pr in promoters])
     out = []
     for promoter in promoters:

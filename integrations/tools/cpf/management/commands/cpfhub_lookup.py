@@ -28,9 +28,7 @@ class Command(BaseCommand):
 
         if result is None:
             self.stdout.write(
-                self.style.WARNING(
-                    f'CPF "{cpf}" não encontrado ou com formato inválido.'
-                )
+                self.style.WARNING(f'CPF "{cpf}" não encontrado ou com formato inválido.')
             )
             return
 

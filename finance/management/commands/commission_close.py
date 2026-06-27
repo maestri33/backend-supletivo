@@ -35,9 +35,7 @@ class Command(BaseCommand):
             try:
                 day = datetime.strptime(o["date"], "%Y-%m-%d")
             except ValueError as exc:
-                raise CommandError(
-                    f"data inválida: {o['date']} (use YYYY-MM-DD)"
-                ) from exc
+                raise CommandError(f"data inválida: {o['date']} (use YYYY-MM-DD)") from exc
             # ancora ao meio-dia SP p/ evitar virada de dia por fuso.
             reference = day.replace(hour=12, tzinfo=SP_TZ)
 

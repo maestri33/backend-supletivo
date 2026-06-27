@@ -95,9 +95,7 @@ def _check_and_record_rate_limit(user) -> None:
                 rl.hourly_count = 1
                 rl.hourly_window_start = now
             rl.last_created_at = now
-            rl.save(
-                update_fields=["last_created_at", "hourly_count", "hourly_window_start"]
-            )
+            rl.save(update_fields=["last_created_at", "hourly_count", "hourly_window_start"])
         else:
             OtpRateLimit.objects.create(
                 user=user,
@@ -118,9 +116,7 @@ def generate_and_send(user) -> OtpCode:
     _check_and_record_rate_limit(user)  # pode levantar RateLimited (429)
 
     code = _generate_code()
-    otp = OtpCode.objects.create(
-        user=user, code_hash=_hash_code(code), status=STATUS_GENERATED
-    )
+    otp = OtpCode.objects.create(user=user, code_hash=_hash_code(code), status=STATUS_GENERATED)
     logger.info("otp.generated", id=otp.id, user=user.id)
 
     # destinatário (phone) vem do Profile — import tardio evita ciclo de import.
@@ -181,9 +177,7 @@ def verify(user, code: str) -> bool:
             otp.status = STATUS_FAILED
             otp.failure_reason = "invalid_code"
             otp.error_detail = f"Esgotadas {settings.OTP_MAX_ATTEMPTS} tentativas"
-            otp.save(
-                update_fields=["attempts", "status", "failure_reason", "error_detail"]
-            )
+            otp.save(update_fields=["attempts", "status", "failure_reason", "error_detail"])
             logger.info("otp.verify.max_attempts", id=otp.id, attempts=otp.attempts)
         else:
             otp.save(update_fields=["attempts"])

@@ -24,9 +24,7 @@ def build_checkout(checkout_pk: int, attempt: int = 1) -> str:
     from users.roles.lead import service
     from users.roles.lead.models import Checkout
 
-    checkout = (
-        Checkout.objects.select_related("lead__user").filter(pk=checkout_pk).first()
-    )
+    checkout = Checkout.objects.select_related("lead__user").filter(pk=checkout_pk).first()
     if checkout is None:
         return "gone"
     if checkout.checkout_url:

@@ -36,9 +36,7 @@ class GeminiClient:
 
     async def _generate(self, model: str, body: dict) -> dict:
         url = f"{self._base_url}/models/{model}:generateContent?key={self._api_key}"
-        async with httpx.AsyncClient(
-            timeout=httpx.Timeout(self._timeout, connect=10.0)
-        ) as c:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(self._timeout, connect=10.0)) as c:
             resp = await c.post(url, json=body)
         if resp.status_code >= 400:
             raise GeminiError(f"Gemini HTTP {resp.status_code}: {resp.text[:300]}")
@@ -53,8 +51,7 @@ class GeminiClient:
     ) -> str:
         """Descreve/analisa uma imagem (visão). Devolve o texto. Usado p/ validar selfie/documento/recibo."""
         instruction = (
-            prompt
-            or "Descreva esta imagem em portugues brasileiro de forma clara e objetiva."
+            prompt or "Descreva esta imagem em portugues brasileiro de forma clara e objetiva."
         )
         body = {
             "contents": [

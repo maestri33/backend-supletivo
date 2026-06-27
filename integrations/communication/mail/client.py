@@ -75,9 +75,7 @@ class MailClient:
         msg.attach(MIMEText(html_body, "html", "utf-8"))
 
         refused = await asyncio.to_thread(self._send_sync, msg, to_email)
-        logger.info(
-            "mail.sent", to=to_email, subject=subject[:80], refused=bool(refused)
-        )
+        logger.info("mail.sent", to=to_email, subject=subject[:80], refused=bool(refused))
         return {
             "to": to_email,
             "subject": subject,
@@ -100,9 +98,7 @@ class MailClient:
         except smtplib.SMTPException as exc:
             raise MailError(f"SMTP falhou: {type(exc).__name__}: {exc}") from exc
         except OSError as exc:  # conexão/timeout/DNS
-            raise MailError(
-                f"conexão SMTP falhou: {type(exc).__name__}: {exc}"
-            ) from exc
+            raise MailError(f"conexão SMTP falhou: {type(exc).__name__}: {exc}") from exc
         return {}
 
     async def verify_login(self) -> None:
@@ -122,9 +118,7 @@ class MailClient:
         except smtplib.SMTPException as exc:
             raise MailError(f"login SMTP falhou: {type(exc).__name__}: {exc}") from exc
         except OSError as exc:
-            raise MailError(
-                f"conexão SMTP falhou: {type(exc).__name__}: {exc}"
-            ) from exc
+            raise MailError(f"conexão SMTP falhou: {type(exc).__name__}: {exc}") from exc
 
 
 def get_client(*, timeout: float | None = None) -> MailClient:

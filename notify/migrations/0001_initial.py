@@ -28,9 +28,7 @@ class Migration(migrations.Migration):
                 ),
                 (
                     "idempotency_key",
-                    models.CharField(
-                        blank=True, max_length=255, null=True, unique=True
-                    ),
+                    models.CharField(blank=True, max_length=255, null=True, unique=True),
                 ),
                 ("caller", models.CharField(max_length=100)),
                 (

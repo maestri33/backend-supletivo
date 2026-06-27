@@ -11,10 +11,11 @@ from unittest.mock import patch, MagicMock
 
 import pytest
 
-from tests.conftest import auth_headers, _make_user, _jwt_for
+from tests.conftest import auth_headers
 
 
 # ── gates de role ─────────────────────────────────────────────────────────────
+
 
 @pytest.mark.django_db
 def test_candidate_me_sem_token_retorna_401(client):
@@ -47,6 +48,7 @@ def test_training_materials_sem_role_promoter_retorna_403(client, candidate_user
 
 # ── candidate/me ──────────────────────────────────────────────────────────────
 
+
 @pytest.mark.django_db
 def test_candidate_me_retorna_dados_do_candidato(client, candidate_user, candidate_token):
     """GET /candidate/me retorna o me_dict do candidato."""
@@ -64,8 +66,10 @@ def test_candidate_me_retorna_dados_do_candidato(client, candidate_user, candida
         "selfie": None,
     }
 
-    with patch("users.roles.candidate.interface.get_for_user_external_id") as mock_get, \
-         patch("users.roles.candidate.interface.me_dict") as mock_dict:
+    with (
+        patch("users.roles.candidate.interface.get_for_user_external_id") as mock_get,
+        patch("users.roles.candidate.interface.me_dict") as mock_dict,
+    ):
         mock_get.return_value = mock_cand
         mock_dict.return_value = mock_me
 
@@ -95,6 +99,7 @@ def test_candidate_me_sem_candidato_retorna_404(client, candidate_user, candidat
 
 # ── promoter/me ───────────────────────────────────────────────────────────────
 
+
 @pytest.mark.django_db
 def test_promoter_me_retorna_dados_do_promotor(client, promoter_user, promoter_token):
     """GET /promoter/me retorna o painel do promotor."""
@@ -108,8 +113,10 @@ def test_promoter_me_retorna_dados_do_promotor(client, promoter_user, promoter_t
         "pending_materials": [],
     }
 
-    with patch("users.roles.promoter.interface.get_by_user_external_id") as mock_get, \
-         patch("users.roles.promoter.interface.to_dict") as mock_dict:
+    with (
+        patch("users.roles.promoter.interface.get_by_user_external_id") as mock_get,
+        patch("users.roles.promoter.interface.to_dict") as mock_dict,
+    ):
         mock_get.return_value = mock_promoter
         mock_dict.return_value = mock_promoter_dict
 
@@ -139,6 +146,7 @@ def test_promoter_me_sem_promotor_retorna_404(client, promoter_user, promoter_to
 
 # ── register candidato ────────────────────────────────────────────────────────
 
+
 @pytest.mark.django_db
 def test_register_candidato_phone_duplicado_retorna_409(client):
     """POST /collaborators/auth/register com phone já existente → 409 PHONE_EXISTS."""
@@ -148,11 +156,13 @@ def test_register_candidato_phone_duplicado_retorna_409(client):
         mock_create.side_effect = Conflict("Telefone já cadastrado.", code="PHONE_EXISTS")
         resp = client.post(
             "/api/v1/collaborators/auth/register",
-            data=json.dumps({
-                "cpf": "11111111111",
-                "phone": "11999990000",
-                "email": "novo@example.com",
-            }),
+            data=json.dumps(
+                {
+                    "cpf": "11111111111",
+                    "phone": "11999990000",
+                    "email": "novo@example.com",
+                }
+            ),
             content_type="application/json",
         )
     assert resp.status_code == 409
@@ -160,6 +170,7 @@ def test_register_candidato_phone_duplicado_retorna_409(client):
 
 
 # ── training/submit ───────────────────────────────────────────────────────────
+
 
 @pytest.mark.django_db
 def test_training_submit_ja_em_correcao_retorna_409(client, promoter_user, promoter_token):
@@ -172,10 +183,12 @@ def test_training_submit_ja_em_correcao_retorna_409(client, promoter_user, promo
         )
         resp = client.post(
             "/api/v1/collaborators/training/submissions",
-            data=json.dumps({
-                "material_external_id": str(uuid.uuid4()),
-                "answer": "minha resposta",
-            }),
+            data=json.dumps(
+                {
+                    "material_external_id": str(uuid.uuid4()),
+                    "answer": "minha resposta",
+                }
+            ),
             content_type="application/json",
             **auth_headers(promoter_token),
         )

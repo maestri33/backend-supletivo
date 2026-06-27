@@ -77,17 +77,13 @@ def create_payout(*, amount, pix_key, description=None, payment_id=None) -> Paym
     row.asaas_id = res.get("id")
     row.status = "SUBMITTED"
     row.save(update_fields=["asaas_id", "status", "updated_at"])
-    logger.info(
-        "payout_submitted", payment_id=pid, asaas_id=row.asaas_id, amount=str(amt)
-    )
+    logger.info("payout_submitted", payment_id=pid, asaas_id=row.asaas_id, amount=str(amt))
     return row
 
 
 def get_payout(payment_id: str) -> Payment:
     """Lê um payout pelo payment_id (só kind=pixkey)."""
-    row = Payment.objects.filter(
-        payment_id=payment_id, kind=Payment.Kind.PIXKEY
-    ).first()
+    row = Payment.objects.filter(payment_id=payment_id, kind=Payment.Kind.PIXKEY).first()
     if row is None:
         raise PayoutError("not_found")
     return row
@@ -115,9 +111,7 @@ def _parse_amount(amount) -> Decimal:
     return amt
 
 
-async def _send(
-    amount: Decimal, pix_key: str, payment_id: str, description: str
-) -> dict:
+async def _send(amount: Decimal, pix_key: str, payment_id: str, description: str) -> dict:
     async with get_client() as c:
         return await c.create_transfer(
             {

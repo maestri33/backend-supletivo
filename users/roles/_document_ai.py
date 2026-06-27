@@ -147,9 +147,7 @@ def check_photo(
         "ou REPROVADO, seguida de um motivo curto e claro."
     )
     try:
-        desc = ai.describe_image(
-            image_bytes, caller=caller, mime_type=mime_type, prompt=prompt
-        )
+        desc = ai.describe_image(image_bytes, caller=caller, mime_type=mime_type, prompt=prompt)
     except Exception as exc:  # noqa: BLE001 — IA fora do ar → review (coordenador resolve)
         logger.warning("document_ai.vision_failed", caller=caller, error=str(exc)[:200])
         return REVIEW, _AI_DOWN
@@ -161,9 +159,7 @@ def check_photo(
     return REVIEW, desc or "IA não foi conclusiva — enviado para revisão manual."
 
 
-def fix_orientation(
-    image_path: str, *, mime_type: str = "image/jpeg", caller: str
-) -> bool:
+def fix_orientation(image_path: str, *, mime_type: str = "image/jpeg", caller: str) -> bool:
     """Endireita a foto pela orientação EXIF do celular (decisão do Victor 2026-06-11: tratar a
     imagem antes de validar). REGRAVA reta no mesmo arquivo (formato preservado). Retorna se mudou.
 
@@ -185,14 +181,10 @@ def fix_orientation(
         fmt = "PNG" if Path(image_path).suffix.lower() == ".png" else "JPEG"
         save_kwargs = {"quality": 90} if fmt == "JPEG" else {}
         fixed.save(image_path, format=fmt, **save_kwargs)
-        logger.info(
-            "document_ai.orientation_fixed", caller=caller, exif_orientation=orientation
-        )
+        logger.info("document_ai.orientation_fixed", caller=caller, exif_orientation=orientation)
         return True
     except Exception as exc:  # noqa: BLE001 — endireitar é apoio; nunca quebra o pipeline
-        logger.warning(
-            "document_ai.fix_orientation_failed", caller=caller, error=str(exc)[:200]
-        )
+        logger.warning("document_ai.fix_orientation_failed", caller=caller, error=str(exc)[:200])
         return False
 
 
@@ -207,9 +199,7 @@ def ocr_images(images: list[bytes], *, caller: str) -> str:
 def extract_rg(ocr_text: str, *, holder_name: str | None, caller: str) -> dict:
     """Wrapper de retrocompatibilidade (plan/12) — delega pra `extract_document(..., doc_type="rg")`.
     Mantido pra não quebrar callers existentes; novos callers devem usar `extract_document`."""
-    return extract_document(
-        ocr_text, doc_type=DOC_RG, holder_name=holder_name, caller=caller
-    )
+    return extract_document(ocr_text, doc_type=DOC_RG, holder_name=holder_name, caller=caller)
 
 
 def extract_document(
@@ -265,9 +255,7 @@ def extract_document(
     return data
 
 
-def crop_face(
-    image_bytes: bytes, *, mime_type: str = "image/jpeg", caller: str
-) -> bytes | None:
+def crop_face(image_bytes: bytes, *, mime_type: str = "image/jpeg", caller: str) -> bytes | None:
     """Fallback do InsightFace (plan/13): a visão LOCALIZA a foto do rosto do titular no documento
     e o Pillow recorta (com folga de 10%). Devolve o recorte em JPEG, ou None (sem rosto na
     imagem / IA fora do ar) — best-effort, quem chama decide o que fazer."""
@@ -286,9 +274,7 @@ def crop_face(
         'Se não houver foto de rosto na imagem, responda {"left": null}.'
     )
     try:
-        desc = ai.describe_image(
-            image_bytes, caller=caller, mime_type=mime_type, prompt=prompt
-        )
+        desc = ai.describe_image(image_bytes, caller=caller, mime_type=mime_type, prompt=prompt)
         match = re.search(r"\{[^{}]*\}", desc or "")
         box = _json.loads(match.group(0)) if match else {}
         edges = (box.get("left"), box.get("top"), box.get("right"), box.get("bottom"))
@@ -309,7 +295,5 @@ def crop_face(
         logger.info("document_ai.face_cropped", caller=caller, box=(x0, y0, x1, y1))
         return out.getvalue()
     except Exception as exc:  # noqa: BLE001 — recorte é apoio; nunca quebra o pipeline
-        logger.warning(
-            "document_ai.face_crop_failed", caller=caller, error=str(exc)[:200]
-        )
+        logger.warning("document_ai.face_crop_failed", caller=caller, error=str(exc)[:200])
         return None

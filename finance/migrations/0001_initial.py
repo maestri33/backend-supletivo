@@ -148,9 +148,7 @@ class Migration(migrations.Migration):
                 ),
                 (
                     "external_reference",
-                    models.CharField(
-                        blank=True, db_index=True, max_length=128, null=True
-                    ),
+                    models.CharField(blank=True, db_index=True, max_length=128, null=True),
                 ),
                 ("created_at", models.DateTimeField(auto_now_add=True)),
                 ("updated_at", models.DateTimeField(auto_now=True)),

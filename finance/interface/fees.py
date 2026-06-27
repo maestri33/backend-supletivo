@@ -109,14 +109,9 @@ def retry_fee_payment(
     if latest is None:
         raise ValueError(f"fee inexistente: {reference_prefix}")
     if latest.status != PaymentRequest.Status.FAILED:
-        raise ValueError(
-            f"fee não está em falha (status={latest.status}) — nada a re-tentar"
-        )
+        raise ValueError(f"fee não está em falha (status={latest.status}) — nada a re-tentar")
     attempt = (
-        PaymentRequest.objects.filter(
-            external_reference__startswith=reference_prefix
-        ).count()
-        + 1
+        PaymentRequest.objects.filter(external_reference__startswith=reference_prefix).count() + 1
     )
     return request_fee_payment(
         amount=amount,
@@ -167,16 +162,12 @@ def plan_qr_payment(*, qr_payload, amount=None) -> dict:
         raise ValueError(f"QR não pode ser pago: {reason}")
     value = amount if amount is not None else info.get("value")
     if value is None:
-        raise ValueError(
-            "sem valor: o caller não informou e o QR decodificado não traz `value`."
-        )
+        raise ValueError("sem valor: o caller não informou e o QR decodificado não traz `value`.")
     due = info.get("dueDate")
     scheduled_for = None
     if due:
         scheduled_for = _due_to_scheduled(str(due))
-        if (
-            scheduled_for <= timezone.now()
-        ):  # vencida → imediato (não agenda no passado)
+        if scheduled_for <= timezone.now():  # vencida → imediato (não agenda no passado)
             scheduled_for = None
     return {"amount": value, "scheduled_for": scheduled_for, "due_date": due}
 

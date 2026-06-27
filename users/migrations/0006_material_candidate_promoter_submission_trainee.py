@@ -218,9 +218,7 @@ class Migration(migrations.Migration):
                 ("answer", models.TextField()),
                 (
                     "grade",
-                    models.DecimalField(
-                        blank=True, decimal_places=1, max_digits=4, null=True
-                    ),
+                    models.DecimalField(blank=True, decimal_places=1, max_digits=4, null=True),
                 ),
                 ("justification", models.TextField(blank=True, null=True)),
                 (

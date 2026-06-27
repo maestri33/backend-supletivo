@@ -115,9 +115,7 @@ def run_setup(name: str) -> dict | None:
         from integrations.bank.asaas import onboarding
 
         return onboarding.setup()
-    return {
-        "detail": f"'{name}' não tem ação de setup (config via .env; use /test pra checar)."
-    }
+    return {"detail": f"'{name}' não tem ação de setup (config via .env; use /test pra checar)."}
 
 
 def run_test(name: str) -> dict | None:

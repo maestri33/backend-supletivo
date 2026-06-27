@@ -44,9 +44,7 @@ class PixKey(ExternalIdModel):
 
     key = models.CharField(max_length=255, unique=True)
     key_type = models.CharField(max_length=10)  # CPF | CNPJ | EMAIL | PHONE | EVP
-    holder_document = models.CharField(
-        max_length=14, db_index=True
-    )  # CPF(11) ou CNPJ(14)
+    holder_document = models.CharField(max_length=14, db_index=True)  # CPF(11) ou CNPJ(14)
     holder_name = models.CharField(max_length=255)
     bank_name = models.CharField(max_length=255)
     validated_at = models.DateTimeField(auto_now_add=True)
@@ -73,9 +71,7 @@ class Payment(models.Model):
     # outbound: SCHEDULED|QUEUED|SUBMITTING|SUBMITTED|AWAITING_BALANCE|PAID|FAILED|CANCELLED|
     #           NEEDS_RECONCILE
     # charge:   PENDING|PAID|EXPIRED|CANCELLED|REFUNDED
-    payment_id = models.CharField(
-        max_length=255, unique=True
-    )  # ref pública (user-provided/uuid)
+    payment_id = models.CharField(max_length=255, unique=True)  # ref pública (user-provided/uuid)
     kind = models.CharField(max_length=10, choices=Kind.choices, db_index=True)
 
     # kind=pixkey -> FK real pra PixKey (CONVENTION §4: referência interna é FK, não string-cola)
@@ -96,15 +92,11 @@ class Payment(models.Model):
         on_delete=models.PROTECT,
         related_name="payments",
     )
-    pix_qr_image = models.TextField(
-        null=True, blank=True
-    )  # PNG base64 do QR (kind=charge)
+    pix_qr_image = models.TextField(null=True, blank=True)  # PNG base64 do QR (kind=charge)
     due_date = models.DateField(null=True, blank=True)  # vencimento da cobrança
     amount = models.DecimalField(max_digits=12, decimal_places=2)
     description = models.TextField(null=True, blank=True)
-    scheduled_for = models.DateTimeField(
-        null=True, blank=True
-    )  # NULL = imediato (outbound)
+    scheduled_for = models.DateTimeField(null=True, blank=True)  # NULL = imediato (outbound)
     status = models.CharField(max_length=20, db_index=True)
     asaas_id = models.CharField(max_length=255, null=True, blank=True, db_index=True)
     last_error = models.TextField(null=True, blank=True)

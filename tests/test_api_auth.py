@@ -8,14 +8,15 @@ from __future__ import annotations
 
 import json
 import uuid
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
 import pytest
 
-from tests.conftest import auth_headers, _make_user, _jwt_for
+from tests.conftest import auth_headers, _make_user
 
 
 # ── /auth/check ─────────────────────────────────────────────────────────────
+
 
 @pytest.mark.django_db
 def test_check_usuario_inexistente_retorna_not_found(client):
@@ -72,14 +73,10 @@ def test_login_otp_invalido_retorna_erro_dominio(client):
     user = _make_user(roles=["lead"])
 
     with patch("users.auth.interface.login") as mock_login:
-        mock_login.side_effect = DomainValidationError(
-            "OTP inválido.", code="OTP_INVALID"
-        )
+        mock_login.side_effect = DomainValidationError("OTP inválido.", code="OTP_INVALID")
         resp = client.post(
             "/api/v1/clients/auth/login",
-            data=json.dumps(
-                {"external_id": str(user.external_id), "otp": "000000"}
-            ),
+            data=json.dumps({"external_id": str(user.external_id), "otp": "000000"}),
             content_type="application/json",
         )
     assert resp.status_code == 422
@@ -104,6 +101,7 @@ def test_login_usuario_nao_no_funil_retorna_403(client):
 
 
 # ── /whoami ──────────────────────────────────────────────────────────────────
+
 
 @pytest.mark.django_db
 def test_whoami_retorna_principal_correto(client, lead_user, lead_token):
@@ -130,6 +128,7 @@ def test_whoami_token_expirado_retorna_401(client):
 
 
 # ── /auth/refresh ────────────────────────────────────────────────────────────
+
 
 @pytest.mark.django_db
 def test_refresh_token_invalido_retorna_401(client):

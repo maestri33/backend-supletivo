@@ -54,9 +54,7 @@ class Migration(migrations.Migration):
                 ("cache_miss_tokens", models.IntegerField(default=0)),
                 (
                     "cost",
-                    models.DecimalField(
-                        blank=True, decimal_places=6, max_digits=12, null=True
-                    ),
+                    models.DecimalField(blank=True, decimal_places=6, max_digits=12, null=True),
                 ),
                 ("latency_ms", models.IntegerField()),
                 (
@@ -68,9 +66,7 @@ class Migration(migrations.Migration):
             ],
             options={
                 "indexes": [
-                    models.Index(
-                        fields=["created_at"], name="ai_aicall_created_c0cafa_idx"
-                    )
+                    models.Index(fields=["created_at"], name="ai_aicall_created_c0cafa_idx")
                 ],
             },
         ),

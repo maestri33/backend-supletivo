@@ -7,15 +7,14 @@ são mockadas por patch — os testes validam a CAMADA DA API, não os serviços
 
 from __future__ import annotations
 
-import json
 import uuid
-from unittest.mock import MagicMock, patch
 
 import pytest
 from django.test import Client
 
 
 # ── helpers de autenticação ─────────────────────────────────────────────────
+
 
 def _make_user(*, is_superuser=False, roles: list[str] | None = None):
     """Cria um User + Profile mínimo pro banco de teste."""

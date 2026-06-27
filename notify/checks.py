@@ -14,9 +14,7 @@ from django.core.checks import Warning as DjangoWarning
 
 def check_notify_env(app_configs, **kwargs):
     warnings = []
-    if not (
-        getattr(settings, "MEDIA_LAN_BASE", "") or getattr(settings, "EXTERNAL_URL", "")
-    ):
+    if not (getattr(settings, "MEDIA_LAN_BASE", "") or getattr(settings, "EXTERNAL_URL", "")):
         warnings.append(
             DjangoWarning(
                 "MEDIA_LAN_BASE/EXTERNAL_URL ausentes — o WhatsApp do notify não monta a URL "

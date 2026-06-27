@@ -12,10 +12,11 @@ from unittest.mock import patch, MagicMock
 
 import pytest
 
-from tests.conftest import auth_headers, _make_user, _jwt_for
+from tests.conftest import auth_headers
 
 
 # ── pricing público ───────────────────────────────────────────────────────────
+
 
 @pytest.mark.django_db
 def test_pricing_publico_sem_auth(client):
@@ -33,6 +34,7 @@ def test_pricing_publico_sem_auth(client):
 
 
 # ── gate de role ──────────────────────────────────────────────────────────────
+
 
 @pytest.mark.django_db
 def test_enrollment_me_sem_token_retorna_401(client):
@@ -66,6 +68,7 @@ def test_student_me_sem_role_student_retorna_403(client, lead_user, lead_token):
 
 # ── lead/me ───────────────────────────────────────────────────────────────────
 
+
 @pytest.mark.django_db
 def test_lead_me_retorna_lead_do_usuario(client, lead_user, lead_token):
     """GET /lead/me retorna os dados do lead do usuário logado."""
@@ -75,13 +78,20 @@ def test_lead_me_retorna_lead_do_usuario(client, lead_user, lead_token):
         "status": "pending",
         "failed_reason": None,
         "created_at": "2026-01-01T00:00:00",
-        "customer": {"name": "Teste", "phone": "11999990000", "email": "t@e.com", "cpf": "00000000000"},
+        "customer": {
+            "name": "Teste",
+            "phone": "11999990000",
+            "email": "t@e.com",
+            "cpf": "00000000000",
+        },
         "promoter": {"external_id": str(uuid.uuid4()), "name": "Promotor"},
         "checkout": None,
     }
 
-    with patch("users.roles.lead.interface.get_for_user_external_id") as mock_get, \
-         patch("users.roles.lead.interface.lead_self_dict") as mock_dict:
+    with (
+        patch("users.roles.lead.interface.get_for_user_external_id") as mock_get,
+        patch("users.roles.lead.interface.lead_self_dict") as mock_dict,
+    ):
         mock_get.return_value = mock_lead
         mock_dict.return_value = mock_lead_dict
 
@@ -111,6 +121,7 @@ def test_lead_me_sem_lead_retorna_404(client, lead_user, lead_token):
 
 # ── register ──────────────────────────────────────────────────────────────────
 
+
 @pytest.mark.django_db
 def test_register_cpf_duplicado_retorna_409(client):
     """POST /auth/register com CPF já existente → 409 CPF_EXISTS."""
@@ -120,11 +131,13 @@ def test_register_cpf_duplicado_retorna_409(client):
         mock_create.side_effect = Conflict("CPF já cadastrado.", code="CPF_EXISTS")
         resp = client.post(
             "/api/v1/clients/auth/register",
-            data=json.dumps({
-                "cpf": "00000000000",
-                "phone": "11999990000",
-                "email": "novo@example.com",
-            }),
+            data=json.dumps(
+                {
+                    "cpf": "00000000000",
+                    "phone": "11999990000",
+                    "email": "novo@example.com",
+                }
+            ),
             content_type="application/json",
         )
     assert resp.status_code == 409

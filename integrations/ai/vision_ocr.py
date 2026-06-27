@@ -27,9 +27,7 @@ class VisionOCRClient:
         base_url: str | None = None,
         timeout: float = 60.0,
     ):
-        self._api_key = (
-            api_key if api_key is not None else settings.GOOGLE_VISION_API_KEY
-        )
+        self._api_key = api_key if api_key is not None else settings.GOOGLE_VISION_API_KEY
         self._base_url = (base_url or settings.GOOGLE_VISION_BASE_URL).rstrip("/")
         self._timeout = timeout
 
@@ -45,9 +43,7 @@ class VisionOCRClient:
                 }
             ]
         }
-        async with httpx.AsyncClient(
-            timeout=httpx.Timeout(self._timeout, connect=10.0)
-        ) as c:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(self._timeout, connect=10.0)) as c:
             resp = await c.post(url, json=body)
         if resp.status_code >= 400:
             raise VisionOCRError(f"Vision HTTP {resp.status_code}: {resp.text[:300]}")
@@ -58,7 +54,5 @@ class VisionOCRClient:
         if not text:
             anns = result.get("textAnnotations") or []
             text = anns[0].get("description", "") if anns else ""
-        logger.info(
-            "vision.ocr_done", feature=feature, bytes=len(image_bytes), chars=len(text)
-        )
+        logger.info("vision.ocr_done", feature=feature, bytes=len(image_bytes), chars=len(text))
         return text.strip()

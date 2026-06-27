@@ -94,9 +94,7 @@ class WhatsAppClient:
         """POST /chat/<endpoint>/<instance>"""
         return f"/chat/{endpoint}/{self._instance}"
 
-    async def _post(
-        self, path: str, json: dict[str, Any], *, timeout: float | None = None
-    ) -> Any:
+    async def _post(self, path: str, json: dict[str, Any], *, timeout: float | None = None) -> Any:
         kwargs: dict[str, Any] = {}
         if timeout is not None:
             kwargs["timeout"] = httpx.Timeout(timeout, connect=5.0)
@@ -134,9 +132,7 @@ class WhatsAppClient:
         numbers: formato DDI+DDD+número (ex.: "5543996648750"). Resposta: lista de
         {jid, exists, number, name}.
         """
-        result = await self._post(
-            self._chat_path("whatsappNumbers"), {"numbers": numbers}
-        )
+        result = await self._post(self._chat_path("whatsappNumbers"), {"numbers": numbers})
         logger.info("whatsapp.check", count=len(numbers))
         return result
 
@@ -187,9 +183,7 @@ class WhatsAppClient:
         _br_jid_cache[phone] = (chosen, time.monotonic())
 
         if chosen is None:
-            logger.warning(
-                "whatsapp.resolve_br.none_exists", phone=phone, tried=variants
-            )
+            logger.warning("whatsapp.resolve_br.none_exists", phone=phone, tried=variants)
             return phone  # fallback
         if chosen != phone:
             logger.info(
@@ -211,9 +205,7 @@ class WhatsAppClient:
 
     async def fetch_business_profile(self, number: str) -> dict[str, Any]:
         """Perfil comercial (WhatsApp Business). POST /chat/fetchBusinessProfile/{instance}."""
-        result = await self._post(
-            self._chat_path("fetchBusinessProfile"), {"number": number}
-        )
+        result = await self._post(self._chat_path("fetchBusinessProfile"), {"number": number})
         logger.info(
             "whatsapp.business_profile_fetched",
             number=number,
@@ -320,9 +312,7 @@ class WhatsAppClient:
             payload["formatJid"] = format_jid
 
         result = await self._post(self._msg_path("sendMedia"), payload)
-        logger.info(
-            "whatsapp.media_sent", number=number, type=media_type, url=media_url[:80]
-        )
+        logger.info("whatsapp.media_sent", number=number, type=media_type, url=media_url[:80])
         return result
 
     # ---------- send whatsapp audio (nota de voz nativa / PTT) ----------
@@ -346,9 +336,7 @@ class WhatsAppClient:
         if quoted := self._build_quoted(quoted_msg_id, quoted_participant):
             payload["quoted"] = quoted
 
-        result = await self._post(
-            self._msg_path("sendWhatsAppAudio"), payload, timeout=60.0
-        )
+        result = await self._post(self._msg_path("sendWhatsAppAudio"), payload, timeout=60.0)
         logger.info("whatsapp.audio_sent", number=number, url=audio_url[:80])
         return result
 
@@ -402,9 +390,7 @@ class WhatsAppClient:
             payload["quoted"] = quoted
 
         result = await self._post(self._msg_path("sendLocation"), payload)
-        logger.info(
-            "whatsapp.location_sent", number=number, lat=latitude, lon=longitude
-        )
+        logger.info("whatsapp.location_sent", number=number, lat=latitude, lon=longitude)
         return result
 
     # ---------- send contact (vCard) ----------

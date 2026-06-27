@@ -133,9 +133,7 @@ def set_platform_credentials(
             "updated_at",
         ]
     )
-    logger.info(
-        "student.platform_credentials_updated", external_id=str(student.external_id)
-    )
+    logger.info("student.platform_credentials_updated", external_id=str(student.external_id))
     return student
 
 
@@ -182,9 +180,7 @@ def _set_status(student: Student, to_status: str) -> None:
 
 def get_for_user_external_id(external_id: str) -> Student | None:
     return (
-        Student.objects.filter(user__external_id=external_id)
-        .select_related("hub", "user")
-        .first()
+        Student.objects.filter(user__external_id=external_id).select_related("hub", "user").first()
     )
 
 
@@ -223,9 +219,7 @@ def to_dict(student: Student) -> dict:
             for p in student.pendencies.all()
         ],
         "diploma": {
-            "issued_at": diploma.issued_at.isoformat()
-            if diploma and diploma.issued_at
-            else None,
+            "issued_at": diploma.issued_at.isoformat() if diploma and diploma.issued_at else None,
             "picked_up": bool(diploma and diploma.picked_up_at),
         }
         if diploma
@@ -253,11 +247,7 @@ def _document_expires_at(doc: StudentDocument) -> str | None:
     if not started_raw:
         return None
     if isinstance(started_raw, datetime):
-        started = (
-            started_raw
-            if started_raw.tzinfo
-            else started_raw.replace(tzinfo=timezone.utc)
-        )
+        started = started_raw if started_raw.tzinfo else started_raw.replace(tzinfo=timezone.utc)
     else:
         try:
             started = datetime.fromisoformat(started_raw)
@@ -293,9 +283,7 @@ def set_blood_type(*, user_external_id: str, blood_type: str) -> Student:
     return student
 
 
-def _save_photo(
-    student: Student, doc_type: str, image_bytes: bytes, content_type: str
-) -> str:
+def _save_photo(student: Student, doc_type: str, image_bytes: bytes, content_type: str) -> str:
     from core.media import save_media
 
     ext = _EXT.get(content_type, "jpg")
@@ -327,13 +315,9 @@ def upload_document(
         )
     # não deixa um re-post derrubar um doc JÁ APROVADO de volta pra PENDING (reentrância: o aluno
     # clica 2× / retry de rede). Re-upload só é aceito enquanto PENDING (em análise) ou REJECTED.
-    existing = StudentDocument.objects.filter(
-        student=student, doc_type=doc_type
-    ).first()
+    existing = StudentDocument.objects.filter(student=student, doc_type=doc_type).first()
     if existing and existing.validation_status == StudentDocument.Validation.APPROVED:
-        raise StudentError(
-            "Documento já aprovado — não precisa reenviar.", code="ALREADY_APPROVED"
-        )
+        raise StudentError("Documento já aprovado — não precisa reenviar.", code="ALREADY_APPROVED")
 
     rel = _save_photo(student, doc_type, image_bytes, content_type)
     started_at = timezone.now()
@@ -449,27 +433,19 @@ def _ai_validate(
         return StudentDocument.Validation.REJECTED, result
 
     if match not in ("sim", "yes"):
-        result["reason"] = (
-            f"Não deu pra confirmar o nome do titular. {name_reason}".strip()
-        )
+        result["reason"] = f"Não deu pra confirmar o nome do titular. {name_reason}".strip()
         return StudentDocument.Validation.REVIEW, result
 
     result["reason"] = name_reason or "Documento validado."
     return StudentDocument.Validation.APPROVED, result
 
 
-def apply_validation(
-    student_document_id: int, *, status: str, payload: dict | None
-) -> None:
+def apply_validation(student_document_id: int, *, status: str, payload: dict | None) -> None:
     """Grava o veredito da IA no documento (chamado pela task). Idempotente (só age em PENDING).
 
     `payload` contém `vision`, `ocr`, `extracted` e `reason` (motivo final). Mantém compat
     com o formato legado em que a chave `raw` pode vir do `validation_result` legado."""
-    doc = (
-        StudentDocument.objects.select_related("student")
-        .filter(id=student_document_id)
-        .first()
-    )
+    doc = StudentDocument.objects.select_related("student").filter(id=student_document_id).first()
     if doc is None or doc.validation_status != StudentDocument.Validation.PENDING:
         return
     if status == StudentDocument.Validation.PENDING:
@@ -559,9 +535,7 @@ def decide_document(
     aprova → APPROVED (+ pode liberar a prova); reprova → REJECTED (+ avisa o aluno pra refazer). Só age
     em documento `review` (a decisão da IA aprovado/reprovado é final; o coordenador resolve a dúvida)."""
     student = _coordinated(student_external_id, coordinator)
-    doc = StudentDocument.objects.filter(
-        student=student, external_id=document_external_id
-    ).first()
+    doc = StudentDocument.objects.filter(student=student, external_id=document_external_id).first()
     if doc is None:
         raise StudentError("Documento não encontrado.", code="DOCUMENT_NOT_FOUND")
     if doc.validation_status != StudentDocument.Validation.REVIEW:
@@ -574,9 +548,7 @@ def decide_document(
         "aprovado pelo coordenador" if approve else "reprovado pelo coordenador"
     )
     doc.validation_status = (
-        StudentDocument.Validation.APPROVED
-        if approve
-        else StudentDocument.Validation.REJECTED
+        StudentDocument.Validation.APPROVED if approve else StudentDocument.Validation.REJECTED
     )
     # preserva a justificativa da IA e soma a decisão humana (auditoria).
     doc.validation_result = {
@@ -614,9 +586,7 @@ def decide_document(
 
 
 def schedule_exam(*, user_external_id: str, subject: str, scheduled_at) -> StudentExam:
-    student = _require(
-        user_external_id, Student.Status.EXAM_RELEASED, Student.Status.EXAM_FAILED
-    )
+    student = _require(user_external_id, Student.Status.EXAM_RELEASED, Student.Status.EXAM_FAILED)
     if not (subject or "").strip():
         raise StudentError("Informe a matéria da prova.", code="SUBJECT_REQUIRED")
     if isinstance(scheduled_at, str):
@@ -624,9 +594,7 @@ def schedule_exam(*, user_external_id: str, subject: str, scheduled_at) -> Stude
 
         parsed = parse_datetime(scheduled_at)
         if parsed is None:
-            raise StudentError(
-                "Data/hora da prova inválida.", code="INVALID_SCHEDULED_AT"
-            )
+            raise StudentError("Data/hora da prova inválida.", code="INVALID_SCHEDULED_AT")
         if timezone.is_naive(parsed):
             parsed = timezone.make_aware(parsed)
         scheduled_at = parsed
@@ -644,9 +612,7 @@ def schedule_exam(*, user_external_id: str, subject: str, scheduled_at) -> Stude
         event="student.exam_scheduled",
         key=f"student_exam_scheduled_{exam.external_id}",
     )
-    logger.info(
-        "student.exam_scheduled", external_id=str(exam.external_id), attempt=attempt
-    )
+    logger.info("student.exam_scheduled", external_id=str(exam.external_id), attempt=attempt)
     return exam
 
 
@@ -668,9 +634,7 @@ def grade_exam(
     exam.corrected_by = coordinator
     exam.corrected_at = timezone.now()
     exam.notes = (notes or "")[:500] or None
-    exam.save(
-        update_fields=["result", "corrected_by", "corrected_at", "notes", "updated_at"]
-    )
+    exam.save(update_fields=["result", "corrected_by", "corrected_at", "notes", "updated_at"])
     if passed:
         _set_status(student, Student.Status.AWAITING_DOCUMENTATION_DISPATCH)
         _notify(
@@ -715,9 +679,7 @@ def open_pendency(
     if kind not in valid_kinds:
         raise StudentError("Tipo de pendência inválido.", code="INVALID_KIND")
     if not (description or "").strip():
-        raise StudentError(
-            "Informe a descrição da pendência.", code="DESCRIPTION_REQUIRED"
-        )
+        raise StudentError("Informe a descrição da pendência.", code="DESCRIPTION_REQUIRED")
     pend = StudentPendency.objects.create(
         student=student,
         kind=kind,
@@ -747,9 +709,7 @@ def resolve_pendency(*, pendency_external_id: str, coordinator) -> StudentPenden
     if pend is None:
         raise StudentError("Pendência não encontrada.", code="PENDENCY_NOT_FOUND")
     if pend.student.hub.coordinator_id != coordinator.id:
-        raise StudentError(
-            "Você não coordena o polo deste aluno.", code="NOT_HUB_COORDINATOR"
-        )
+        raise StudentError("Você não coordena o polo deste aluno.", code="NOT_HUB_COORDINATOR")
     # lock no aluno: a checagem "sem pendência aberta → avança" não pode correr com um open_pendency
     # concorrente (senão o aluno avançaria com pendência aberta). select_for_update trava no Postgres.
     with transaction.atomic():
@@ -764,9 +724,7 @@ def resolve_pendency(*, pendency_external_id: str, coordinator) -> StudentPenden
     return pend
 
 
-def list_pendencies(
-    user_external_id: str, *, open_only: bool = False
-) -> list[StudentPendency]:
+def list_pendencies(user_external_id: str, *, open_only: bool = False) -> list[StudentPendency]:
     student = _by_user(user_external_id)
     qs = student.pendencies.all()
     if open_only:
@@ -824,9 +782,7 @@ def issue_diploma(*, student_external_id: str, coordinator) -> StudentDiploma:
     return diploma
 
 
-def register_pickup(
-    *, user_external_id: str, image_bytes: bytes, content_type: str
-) -> Student:
+def register_pickup(*, user_external_id: str, image_bytes: bytes, content_type: str) -> Student:
     """Aluno posta a FOTO tirando o diploma → vira VETERAN + comissão do coordenador do polo.
 
     TUDO (retirada + role + status + comissão) numa ÚNICA transação: se a comissão não puder ser
@@ -837,9 +793,7 @@ def register_pickup(
     student = _require(user_external_id, Student.Status.AWAITING_PICKUP)
     diploma = getattr(student, "diploma", None)
     if diploma is None:
-        raise StudentError(
-            "O diploma ainda não foi emitido.", code="DIPLOMA_NOT_ISSUED"
-        )
+        raise StudentError("O diploma ainda não foi emitido.", code="DIPLOMA_NOT_ISSUED")
     rel = _save_photo(student, "diploma_pickup", image_bytes, content_type)
     with transaction.atomic():
         diploma.pickup_photo = rel
@@ -903,9 +857,7 @@ def _credit_coordinator(student: Student, diploma: StudentDiploma) -> None:
             source_type=Commission.Source.VETERAN,
             source_external_id=student.external_id,
         )
-    except (
-        ValueError
-    ) as exc:  # payee None/inválido (defensivo; coordinator já checado acima)
+    except ValueError as exc:  # payee None/inválido (defensivo; coordinator já checado acima)
         raise StudentError(
             "Beneficiário da comissão inválido.", code="COMMISSION_PAYEE_INVALID"
         ) from exc
@@ -920,9 +872,7 @@ def _coordinated(student_external_id: str, coordinator) -> Student:
     """Carrega o aluno e exige que `coordinator` seja o coordenador do hub dele."""
     student = _by_external_id(student_external_id)
     if student.hub.coordinator_id != coordinator.id:
-        raise StudentError(
-            "Você não coordena o polo deste aluno.", code="NOT_HUB_COORDINATOR"
-        )
+        raise StudentError("Você não coordena o polo deste aluno.", code="NOT_HUB_COORDINATOR")
     return student
 
 

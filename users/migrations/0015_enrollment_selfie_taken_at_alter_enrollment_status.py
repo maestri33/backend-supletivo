@@ -21,9 +21,7 @@ class Migration(migrations.Migration):
         migrations.AddField(
             model_name="enrollment",
             name="selfie_taken_at",
-            field=models.DateTimeField(
-                blank=True, null=True, verbose_name="selfie enviada em"
-            ),
+            field=models.DateTimeField(blank=True, null=True, verbose_name="selfie enviada em"),
         ),
         migrations.AlterField(
             model_name="enrollment",

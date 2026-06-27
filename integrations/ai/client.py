@@ -35,9 +35,7 @@ SYSTEM_PROMPT_PT = (
 class LLMError(Exception):
     """Erro ao falar com um provider de IA. `retryable` decide se o service tenta o próximo da cadeia."""
 
-    def __init__(
-        self, message: str, *, retryable: bool, status_code: int | None = None
-    ):
+    def __init__(self, message: str, *, retryable: bool, status_code: int | None = None):
         super().__init__(message)
         self.retryable = retryable
         self.status_code = status_code
@@ -100,9 +98,7 @@ class LLMClient:
         payload: dict = {
             "model": model,
             "messages": messages,
-            "temperature": (
-                temperature if temperature is not None else self._default_temperature
-            ),
+            "temperature": (temperature if temperature is not None else self._default_temperature),
         }
         resolved_max_tokens = max_tokens if max_tokens is not None else self._max_tokens
         if resolved_max_tokens:
@@ -162,9 +158,7 @@ class LLMClient:
         raise LLMError(f"{self.provider}: falha de rede: {last_exc}", retryable=True)
 
     async def _request(self, payload: dict) -> ChatResult:
-        async with httpx.AsyncClient(
-            timeout=httpx.Timeout(self._timeout, connect=10.0)
-        ) as client:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(self._timeout, connect=10.0)) as client:
             resp = await self._send_with_retry(client, payload)
         if resp.status_code >= 400:
             # 429/5xx = retryable (provider em apuros → fallback). Demais 4xx = bug do caller.
@@ -222,18 +216,14 @@ class LLMClient:
     ) -> ChatResult:
         """JSON estruturado (response_format=json_object). O conteúdo vem como string JSON."""
         schema_note = (
-            f"O JSON deve seguir este schema: {schema_description}"
-            if schema_description
-            else ""
+            f"O JSON deve seguir este schema: {schema_description}" if schema_description else ""
         )
         instruction_line = f"Instrucao: {instruction}" if instruction else ""
         payload = self._build_payload(
             [
                 {
                     "role": "system",
-                    "content": SYSTEM_PROMPT_PT
-                    + " Retorne APENAS um JSON valido. "
-                    + schema_note,
+                    "content": SYSTEM_PROMPT_PT + " Retorne APENAS um JSON valido. " + schema_note,
                 },
                 {"role": "user", "content": f"Prompt: {prompt}\n{instruction_line}"},
             ],
@@ -283,8 +273,7 @@ class LLMClient:
             [
                 {
                     "role": "system",
-                    "content": SYSTEM_PROMPT_PT
-                    + " Voce e um especialista em sumarizacao.",
+                    "content": SYSTEM_PROMPT_PT + " Voce e um especialista em sumarizacao.",
                 },
                 {"role": "user", "content": f"{instruction}\n\n{text}"},
             ],
@@ -329,9 +318,7 @@ class LLMClient:
     async def list_models(self) -> list[str]:
         """GET /models — lista os modelos reais do provider (valida a key de quebra). Usado no §8."""
         url = f"{self._base_url}/models"
-        async with httpx.AsyncClient(
-            timeout=httpx.Timeout(self._timeout, connect=10.0)
-        ) as client:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(self._timeout, connect=10.0)) as client:
             resp = await client.get(url, headers=self._headers())
         if resp.status_code >= 400:
             retryable = resp.status_code in RETRYABLE_STATUS

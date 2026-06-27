@@ -63,9 +63,7 @@ def create_checkout(
         raise CheckoutError("description_required")
     handle = settings.INFINITEPAY_HANDLE
     if not handle:
-        raise CheckoutError(
-            "handle_not_configured"
-        )  # o check infinitepay.E001 já avisa no boot
+        raise CheckoutError("handle_not_configured")  # o check infinitepay.E001 já avisa no boot
     if not settings.EXTERNAL_URL:
         raise CheckoutError("external_url_not_configured")
 
@@ -75,9 +73,7 @@ def create_checkout(
     )
     order_nsu = str(row.external_id)
 
-    redirect = (
-        redirect_url or settings.INFINITEPAY_REDIRECT_URL or settings.EXTERNAL_URL
-    )
+    redirect = redirect_url or settings.INFINITEPAY_REDIRECT_URL or settings.EXTERNAL_URL
     webhook_url = f"{settings.EXTERNAL_URL}/integrations/infinitepay/webhook/?order_nsu={order_nsu}"
     payload = {
         "handle": handle,
@@ -96,9 +92,7 @@ def create_checkout(
         row.request_payload = payload
         row.response_payload = {"error": str(e), "payload": e.payload}
         row.save(update_fields=["request_payload", "response_payload", "updated_at"])
-        logger.warning(
-            "checkout_create_failed", external_id=order_nsu, body=str(e.payload)
-        )
+        logger.warning("checkout_create_failed", external_id=order_nsu, body=str(e.payload))
         raise CheckoutError(f"infinitepay_create_link_failed: {e.payload or e}") from e
 
     row.checkout_url = resp.get("url") or resp.get("checkout_url") or resp.get("link")
@@ -106,9 +100,7 @@ def create_checkout(
     row.request_payload = payload
     row.response_payload = resp
     row.save()
-    logger.info(
-        "checkout_created", external_id=order_nsu, slug=row.slug, amount_cents=cents
-    )
+    logger.info("checkout_created", external_id=order_nsu, slug=row.slug, amount_cents=cents)
     return row
 
 

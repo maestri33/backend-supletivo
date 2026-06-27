@@ -16,9 +16,7 @@ class Command(BaseCommand):
     help = "Compara duas imagens (documento × selfie) e imprime o score/veredito do face-match."
 
     def add_arguments(self, parser):
-        parser.add_argument(
-            "document_image", help="caminho da imagem do documento (com o rosto)"
-        )
+        parser.add_argument("document_image", help="caminho da imagem do documento (com o rosto)")
         parser.add_argument("selfie_image", help="caminho da selfie")
 
     def handle(self, *args, **options):
@@ -35,9 +33,7 @@ class Command(BaseCommand):
 
         self.stdout.write(json.dumps(result, ensure_ascii=False, indent=2))
         flag = "MATCH" if result["match"] else result["status"].upper()
-        self.stdout.write(
-            self.style.SUCCESS(f"=> {flag} (score={result['score']:.4f})")
-        )
+        self.stdout.write(self.style.SUCCESS(f"=> {flag} (score={result['score']:.4f})"))
         record_check(
             "biometric",
             "face_match",

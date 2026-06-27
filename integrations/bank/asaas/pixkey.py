@@ -120,9 +120,7 @@ def validate_pix_key(*, key: str, key_type: str, expected_document: str) -> PixK
             "key_type": key_type,
             # got_doc vem mascarado; como bate com o esperado, guardo o CPF completo do candidato.
             "holder_document": expected,
-            "holder_name": bank_account.get("ownerName")
-            or bank_account.get("accountName")
-            or "",
+            "holder_name": bank_account.get("ownerName") or bank_account.get("accountName") or "",
             "bank_name": bank_info.get("name") or "",
             "raw_dict": raw,
         },

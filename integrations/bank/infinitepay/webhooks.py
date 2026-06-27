@@ -55,9 +55,7 @@ def handle_event(order_nsu, payload, *, source_ip=None, user_agent=None):
                 provider_payment_id=str(checkout.external_id),
                 amount_cents=checkout.paid_amount_cents,
                 # comprovante (InfinitePay) → o lead manda pro aluno na notify de pago.
-                receipt_url=payload.get("receipt_url")
-                if isinstance(payload, dict)
-                else None,
+                receipt_url=payload.get("receipt_url") if isinstance(payload, dict) else None,
             )
         # ninguém consumiu -> fallback rastreável (§7.4), não perde o evento.
         if not consumed:
@@ -103,9 +101,7 @@ def _apply(order_nsu, payload):
 
     # A TRAVA real: reconfirma o pagamento direto na API antes de marcar pago.
     try:
-        check = asyncio.run(
-            _payment_check(settings.INFINITEPAY_HANDLE, nsu, transaction_nsu, slug)
-        )
+        check = asyncio.run(_payment_check(settings.INFINITEPAY_HANDLE, nsu, transaction_nsu, slug))
     except InfinitePayError as e:
         logger.warning("payment_check_failed", order_nsu=nsu, body=str(e.payload))
         return None, {"ok": True, "paid": False}, f"payment_check_failed: {e.payload}"

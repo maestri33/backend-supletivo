@@ -22,6 +22,4 @@ def validate_document(student_document_id: int) -> None:
         return
     status, payload = service._ai_validate(doc)
     service.apply_validation(student_document_id, status=status, payload=payload)
-    logger.info(
-        "student.task_validated", student_document_id=student_document_id, status=status
-    )
+    logger.info("student.task_validated", student_document_id=student_document_id, status=status)

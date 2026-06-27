@@ -190,9 +190,7 @@ def set_profile(
 def get_address(*, user_external_id) -> dict:
     """GET do endereço + `missing_fields` (o front renderiza input só do que falta)."""
     _require(user_external_id)
-    data = address_iface.as_public_dict(
-        address_iface.get_by_external_id(user_external_id)
-    )
+    data = address_iface.as_public_dict(address_iface.get_by_external_id(user_external_id))
     data["missing_fields"] = [f for f in _ADDRESS_FIELDS if not data.get(f)]
     return data
 
@@ -264,13 +262,9 @@ def patch_document_section(*, user_external_id, **fields) -> dict:
     doc_payload = {k: fields[k] for k in _DOC_DOC_FIELDS if fields.get(k) is not None}
     if doc_payload:
         documents_iface.update(user_external_id, {doc_type: doc_payload})
-    profile_payload = {
-        k: fields[k] for k in _DOC_PROFILE_FIELDS if fields.get(k) is not None
-    }
+    profile_payload = {k: fields[k] for k in _DOC_PROFILE_FIELDS if fields.get(k) is not None}
     if profile_payload:
-        profiles.update_identity(
-            cand.user, **profile_payload
-        )  # identidade → Profile (correção)
+        profiles.update_identity(cand.user, **profile_payload)  # identidade → Profile (correção)
     _advance_documents(cand, user_external_id)
     return me_dict(cand)  # resposta canônica
 
@@ -287,13 +281,9 @@ def upload_document_photo(*, user_external_id, slot: str, upload) -> dict:
     # número/tipo antes (ninguém sabe o nº da CNH; o OCR extrai). Aceito a partir de `address`.
     cand = _require(user_external_id, _S.ADDRESS, _S.DOCUMENTS, _S.PIX)
     # Define o `doc_type` do candidato a partir do 1º slot (rg_* ou cnh_*). Imutável depois.
-    inferred = (
-        "rg" if slot.startswith("rg_") else ("cnh" if slot.startswith("cnh_") else None)
-    )
+    inferred = "rg" if slot.startswith("rg_") else ("cnh" if slot.startswith("cnh_") else None)
     if inferred is None:
-        raise CandidateError(
-            f"Slot de documento inválido: {slot}.", code="SLOT_INVALID"
-        )
+        raise CandidateError(f"Slot de documento inválido: {slot}.", code="SLOT_INVALID")
     if cand.doc_type in (None, ""):
         cand.doc_type = inferred
         cand.save(update_fields=["doc_type", "updated_at"])
@@ -435,9 +425,7 @@ def _doc_section_dict(cand: Candidate) -> dict:
         section["missing_fields"] = ["doc_type"]
         return section
     sub = docs.get(doc_type) or {}
-    section.update(
-        sub
-    )  # number/issuing_agency/category/... + photos + validation_status/reason
+    section.update(sub)  # number/issuing_agency/category/... + photos + validation_status/reason
     # `analysis_status`/`analysis_reason` canônicos (espelha proposal #2 do front)
     section["analysis_status"] = sub.get("validation_status") or _analysis.PENDING
     section["analysis_reason"] = sub.get("validation_reason")
@@ -457,9 +445,7 @@ def _doc_section_dict(cand: Candidate) -> dict:
 
 def _required_doc_fields(doc_type: str) -> tuple[str, ...]:
     if doc_type == "cnh":
-        return (
-            "number",
-        )  # CNH exige só o número pra avançar; resto é melhor-ter-que-não-ter
+        return ("number",)  # CNH exige só o número pra avançar; resto é melhor-ter-que-não-ter
     return ("number",)  # RG idem
 
 
@@ -650,9 +636,7 @@ def _doc_extract_and_finish(cand: Candidate, sub, result: dict, images: list) ->
         )
         return
     _apply_doc_extracted(cand, sub, data)
-    _finish_doc(
-        cand, sub, doc_ai.APPROVED, name_reason or "Documento validado.", result
-    )
+    _finish_doc(cand, sub, doc_ai.APPROVED, name_reason or "Documento validado.", result)
     _notify_doc_event(
         cand=cand,
         event="candidate.document_approved",
@@ -724,20 +708,14 @@ def _apply_doc_extracted(cand: Candidate, sub, data: dict) -> None:
     # (Victor 2026-06-16: a identidade mora SÓ no Profile, nunca espalhada no candidate).
     profiles.fill_identity(
         cand.user,
-        mother_name=_clean(data["mother_name"], 255)
-        if data.get("mother_name")
-        else None,
-        father_name=_clean(data["father_name"], 255)
-        if data.get("father_name")
-        else None,
+        mother_name=_clean(data["mother_name"], 255) if data.get("mother_name") else None,
+        father_name=_clean(data["father_name"], 255) if data.get("father_name") else None,
         birthplace=_clean(data["birthplace"], 128) if data.get("birthplace") else None,
         birth_date=_date(data.get("birth_date")),
     )
 
 
-def _finish_doc(
-    cand: Candidate, sub, status: str, reason: str | None, result: dict
-) -> None:
+def _finish_doc(cand: Candidate, sub, status: str, reason: str | None, result: dict) -> None:
     """Grava o veredito (justificativa SEMPRE — plan/9) + dispara o notify do estado."""
     from django.utils import timezone
 
@@ -757,9 +735,7 @@ def _finish_doc(
     if status == doc_ai.REJECTED:
         _notify_doc_event(cand=cand, event="candidate.document_rejected", detail=reason)
     elif status == doc_ai.REVIEW:
-        _notify_doc_event(
-            cand=cand, event="candidate.document_in_review", detail=reason
-        )
+        _notify_doc_event(cand=cand, event="candidate.document_in_review", detail=reason)
 
 
 def _doc_post_approval(cand: Candidate, sub) -> None:
@@ -802,9 +778,7 @@ def run_document_fill(candidate_id: int) -> None:
     A aprovação humana é FINAL — aqui não há veto (o `name_match` fica só registrado)."""
     from users.roles import _document_ai as doc_ai
 
-    cand = (
-        Candidate.objects.select_related("user", "hub").filter(id=candidate_id).first()
-    )
+    cand = Candidate.objects.select_related("user", "hub").filter(id=candidate_id).first()
     if cand is None or not cand.doc_type:
         return
     user_ext = str(cand.user.external_id)
@@ -971,9 +945,7 @@ def _sweep_stale_reviews(hub) -> None:
     cutoff = timezone.now() - timedelta(seconds=_analysis.ttl_seconds())
     Candidate.objects.filter(
         hub=hub, selfie_status=SelfieStatus.PENDING, selfie_taken_at__lt=cutoff
-    ).update(
-        selfie_status=SelfieStatus.REVIEW, selfie_description=_analysis.stale_reason()
-    )
+    ).update(selfie_status=SelfieStatus.REVIEW, selfie_description=_analysis.stale_reason())
     # documento (RG/CNH): sem `updated_at` no model; o início vive no JSON (`analysis_started_at`),
     # igual ao ack do candidato (`_doc_started_at`). Loop curto — sem referência → não mexe.
     user_ids = list(Candidate.objects.filter(hub=hub).values_list("user_id", flat=True))
@@ -1026,9 +998,7 @@ def set_pix(*, user_external_id, key: str, key_type: str) -> dict:
             "CPF do perfil ausente — refaça o cadastro.", code="PROFILE_CPF_MISSING"
         )
     try:
-        pixkey.validate_pix_key(
-            key=key, key_type=key_type, expected_document=profile.cpf
-        )
+        pixkey.validate_pix_key(key=key, key_type=key_type, expected_document=profile.cpf)
     except pixkey.PixKeyError as exc:
         raise CandidateError(
             "Chave Pix inválida ou não é do titular.",
@@ -1055,9 +1025,7 @@ def get_selfie(*, user_external_id: str) -> dict:
     return _selfie_dict(cand)
 
 
-def set_selfie(
-    *, user_external_id, image_bytes: bytes, content_type="image/jpeg"
-) -> dict:
+def set_selfie(*, user_external_id, image_bytes: bytes, content_type="image/jpeg") -> dict:
     """Selfie ("assinar") — ASSÍNCRONA (plan/15 C, espelha o enrollment):
 
     1. salva a foto
@@ -1199,9 +1167,7 @@ def run_selfie_validation(candidate_id: int) -> None:
             "updated_at",
         ]
     )
-    logger.info(
-        "candidate.selfie_validated", candidate=str(cand.external_id), status=status
-    )
+    logger.info("candidate.selfie_validated", candidate=str(cand.external_id), status=status)
     _resolve_selfie(cand)
 
 
@@ -1384,9 +1350,7 @@ def reset_doc_type(*, candidate_external_id: str, coordinator) -> dict:
     if cand is None:
         raise CandidateError("Candidato não encontrado.", code="CANDIDATE_NOT_FOUND")
     if cand.hub.coordinator_id != coordinator.id:
-        raise Forbidden(
-            "Você não coordena o polo deste candidato.", code="NOT_HUB_COORDINATOR"
-        )
+        raise Forbidden("Você não coordena o polo deste candidato.", code="NOT_HUB_COORDINATOR")
     if cand.status in (_S.COMPLETED, _S.APPROVED, _S.REJECTED):
         raise Conflict(
             "O candidato já saiu da coleta — não dá pra trocar o tipo de documento.",
@@ -1419,9 +1383,7 @@ def _notify_doc_type_reset(cand: Candidate) -> None:
     p = profiles.get(cand.user)
     try:
         send(
-            text=msgs.text(
-                "candidate.doc_type_reset", name=msgs.first_name(p.name if p else None)
-            ),
+            text=msgs.text("candidate.doc_type_reset", name=msgs.first_name(p.name if p else None)),
             caller="candidate.doc_type_reset",
             phone=p.phone if p else None,
             email=p.email if p else None,
@@ -1448,9 +1410,7 @@ def approve_candidate(*, candidate_external_id: str, coordinator) -> Candidate:
     if cand is None:
         raise CandidateError("Candidato não encontrado.", code="CANDIDATE_NOT_FOUND")
     if cand.hub.coordinator_id != coordinator.id:
-        raise Forbidden(
-            "Você não coordena o polo deste candidato.", code="NOT_HUB_COORDINATOR"
-        )
+        raise Forbidden("Você não coordena o polo deste candidato.", code="NOT_HUB_COORDINATOR")
     # rejeição é SOFT (Victor 2026-06-17: "aguarda ser aprovado") — um candidato REJEITADO continua
     # aguardando e pode ser aprovado depois (o coordenador mudou de ideia / a situação mudou). Não é
     # beco terminal. Só barra quem ainda está na coleta (não concluiu).
@@ -1485,9 +1445,7 @@ def reject_candidate(
     if cand is None:
         raise CandidateError("Candidato não encontrado.", code="CANDIDATE_NOT_FOUND")
     if cand.hub.coordinator_id != coordinator.id:
-        raise Forbidden(
-            "Você não coordena o polo deste candidato.", code="NOT_HUB_COORDINATOR"
-        )
+        raise Forbidden("Você não coordena o polo deste candidato.", code="NOT_HUB_COORDINATOR")
     if cand.status != _S.COMPLETED:
         raise Conflict(
             "O candidato não está aguardando aprovação.",
@@ -1529,9 +1487,7 @@ def _notify_candidate_rejected(cand: Candidate) -> None:
     p = profiles.get(cand.user)
     try:
         send(
-            text=msgs.text(
-                "candidate.rejected", name=msgs.first_name(p.name if p else None)
-            ),
+            text=msgs.text("candidate.rejected", name=msgs.first_name(p.name if p else None)),
             caller="candidate.rejected",
             phone=p.phone if p else None,
             idempotency_key=f"candidate_rejected_{cand.external_id}",
@@ -1540,9 +1496,7 @@ def _notify_candidate_rejected(cand: Candidate) -> None:
         logger.warning("candidate.notify_rejected_failed", error=str(exc))
 
 
-def candidate_detail_for_coordinator(
-    *, candidate_external_id: str, coordinator
-) -> dict:
+def candidate_detail_for_coordinator(*, candidate_external_id: str, coordinator) -> dict:
     """Detalhe do candidato aguardando aprovação — pro coordenador decidir VENDO (perfil + coleta).
     Gate: ser o coordenador do polo do candidato."""
     cand = (
@@ -1553,9 +1507,7 @@ def candidate_detail_for_coordinator(
     if cand is None:
         raise CandidateError("Candidato não encontrado.", code="CANDIDATE_NOT_FOUND")
     if cand.hub.coordinator_id != coordinator.id:
-        raise Forbidden(
-            "Você não coordena o polo deste candidato.", code="NOT_HUB_COORDINATOR"
-        )
+        raise Forbidden("Você não coordena o polo deste candidato.", code="NOT_HUB_COORDINATOR")
     p = profiles.get(cand.user)
     return {
         "external_id": str(cand.external_id),
@@ -1633,9 +1585,7 @@ def list_selfie_reviews_for_hub(*, hub) -> list[dict]:
     return out
 
 
-def candidate_selfie_for_coordinator(
-    *, candidate_external_id: str, coordinator
-) -> dict:
+def candidate_selfie_for_coordinator(*, candidate_external_id: str, coordinator) -> dict:
     """Tela de DETALHE da selfie do candidato em REVISÃO pro coordenador decidir (plan/15 D2).
 
     Devolve a foto + `analysis_status`/`analysis_reason` (motivo da IA — útil pra aprovar/
