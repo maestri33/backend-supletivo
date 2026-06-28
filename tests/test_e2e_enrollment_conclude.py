@@ -231,13 +231,13 @@ def test_conclude_falta_segunda_agendada(client, scenario):
 
 
 @pytest.mark.django_db
-@pytest.mark.xfail(
-    reason="GAP REAL: backend aceita platform_login/password vazios — só o proxy Next valida. "
-    "Quem bater direto no /api/v1/leadership/enrollments/{id}/conclude consegue concluir sem credencial.",
-    strict=True,
-)
 def test_conclude_credenciais_vazias(client, scenario):
-    """login ou senha vazios → o backend DEVERIA rejeitar com 4xx (não só o proxy Next)."""
+    """login ou senha vazios → 422 (validação no schema ConcludeIn).
+
+    Defesa no backend (não só no proxy Next): o schema usa StringConstraints
+    com min_length=1 + strip_whitespace, então quem bater direto na API com
+    credencial vazia leva 422 antes de chegar no service. Sem isso, criaria
+    Student órfão sem como entrar na plataforma."""
     _seed_fee_first_paid(scenario["enr"])
     _seed_fee_second_scheduled(scenario["enr"])
 
@@ -249,7 +249,7 @@ def test_conclude_credenciais_vazias(client, scenario):
             content_type="application/json",
             **auth_headers(scenario["coord_token"]),
         )
-    assert resp.status_code in (400, 422), resp.content
+    assert resp.status_code == 422, resp.content
 
 
 @pytest.mark.django_db

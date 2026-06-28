@@ -16,6 +16,8 @@ sobre o `hub/` (plan/14, Victor 2026-06-12).
 from __future__ import annotations
 
 import structlog
+from typing import Annotated
+from pydantic import StringConstraints
 from ninja import Field, File, Router, Schema
 from ninja.files import UploadedFile
 
@@ -750,8 +752,11 @@ class FeeIn(Schema):
 
 class ConcludeIn(Schema):
     # credenciais da plataforma de estudo — a instituição só as libera com a 1ª parcela PAGA.
-    platform_login: str
-    platform_password: str
+    # login/senha NÃO podem ser vazios: aceitar string vazia aqui criaria Student órfão sem como
+    # entrar na plataforma. Valida no schema (422 antes do service); o proxy Next também valida,
+    # mas a defesa tem que estar no backend porque qualquer cliente pode bater direto na API.
+    platform_login: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
+    platform_password: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
     platform_url: str | None = None
     platform_notes: str | None = None
 
