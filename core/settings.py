@@ -231,6 +231,9 @@ ASAAS_BASE_URL = env("ASAAS_BASE_URL", default="https://api.asaas.com")
 # dois endpoints que o Asaas chama de volta: webhook de eventos e mecanismo de validação de saque.
 ASAAS_WEBHOOK_SECRET = env("ASAAS_WEBHOOK_SECRET", default="")
 EXTERNAL_URL = env("EXTERNAL_URL", default="")
+# Base do link de divulgação do promotor (ref_url). Vazio => cai no EXTERNAL_URL (= backend → 404).
+# Sem esta linha o valor do .env é ignorado pelo getattr(settings, "LANDING_BASE_URL", "") em ref_url().
+LANDING_BASE_URL = env("LANDING_BASE_URL", default="")
 # URL do front pra onde o gateway redireciona APÓS o pagamento (cartão/PIX). Vazio => cai no EXTERNAL_URL.
 # «PENDÊNCIA»: Victor define a URL real do front.
 FRONTEND_URL = env("FRONTEND_URL", default="")
