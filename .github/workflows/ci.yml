@@ -17,7 +17,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: .env real (symlink do deploy dir — não copia, não vaza o secret no workspace)
-        run: ln -sf /opt/dmz-backend-supletivo/.env "$GITHUB_WORKSPACE/.env"
+        run: ln -sf /opt/backend-supletivo/.env "$GITHUB_WORKSPACE/.env"
 
       - name: Dependências (venv isolado do _work, não toca o /opt)
         run: |

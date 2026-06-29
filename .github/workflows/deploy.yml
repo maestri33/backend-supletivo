@@ -1,6 +1,6 @@
 name: Deploy
 # CD: dispara DEPOIS do CI passar na main (padrão das outras LXCs do projeto). O runner
-# self-hosted (CT 30101) atualiza /opt/dmz-backend-supletivo pro SHA que o CI validou, checa,
+# self-hosted (CT 30101) atualiza /opt/backend-supletivo pro SHA que o CI validou, checa,
 # migra, reinicia e prova o health no loopback. Em FALHA: rollback de código + abre issue.
 on:
   workflow_run:
@@ -20,13 +20,13 @@ jobs:
     runs-on: [self-hosted, backend-v7m]
     steps:
       - name: SHA atual (rede de rollback)
-        run: echo "PREV_SHA=$(git -C /opt/dmz-backend-supletivo rev-parse HEAD)" >> "$GITHUB_ENV"
+        run: echo "PREV_SHA=$(git -C /opt/backend-supletivo rev-parse HEAD)" >> "$GITHUB_ENV"
 
       - name: Atualiza, checa, migra e reinicia
         run: |
           exec > >(tee /tmp/backend-deploy.log) 2>&1   # captura o log p/ a issue de falha
           set -e
-          cd /opt/dmz-backend-supletivo
+          cd /opt/backend-supletivo
           git fetch origin
           # o SHA EXATO que passou no CI (não 'origin/main' — evita deployar um push posterior não-gated)
           git reset --hard ${{ github.event.workflow_run.head_sha }}
@@ -46,7 +46,7 @@ jobs:
         if: failure()
         run: |
           set -e
-          cd /opt/dmz-backend-supletivo
+          cd /opt/backend-supletivo
           echo "ROLLBACK de código -> $PREV_SHA"
           git reset --hard "$PREV_SHA"
           /usr/local/bin/uv sync --inexact
