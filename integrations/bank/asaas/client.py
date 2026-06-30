@@ -142,6 +142,17 @@ class AsaasClient:
             "POST", "/v3/pix/qrCodes/pay", json=body, idempotency_key=idempotency_key
         )
 
+    # ---------- bill payments (boleto / conta de consumo, OUTBOUND) ----------
+    async def pay_bill(self, payload: dict, *, idempotency_key: str | None = None) -> dict:
+        # Paga um boleto/conta pela linha digitável (`identificationField`) ou código de barras
+        # (`barCode`). Campos úteis no retorno: id, status, value, dueDate.
+        return await self._request(
+            "POST", "/v3/bill", json=payload, idempotency_key=idempotency_key
+        )
+
+    async def get_bill(self, bill_id: str) -> dict:
+        return await self._request("GET", f"/v3/bill/{bill_id}")
+
     # ---------- PIX transactions (outbound) ----------
     async def get_pix_transaction(self, transaction_id: str) -> dict:
         return await self._request("GET", f"/v3/pix/transactions/{transaction_id}")

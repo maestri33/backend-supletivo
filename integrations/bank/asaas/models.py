@@ -62,12 +62,14 @@ class Payment(models.Model):
     kind=pixkey -> transferência pra chave PIX cadastrada (outbound)
     kind=qrcode -> pagamento de BR Code copia-e-cola (outbound)
     kind=charge -> cobrança PIX recebida via Asaas /payments (inbound)
+    kind=boleto -> pagamento de boleto/conta por linha digitável (outbound) — /v3/bill
     """
 
     class Kind(models.TextChoices):
         PIXKEY = "pixkey"
         QRCODE = "qrcode"
         CHARGE = "charge"
+        BOLETO = "boleto"
 
     # `status` é string livre por ora; a máquina/choices entra nas etapas que transicionam.
     # outbound: SCHEDULED|QUEUED|SUBMITTING|SUBMITTED|AWAITING_BALANCE|PAID|FAILED|CANCELLED|

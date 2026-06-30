@@ -108,6 +108,34 @@ def update_material(external_id: str, **fields) -> Material:
     return m
 
 
+_VIDEO_EXT = {
+    "video/mp4": "mp4",
+    "video/webm": "webm",
+    "video/quicktime": "mov",
+    "video/x-msvideo": "avi",
+}
+
+
+def set_material_video(external_id: str, *, data: bytes, content_type: str) -> Material:
+    """Staff sobe o VÍDEO da matéria (1 por matéria) → salva em media/training/ e grava o path.
+
+    Substitui o vídeo anterior (campo único `Material.video`). Path NÃO-enumerável (token aleatório),
+    igual aos demais writers de mídia (core.media). Formato não suportado → 422 `INVALID_VIDEO_TYPE`."""
+    from core.media import save_media
+
+    m = _material(external_id)
+    ext = _VIDEO_EXT.get(content_type)
+    if ext is None:
+        raise TrainingError(
+            "Formato de vídeo não suportado (use mp4/webm/mov).",
+            code="INVALID_VIDEO_TYPE",
+        )
+    m.video = save_media(prefix="training", data=data, ext=ext)
+    m.save(update_fields=["video", "updated_at"])
+    logger.info("training.material_video_set", external_id=external_id)
+    return m
+
+
 def delete_material(external_id: str) -> None:
     """Descarta uma matéria EFÊMERA (descartável). Não-efêmera → use `active=False` (preserva histórico)."""
     m = _material(external_id)

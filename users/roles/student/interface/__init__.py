@@ -26,6 +26,7 @@ from users.roles.student.service import (
     set_platform_credentials,
     to_dict,
     upload_document,
+    veteran_detail,
 )
 
 __all__ = [
@@ -50,4 +51,5 @@ __all__ = [
     "set_platform_credentials",
     "to_dict",
     "upload_document",
+    "veteran_detail",
 ]

@@ -16,6 +16,7 @@ from django.db.models import Q
 from django.utils import timezone
 
 from finance.models import Commission, PaymentRequest
+from integrations.bank.asaas import billpay as asaas_billpay
 from integrations.bank.asaas import payout as asaas_payout
 from integrations.bank.asaas import qrpay as asaas_qrpay
 from users.profiles.interface import get as get_profile
@@ -120,14 +121,29 @@ def _submit(pr: PaymentRequest, summary: dict) -> None:
                 payment_id=pr.external_reference,
                 description=f"despesa {pr.supplier_name or pr.external_reference}",
             )
+        elif pr.method == PaymentRequest.Method.BOLETO:
+            payment = asaas_billpay.pay_bill(
+                line_code=pr.boleto_line,
+                amount=pr.amount or None,  # 0 = deixa o Asaas ler o valor do boleto
+                payment_id=pr.external_reference,
+                description=f"avulso {pr.supplier_name or pr.external_reference}",
+            )
         else:
             payment = asaas_payout.create_payout(
                 amount=pr.amount,  # já em reais (Decimal) — mesma unidade do asaas, sem conversão
                 pix_key=pr.pix_key,
                 payment_id=pr.external_reference,
-                description=f"comissao {pr.payee_role} semana {pr.week_of}",
+                description=(
+                    f"avulso {pr.supplier_name or pr.external_reference}"
+                    if pr.kind == PaymentRequest.Kind.MANUAL
+                    else f"comissao {pr.payee_role} semana {pr.week_of}"
+                ),
             )
-    except (asaas_payout.PayoutError, asaas_qrpay.QrPayError) as exc:
+    except (
+        asaas_payout.PayoutError,
+        asaas_qrpay.QrPayError,
+        asaas_billpay.BillPayError,
+    ) as exc:
         reason = str(exc)
         if reason.startswith("asaas_rejected"):
             # recusa definitiva do asaas: falha terminal, cascateia.
@@ -191,9 +207,15 @@ def _reconcile(pr: PaymentRequest, summary: dict) -> None:
     try:
         if pr.method == PaymentRequest.Method.PIX_QRCODE:
             payment = asaas_qrpay.refresh_qr_payment(pr.external_reference)
+        elif pr.method == PaymentRequest.Method.BOLETO:
+            payment = asaas_billpay.refresh_boleto(pr.external_reference)
         else:
             payment = asaas_payout.get_payout(pr.external_reference)
-    except (asaas_payout.PayoutError, asaas_qrpay.QrPayError):
+    except (
+        asaas_payout.PayoutError,
+        asaas_qrpay.QrPayError,
+        asaas_billpay.BillPayError,
+    ):
         # ainda não achou o Payment (corrida) — tenta de novo com backoff.
         pr.next_attempt_at = timezone.now() + _backoff(pr.attempts)
         pr.save(update_fields=["next_attempt_at", "updated_at"])

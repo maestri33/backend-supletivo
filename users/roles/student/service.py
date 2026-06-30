@@ -302,6 +302,20 @@ def _save_photo(
     return save_media(prefix="student", data=image_bytes, ext=ext)
 
 
+# diploma/histórico aceitam PDF além de imagem (o coordenador sobe o documento emitido).
+_DOC_EXT = {**_EXT, "application/pdf": "pdf"}
+
+
+def _save_doc_file(
+    student: Student, kind: str, data: bytes, content_type: str
+) -> str:
+    """Salva um arquivo do diploma (PDF ou imagem) em media/diploma/ com token não-enumerável."""
+    from core.media import save_media
+
+    ext = _DOC_EXT.get(content_type, "pdf")
+    return save_media(prefix="diploma", data=data, ext=ext)
+
+
 def upload_document(
     *, user_external_id: str, doc_type: str, image_bytes: bytes, content_type: str
 ) -> tuple[StudentDocument, dict]:
@@ -796,8 +810,18 @@ def clear_documentation(*, student_external_id: str, coordinator) -> Student:
     return student
 
 
-def issue_diploma(*, student_external_id: str, coordinator) -> StudentDiploma:
-    """Coordenador emite o diploma (certificado + histórico) → aluno fica AGUARDANDO RETIRADA."""
+def issue_diploma(
+    *,
+    student_external_id: str,
+    coordinator,
+    diploma_bytes: bytes,
+    diploma_content_type: str,
+    transcript_bytes: bytes | None = None,
+    transcript_content_type: str | None = None,
+) -> StudentDiploma:
+    """Coordenador emite o diploma: sobe o PDF/imagem do diploma (+ histórico, opcional) → aluno fica
+    AGUARDANDO RETIRADA e é notificado a comparecer ao polo. TODO o fluxo é do coordenador (Victor
+    2026-06-29): o aluno não posta nada."""
     student = _coordinated(student_external_id, coordinator)
     if student.status != Student.Status.AWAITING_DIPLOMA_ISSUANCE:
         raise Conflict(
@@ -805,10 +829,29 @@ def issue_diploma(*, student_external_id: str, coordinator) -> StudentDiploma:
             code="WRONG_STATUS",
             extra={"expected_status": student.status},
         )
+    if not diploma_bytes:
+        raise StudentError("Envie o arquivo do diploma.", code="DIPLOMA_FILE_REQUIRED")
+    diploma_rel = _save_doc_file(student, "diploma", diploma_bytes, diploma_content_type)
+    transcript_rel = None
+    if transcript_bytes:
+        transcript_rel = _save_doc_file(
+            student, "transcript", transcript_bytes, transcript_content_type or ""
+        )
     diploma, _ = StudentDiploma.objects.get_or_create(student=student)
     diploma.issued_by = coordinator
     diploma.issued_at = timezone.now()
-    diploma.save(update_fields=["issued_by", "issued_at", "updated_at"])
+    diploma.diploma_file = diploma_rel
+    if transcript_rel:
+        diploma.transcript_file = transcript_rel
+    diploma.save(
+        update_fields=[
+            "issued_by",
+            "issued_at",
+            "diploma_file",
+            "transcript_file",
+            "updated_at",
+        ]
+    )
     _set_status(student, Student.Status.AWAITING_PICKUP)
     _notify(
         student,
@@ -825,16 +868,24 @@ def issue_diploma(*, student_external_id: str, coordinator) -> StudentDiploma:
 
 
 def register_pickup(
-    *, user_external_id: str, image_bytes: bytes, content_type: str
+    *, student_external_id: str, coordinator, image_bytes: bytes, content_type: str
 ) -> Student:
-    """Aluno posta a FOTO tirando o diploma → vira VETERAN + comissão do coordenador do polo.
+    """Coordenador posta a FOTO do aluno recebendo o diploma → aluno vira VETERAN + comissão do
+    coordenador do polo (Victor 2026-06-29: TODO o fluxo do diploma é do coordenador; o aluno não
+    posta nada).
 
     TUDO (retirada + role + status + comissão) numa ÚNICA transação: se a comissão não puder ser
     creditada (coordenador None/sem profile), o ROLLBACK desfaz a retirada inteira e o aluno continua
     em AWAITING_PICKUP — basta repostar quando o hub tiver coordenador válido. NUNCA vira veteran sem a
     comissão (sem perda silenciosa, sem estado inconsistente). A foto vai pro disco antes (idempotente:
-    mesmo path; re-post sobrescreve)."""
-    student = _require(user_external_id, Student.Status.AWAITING_PICKUP)
+    token novo a cada post; re-post grava outro arquivo e atualiza o ponteiro)."""
+    student = _coordinated(student_external_id, coordinator)
+    if student.status != Student.Status.AWAITING_PICKUP:
+        raise Conflict(
+            "Seu processo está em outra fase.",
+            code="WRONG_STATUS",
+            extra={"expected_status": student.status},
+        )
     diploma = getattr(student, "diploma", None)
     if diploma is None:
         raise StudentError(
@@ -942,6 +993,73 @@ def detail_for_coordinator(*, student_external_id: str, coordinator) -> dict:
         "phone": p.phone if p else None,
         "email": p.email if p else None,
     }
+    return data
+
+
+def veteran_detail(*, user_external_id: str) -> dict:
+    """Visão consolidada do VETERANO (read-only): TODOS os dados dele numa chamada — identidade/
+    matrícula (perfil, endereço, escolaridade, RG, selfie), os documentos que ELE postou como aluno
+    e o que o COORDENADOR postou (diploma + histórico + foto da retirada). O veterano mantém a role
+    student; aqui é só leitura do estado final (não move nada)."""
+    from users.profiles import interface as profiles
+    from users.roles.enrollment import interface as enrollment_iface
+
+    student = _by_user(user_external_id)
+    data = to_dict(student)
+
+    # dados pessoais (nome/cpf/phone/email).
+    p = profiles.get(student.user)
+    data["user"] = {
+        "external_id": str(student.user.external_id),
+        "name": p.name if p else None,
+        "cpf": p.cpf if p else None,
+        "phone": p.phone if p else None,
+        "email": p.email if p else None,
+    }
+
+    # documentos que o ALUNO postou — com o path da foto (o to_dict só traz has_photo; o veterano
+    # precisa acessar os arquivos). O front prefixa /media/.
+    data["documents"] = [
+        {
+            "doc_type": d.doc_type,
+            "validation_status": d.validation_status,
+            "photo": d.photo,
+            "validated_at": d.validated_at.isoformat() if d.validated_at else None,
+        }
+        for d in student.documents.all()
+    ]
+
+    # bloco da MATRÍCULA (perfil/endereço/escolaridade/RG/selfie) — o enrollment persiste após virar
+    # student (nada o deleta). Reusa o me_dict rico do enrollment (cruza domínio pelo interface, §3).
+    enr = enrollment_iface.get_for_user_external_id(user_external_id)
+    if enr is not None:
+        m = enrollment_iface.me_dict(enr)
+        data["enrollment"] = {
+            "profile": m.get("profile"),
+            "address": m.get("address"),
+            "education": m.get("education"),
+            "rg": m.get("rg"),
+            "selfie": m.get("selfie"),
+        }
+    else:
+        data["enrollment"] = None
+
+    # diploma RICO: os arquivos que o COORDENADOR postou (diploma + histórico + foto da retirada).
+    # Paths relativos; o front prefixa /media/.
+    diploma = getattr(student, "diploma", None)
+    data["diploma"] = (
+        {
+            "issued_at": diploma.issued_at.isoformat() if diploma.issued_at else None,
+            "picked_up_at": (
+                diploma.picked_up_at.isoformat() if diploma.picked_up_at else None
+            ),
+            "diploma_file": diploma.diploma_file,
+            "transcript_file": diploma.transcript_file,
+            "pickup_photo": diploma.pickup_photo,
+        }
+        if diploma is not None
+        else None
+    )
     return data
 
 

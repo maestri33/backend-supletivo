@@ -104,10 +104,15 @@ class PaymentRequest(ExternalIdModel):
             "comissão",
         )  # paga promotor/coordenador (default; Fatia 1)
         FEE = "fee", "despesa"  # paga fornecedor/instituição (Fatia 2)
+        MANUAL = (
+            "manual",
+            "avulso",
+        )  # pagamento avulso do staff a terceiro (PIX/boleto; Victor 2026-06-29)
 
     class Method(models.TextChoices):
         PIX_KEY = "pix_key", "PIX por chave"  # comissão → asaas.payout
         PIX_QRCODE = "pix_qrcode", "PIX por QR code"  # fee → asaas.qrpay
+        BOLETO = "boleto", "boleto"  # avulso → asaas.billpay (linha digitável)
 
     class SourceType(models.TextChoices):
         # a que entidade de domínio esta saída se relaciona (espelha o par source do Commission).
@@ -156,6 +161,9 @@ class PaymentRequest(ExternalIdModel):
     source_external_id = models.UUIDField(null=True, blank=True, db_index=True)
     # snapshot de payee.profile.pix_key resolvido no fechamento (auditável/estável).
     pix_key = models.CharField(max_length=140, null=True, blank=True)
+    # avulso (kind=manual, method=boleto): linha digitável + comprovante opcional (recibo).
+    boleto_line = models.CharField(max_length=64, null=True, blank=True)
+    receipt = models.CharField(max_length=255, null=True, blank=True)  # path relativo (anexo)
     status = models.CharField(
         max_length=16, choices=Status.choices, default=Status.QUEUED, db_index=True
     )

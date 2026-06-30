@@ -705,6 +705,20 @@ def student_me(request):
     return _student_dict(_student_guard(request))
 
 
+def _veteran_guard(request) -> str:
+    """Gate role veteran + devolve o external_id do veterano logado."""
+    require_roles(request.auth, "veteran")
+    return request.auth.external_id
+
+
+@api.get("/veteran/me", tags=["veteran"])
+def veteran_me(request):
+    """Visão consolidada do VETERANO: TODOS os dados dele — pessoais, matrícula (perfil/endereço/
+    escolaridade/RG/selfie), os documentos que ELE postou e o que o COORDENADOR postou (diploma +
+    histórico + foto da retirada). Read-only. Paths de mídia relativos; o front prefixa /media/."""
+    return student_iface.veteran_detail(user_external_id=_veteran_guard(request))
+
+
 @api.post("/student/blood-type", response=StudentMeOut, tags=["student"])
 def student_blood_type(request, payload: BloodTypeIn):
     ext = _student_guard(request)
@@ -756,15 +770,3 @@ def student_pendencies(request):
         }
         for p in pends
     ]
-
-
-@api.post("/student/diploma/pickup", response=StudentMeOut, tags=["student"])
-def student_diploma_pickup(request, file: UploadedFile = File(...)):
-    """Aluno posta a foto tirando o diploma → vira veteran + dispara a comissão do coordenador."""
-    ext = _student_guard(request)
-    student_iface.register_pickup(
-        user_external_id=ext,
-        image_bytes=file.read(),
-        content_type=getattr(file, "content_type", "image/jpeg"),
-    )
-    return _student_dict(ext)

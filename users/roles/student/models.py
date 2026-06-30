@@ -191,7 +191,9 @@ class StudentExam(ExternalIdModel):
 
 
 class StudentDiploma(ExternalIdModel):
-    """Diploma: o coordenador emite (certificado + histórico); o aluno retira (foto). 1 por aluno."""
+    """Diploma: o coordenador emite (sobe o PDF do diploma + histórico) e registra a retirada (foto do
+    aluno recebendo). 1 por aluno. TODO o fluxo é do coordenador (Victor 2026-06-29): o aluno não posta
+    nada — só é notificado a comparecer ao polo."""
 
     student = models.OneToOneField(
         Student, on_delete=models.CASCADE, related_name="diploma"
@@ -204,8 +206,11 @@ class StudentDiploma(ExternalIdModel):
         related_name="diplomas_issued",
     )
     issued_at = models.DateTimeField(null=True, blank=True)
+    # arquivos que o coordenador sobe na emissão (path relativo; PDF ou imagem). media/diploma/.
+    diploma_file = models.CharField(max_length=500, null=True, blank=True)
+    transcript_file = models.CharField(max_length=500, null=True, blank=True)
     picked_up_at = models.DateTimeField(null=True, blank=True)
-    # foto do aluno retirando o diploma: path relativo (media/student/<ext>/diploma_pickup.<ext>).
+    # foto do aluno recebendo o diploma — o COORDENADOR posta (media/diploma/<token>.<ext>).
     pickup_photo = models.CharField(max_length=500, null=True, blank=True)
     # idempotência: marca quando a comissão do coordenador foi disparada (não credita 2×).
     commission_triggered_at = models.DateTimeField(null=True, blank=True)

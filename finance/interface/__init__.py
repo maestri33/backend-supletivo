@@ -44,6 +44,8 @@ def _payment_request_dict(pr: PaymentRequest) -> dict:
         "scheduled_for": pr.scheduled_for.isoformat() if pr.scheduled_for else None,
         "asaas_status": pr.asaas_status,
         "external_reference": pr.external_reference,
+        "boleto_line": pr.boleto_line,
+        "receipt": pr.receipt,
         "created_at": pr.created_at.isoformat(),
     }
 
@@ -75,4 +77,49 @@ def summary() -> dict:
     return {
         "commissions": _by_status(Commission),
         "payment_requests": _by_status(PaymentRequest),
+    }
+
+
+def closing_obligation(*, reference_date=None) -> dict:
+    """Estima, SÓ no banco, quanto dinheiro PRECISA sair (sem falar com o gateway — o saldo é lido na
+    camada de integração, no endpoint). Soma duas frentes (CONVENTION §3):
+
+      1. comissões PENDENTES da semana corrente — viram PaymentRequest no fechamento (`run_weekly_closing`);
+      2. PaymentRequests ATIVAS (não-terminais, ainda não pagas) já na fila — comissões antigas, fees, avulsos.
+
+    Devolve `{week_of, pending_commissions, queued_payouts, obrigacao_estimada}` (tudo em reais, str).
+    """
+    from decimal import Decimal
+
+    from django.db.models import Sum
+    from django.utils import timezone
+
+    from finance.interface.commissions import _week_bounds
+
+    now = reference_date or timezone.now()
+    if timezone.is_naive(now):
+        now = timezone.make_aware(now)
+    week_start, week_end, monday, _friday = _week_bounds(now)
+
+    pending = Commission.objects.filter(
+        status=Commission.Status.PENDING,
+        created_at__gte=week_start,
+        created_at__lt=week_end,
+    ).aggregate(total=Sum("amount"))["total"] or Decimal("0")
+
+    active_states = (
+        PaymentRequest.Status.QUEUED,
+        PaymentRequest.Status.AWAITING_PIX,
+        PaymentRequest.Status.SUBMITTED,
+        PaymentRequest.Status.AWAITING_BALANCE,
+    )
+    queued = PaymentRequest.objects.filter(status__in=active_states).aggregate(
+        total=Sum("amount")
+    )["total"] or Decimal("0")
+
+    return {
+        "week_of": monday.isoformat(),
+        "pending_commissions": str(pending),
+        "queued_payouts": str(queued),
+        "obrigacao_estimada": str(pending + queued),
     }

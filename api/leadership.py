@@ -21,7 +21,7 @@ from ninja.files import UploadedFile
 
 from api.auth import require_roles
 from api.base import add_auth_refresh, build_group, resolve_rg_slot
-from api.schemas import MaterialIn, MaterialUpdateIn, TokenOut
+from api.schemas import TokenOut
 from users.auth import interface as auth_iface
 from users.auth.models import User
 from users.exceptions import Forbidden, NotFound
@@ -1073,63 +1073,59 @@ def clear_documentation(request, external_id: str):
     response=DiplomaIssueOut,
     tags=["student"],
 )
-def issue_diploma(request, external_id: str):
-    """Coordenador emite o diploma (certificado + histórico) → aluno fica AGUARDANDO RETIRADA."""
+def issue_diploma(
+    request,
+    external_id: str,
+    diploma: UploadedFile = File(...),
+    transcript: UploadedFile | None = File(None),
+):
+    """Coordenador emite o diploma: sobe o PDF/imagem do diploma (+ histórico opcional) → aluno fica
+    AGUARDANDO RETIRADA e é notificado a comparecer ao polo. Diploma vazio → 422 `DIPLOMA_FILE_REQUIRED`."""
     coordinator = _coordinator(request)
-    diploma = _student_action(external_id, coordinator, student_iface.issue_diploma)
+    issued = _student_action(
+        external_id,
+        coordinator,
+        student_iface.issue_diploma,
+        diploma_bytes=diploma.read(),
+        diploma_content_type=getattr(diploma, "content_type", "application/pdf"),
+        transcript_bytes=transcript.read() if transcript else None,
+        transcript_content_type=(
+            getattr(transcript, "content_type", None) if transcript else None
+        ),
+    )
     return {
-        "external_id": str(diploma.external_id),
-        "issued_at": diploma.issued_at.isoformat(),
+        "external_id": str(issued.external_id),
+        "issued_at": issued.issued_at.isoformat(),
     }
 
 
-# ── funil do colaborador: autoria de matéria (coordenador também — Victor) ──
-# MaterialIn/MaterialUpdateIn vêm do módulo compartilhado (plan/15 A7; mesmo contrato do staff).
-class MaterialOut(Schema):
-    """Matéria do treino (visão de autoria): conteúdo + questão + gabarito."""
-
-    external_id: str
-    title: str
-    text_content: str = ""
-    content_blocks: list[dict] = []
-    question: str
-    video: str | None = None
-    photo: str | None = None
-    kind: str
-    blocking: bool
-    ephemeral: bool
-    order: int
-    active: bool
-    expected_answer: str
-
-
-@api.get("/training/materials", response=list[MaterialOut], tags=["training"])
-def list_materials(request):
-    """Lista todas as matérias COM gabarito (visão de autoria — o coordenador também autora)."""
-    _coordinator(request)
-    return [
-        training_iface.material_to_dict(m, include_answer=True)
-        for m in training_iface.list_materials(active_only=False)
-    ]
-
-
-@api.post("/training/materials", response=MaterialOut, tags=["training"])
-def create_material(request, payload: MaterialIn):
-    _coordinator(request)
-    m = training_iface.create_material(**payload.dict())
-    return training_iface.material_to_dict(m, include_answer=True)
-
-
-@api.put("/training/materials/{external_id}", response=MaterialOut, tags=["training"])
-def update_material(request, external_id: str, payload: MaterialUpdateIn):
-    _coordinator(request)
-    m = training_iface.update_material(external_id, **payload.dict())
-    return training_iface.material_to_dict(m, include_answer=True)
+@api.post(
+    "/students/{external_id}/diploma/pickup",
+    response=EnrollmentActionOut,
+    tags=["student"],
+)
+def register_diploma_pickup(
+    request, external_id: str, file: UploadedFile = File(...)
+):
+    """Coordenador posta a FOTO do aluno recebendo o diploma → aluno vira VETERAN + comissão do
+    coordenador (Victor 2026-06-29: TODO o fluxo do diploma é do coordenador; o aluno não posta nada).
+    Fora de AGUARDANDO RETIRADA → 409 `WRONG_STATUS`; diploma não emitido → 422 `DIPLOMA_NOT_ISSUED`."""
+    coordinator = _coordinator(request)
+    s = _student_action(
+        external_id,
+        coordinator,
+        student_iface.register_pickup,
+        image_bytes=file.read(),
+        content_type=getattr(file, "content_type", "image/jpeg"),
+    )
+    return {"external_id": str(s.external_id), "status": s.status}
 
 
 # ── funil do colaborador: aprovar candidato → PROMOTOR (Victor 2026-06-16) ──
 # A entrevista/Trainee saiu: o coordenador aprova o candidato (que concluiu a coleta) e ele vira
 # PROMOTOR direto. O treino passou a ser uma trava pós-promotor por matérias.
+# Autoria de matéria saiu daqui (Victor 2026-06-29): é função do STAFF. O coordenador, que é
+# obrigatoriamente promotor, VÊ as matérias pelo funil de promotor (collaborators).
 class MaterialApproveOut(Schema):
     """Resultado da aprovação de uma matéria em aberto pelo coordenador."""
 

@@ -8,13 +8,16 @@ Todas as rotas exigem SUPERUSER (staff = superuser nativo do Django — Victor 2
 from __future__ import annotations
 
 from django.conf import settings
-from ninja import Schema
+from ninja import File, Form, Schema
 from ninja.errors import HttpError
+from ninja.files import UploadedFile
 
 from api.auth import require_superuser
 from api.base import build_group
 from api.schemas import MaterialIn, MaterialUpdateIn
 from finance import interface as finance_iface
+from finance.interface import commissions as finance_commissions
+from finance.interface import manual as finance_manual
 from hub import interface as hub_iface
 from integrations import status as integ_status
 from integrations.bank.asaas import onboarding as asaas_onboarding
@@ -154,8 +157,9 @@ def set_hub_address(request, external_id: str, payload: HubAddressIn):
     return _hub_out(hub)
 
 
-# ── autoria de matéria do treino (staff — também o coordenador, no grupo leadership) ──
-# MaterialIn/MaterialUpdateIn vêm do módulo compartilhado (plan/15 A7; mesmo contrato do leadership).
+# ── autoria de matéria do treino (SÓ staff — Victor 2026-06-29: saiu do leadership) ──
+# MaterialIn/MaterialUpdateIn vêm do módulo compartilhado (plan/15 A7). O coordenador, que é
+# obrigatoriamente promotor, VÊ as matérias pelo funil de promotor (collaborators); autoria é staff.
 @api.post("/training/materials", tags=["staff"])
 def create_material(request, payload: MaterialIn):
     """Cria uma matéria do treino (texto+questão+gabarito)."""
@@ -198,6 +202,20 @@ def delete_material(request, external_id: str):
     return {"deleted": external_id}
 
 
+@api.post("/training/materials/{external_id}/video", tags=["staff"])
+def upload_material_video(request, external_id: str, file: UploadedFile = File(...)):
+    """Staff sobe o VÍDEO da matéria (1 por matéria; substitui o anterior). Salva em media/training/
+    e devolve a matéria com o `video` (path relativo; o front prefixa /media/). Formato inválido →
+    422 `INVALID_VIDEO_TYPE`; matéria inexistente → 404 `MATERIAL_NOT_FOUND`."""
+    require_superuser(request.auth)
+    m = training_iface.set_material_video(
+        external_id,
+        data=file.read(),
+        content_type=getattr(file, "content_type", "video/mp4"),
+    )
+    return training_iface.material_to_dict(m, include_answer=True)
+
+
 # ── leads (staff vê TODOS; filtra por polo) ──────────────────────────────────
 @api.get("/leads", tags=["lead"])
 def list_all_leads(request, hub: str | None = None, status: str | None = None):
@@ -237,9 +255,107 @@ def finance_commissions(request, status: str | None = None):
 
 @api.get("/finance/payouts", tags=["staff"])
 def finance_payouts(request, status: str | None = None, kind: str | None = None):
-    """Solicitações de pagamento / payouts (filtros: status; kind=commission|fee)."""
+    """Solicitações de pagamento / payouts (filtros: status; kind=commission|fee|manual)."""
     require_superuser(request.auth)
     return finance_iface.list_payment_requests(status=status, kind=kind)
+
+
+# ── pagamento avulso (staff manda PIX/boleto a um terceiro livre — Victor 2026-06-29) ──
+# Multipart: a imagem (recibo) é opcional. PRODUÇÃO REAL: o worker (Django-Q) é quem move o dinheiro
+# pela fila money-safe (idempotente + retry); aqui só enfileira.
+@api.post("/finance/payments", tags=["staff"])
+def create_manual_payment(
+    request,
+    kind: str = Form(...),  # "pix" | "boleto"
+    amount: str | None = Form(None),  # reais; obrigatório no PIX, opcional no boleto
+    description: str | None = Form(None),
+    supplier_name: str | None = Form(None),
+    pix_key: str | None = Form(None),  # kind=pix
+    boleto_line: str | None = Form(None),  # kind=boleto (linha digitável)
+    receipt: UploadedFile | None = File(None),  # comprovante opcional
+):
+    """Enfileira um pagamento avulso a um terceiro LIVRE (não precisa ser usuário): PIX por chave ou
+    boleto por linha digitável, pela conta Asaas. Anexa um comprovante opcional. Entra na mesma fila
+    de saída (visível em GET /finance/payouts, kind=manual). Validação inválida → 422."""
+    require_superuser(request.auth)
+
+    receipt_path = None
+    if receipt is not None:
+        from core.media import save_media
+
+        ext = (getattr(receipt, "name", "") or "").rsplit(".", 1)[-1].lower() or "jpg"
+        receipt_path = save_media(prefix="receipt", data=receipt.read(), ext=ext)
+
+    try:
+        if kind == "pix":
+            pr = finance_manual.request_pix_payment(
+                amount=amount,
+                pix_key=pix_key,
+                supplier_name=supplier_name,
+                description=description,
+                receipt=receipt_path,
+            )
+        elif kind == "boleto":
+            pr = finance_manual.request_boleto_payment(
+                line_code=boleto_line,
+                amount=amount,
+                supplier_name=supplier_name,
+                description=description,
+                receipt=receipt_path,
+            )
+        else:
+            raise HttpError(422, "kind deve ser 'pix' ou 'boleto'.")
+    except finance_manual.ManualPaymentError as exc:
+        raise HttpError(422, str(exc)) from exc
+    return {
+        "external_id": str(pr.external_id),
+        "kind": pr.kind,
+        "method": pr.method,
+        "amount": str(pr.amount),
+        "status": pr.status,
+        "external_reference": pr.external_reference,
+        "receipt": pr.receipt,
+    }
+
+
+# ── fechamento semanal (staff adianta o "sexta 18h" e mede a saúde — Victor 2026-06-29) ──
+@api.post("/finance/closing/run", tags=["staff"])
+def run_closing(request):
+    """Adianta o fechamento da semana corrente (em vez de esperar a sexta 18h). Idempotente: re-rodar
+    a mesma semana é no-op (cada beneficiário já fechado é pulado). Devolve o resumo do fechamento."""
+    require_superuser(request.auth)
+    return finance_commissions.run_weekly_closing()
+
+
+@api.get("/finance/closing/health", tags=["staff"])
+def closing_health(request):
+    """Saúde do fechamento: cruza o SALDO da conta Asaas (lido ao vivo) com a OBRIGAÇÃO estimada
+    (comissões pendentes da semana + fila de saída ativa). Diz se o saldo cobre — e o déficit se não."""
+    require_superuser(request.auth)
+    from decimal import Decimal
+
+    obligation = finance_iface.closing_obligation()
+    estimated = Decimal(obligation["obrigacao_estimada"])
+
+    balance = asaas_onboarding.account_balance()
+    saldo = balance.get("balance") if isinstance(balance, dict) else None
+    if saldo is None:
+        # saldo indisponível (sem key/erro de rede): reporta sem chutar suficiência.
+        return {
+            **obligation,
+            "saldo": None,
+            "suficiente": None,
+            "deficit": None,
+            "balance_error": balance.get("error") if isinstance(balance, dict) else True,
+        }
+    saldo_dec = Decimal(str(saldo)).quantize(Decimal("0.01"))
+    deficit = estimated - saldo_dec
+    return {
+        **obligation,
+        "saldo": str(saldo_dec),
+        "suficiente": saldo_dec >= estimated,
+        "deficit": str(deficit) if deficit > 0 else "0.00",
+    }
 
 
 # ── integrações (WP6: status/config + fluxo + ações setup/test) ─────────────
