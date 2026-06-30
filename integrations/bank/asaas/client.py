@@ -143,7 +143,9 @@ class AsaasClient:
         )
 
     # ---------- bill payments (boleto / conta de consumo, OUTBOUND) ----------
-    async def pay_bill(self, payload: dict, *, idempotency_key: str | None = None) -> dict:
+    async def pay_bill(
+        self, payload: dict, *, idempotency_key: str | None = None
+    ) -> dict:
         # Paga um boleto/conta pela linha digitável (`identificationField`) ou código de barras
         # (`barCode`). Campos úteis no retorno: id, status, value, dueDate.
         return await self._request(

@@ -306,9 +306,7 @@ def _save_photo(
 _DOC_EXT = {**_EXT, "application/pdf": "pdf"}
 
 
-def _save_doc_file(
-    student: Student, kind: str, data: bytes, content_type: str
-) -> str:
+def _save_doc_file(student: Student, kind: str, data: bytes, content_type: str) -> str:
     """Salva um arquivo do diploma (PDF ou imagem) em media/diploma/ com token não-enumerável."""
     from core.media import save_media
 
@@ -831,7 +829,9 @@ def issue_diploma(
         )
     if not diploma_bytes:
         raise StudentError("Envie o arquivo do diploma.", code="DIPLOMA_FILE_REQUIRED")
-    diploma_rel = _save_doc_file(student, "diploma", diploma_bytes, diploma_content_type)
+    diploma_rel = _save_doc_file(
+        student, "diploma", diploma_bytes, diploma_content_type
+    )
     transcript_rel = None
     if transcript_bytes:
         transcript_rel = _save_doc_file(

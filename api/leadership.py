@@ -1104,9 +1104,7 @@ def issue_diploma(
     response=EnrollmentActionOut,
     tags=["student"],
 )
-def register_diploma_pickup(
-    request, external_id: str, file: UploadedFile = File(...)
-):
+def register_diploma_pickup(request, external_id: str, file: UploadedFile = File(...)):
     """Coordenador posta a FOTO do aluno recebendo o diploma → aluno vira VETERAN + comissão do
     coordenador (Victor 2026-06-29: TODO o fluxo do diploma é do coordenador; o aluno não posta nada).
     Fora de AGUARDANDO RETIRADA → 409 `WRONG_STATUS`; diploma não emitido → 422 `DIPLOMA_NOT_ISSUED`."""

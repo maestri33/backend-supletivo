@@ -16,7 +16,7 @@ from api.auth import require_superuser
 from api.base import build_group
 from api.schemas import MaterialIn, MaterialUpdateIn
 from finance import interface as finance_iface
-from finance.interface import commissions as finance_commissions
+from finance.interface import commissions as finance_closing
 from finance.interface import manual as finance_manual
 from hub import interface as hub_iface
 from integrations import status as integ_status
@@ -324,7 +324,7 @@ def run_closing(request):
     """Adianta o fechamento da semana corrente (em vez de esperar a sexta 18h). Idempotente: re-rodar
     a mesma semana é no-op (cada beneficiário já fechado é pulado). Devolve o resumo do fechamento."""
     require_superuser(request.auth)
-    return finance_commissions.run_weekly_closing()
+    return finance_closing.run_weekly_closing()
 
 
 @api.get("/finance/closing/health", tags=["staff"])
@@ -346,7 +346,9 @@ def closing_health(request):
             "saldo": None,
             "suficiente": None,
             "deficit": None,
-            "balance_error": balance.get("error") if isinstance(balance, dict) else True,
+            "balance_error": balance.get("error")
+            if isinstance(balance, dict)
+            else True,
         }
     saldo_dec = Decimal(str(saldo)).quantize(Decimal("0.01"))
     deficit = estimated - saldo_dec

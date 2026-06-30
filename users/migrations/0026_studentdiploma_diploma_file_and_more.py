@@ -4,20 +4,19 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
-        ('users', '0025_student_uniq_student_platform_login'),
+        ("users", "0025_student_uniq_student_platform_login"),
     ]
 
     operations = [
         migrations.AddField(
-            model_name='studentdiploma',
-            name='diploma_file',
+            model_name="studentdiploma",
+            name="diploma_file",
             field=models.CharField(blank=True, max_length=500, null=True),
         ),
         migrations.AddField(
-            model_name='studentdiploma',
-            name='transcript_file',
+            model_name="studentdiploma",
+            name="transcript_file",
             field=models.CharField(blank=True, max_length=500, null=True),
         ),
     ]

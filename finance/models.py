@@ -163,7 +163,9 @@ class PaymentRequest(ExternalIdModel):
     pix_key = models.CharField(max_length=140, null=True, blank=True)
     # avulso (kind=manual, method=boleto): linha digitável + comprovante opcional (recibo).
     boleto_line = models.CharField(max_length=64, null=True, blank=True)
-    receipt = models.CharField(max_length=255, null=True, blank=True)  # path relativo (anexo)
+    receipt = models.CharField(
+        max_length=255, null=True, blank=True
+    )  # path relativo (anexo)
     status = models.CharField(
         max_length=16, choices=Status.choices, default=Status.QUEUED, db_index=True
     )

@@ -73,7 +73,8 @@ def pay_bill(*, line_code, amount=None, description=None, payment_id=None) -> Pa
     row = Payment.objects.create(
         payment_id=pid,
         kind=Payment.Kind.BOLETO,
-        amount=amt or Decimal("0"),  # 0 = "ler do boleto"; reconciliação atualiza pelo Asaas
+        amount=amt
+        or Decimal("0"),  # 0 = "ler do boleto"; reconciliação atualiza pelo Asaas
         status="SUBMITTING",
         description=description or f"boleto {pid}",
     )
@@ -138,7 +139,9 @@ def refresh_boleto(payment_id: str) -> Payment:
         row.status = mapped
         fields = ["status", "updated_at"]
         if mapped == "FAILED":
-            row.last_error = bill.get("failReason") or f"bill_status={bill.get('status')}"
+            row.last_error = (
+                bill.get("failReason") or f"bill_status={bill.get('status')}"
+            )
             fields.append("last_error")
         row.save(update_fields=fields)
     return row
