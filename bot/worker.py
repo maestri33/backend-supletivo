@@ -22,7 +22,8 @@ from django.conf import settings
 from django.utils import timezone
 
 from bot import context as ctx
-from bot import faq, guardrail, ratelimit, router
+from bot import engine, faq, guardrail, ratelimit, router
+from bot.actor import Actor
 from bot.models import (
     DIRECTION_INBOUND,
     DIRECTION_OUTBOUND,
@@ -222,6 +223,27 @@ def handle_inbound(inbound_event_id: int) -> str:
         logger.warning("bot.degraded_budget", conv=conversation.id)
         return "degraded_budget"
 
+    # ── MOTOR DETERMINÍSTICO DA ETAPA (FASE 2) ───────────────────────────────
+    # O bot age COMO O USUÁRIO (JWT interno, mesma superfície da API). O CÓDIGO decide a ação
+    # canônica da etapa; a IA só conversa. Cadastrado → Actor (token emitido+validado pelo gate da
+    # API); estranho → sem actor (engine vira no-op, segue na FAQ pública).
+    actor = Actor.for_user(user) if user is not None else None
+    decision = engine.run(actor, policy, text)
+
+    # Escrita falhou na API → humano assume (NUNCA finge que fez).
+    if decision.escalate:
+        _escalate(conversation, phone, reason=f"engine:{decision.escalate}")
+        return "engine_escalated"
+
+    # Resposta DETERMINÍSTICA (ex.: confirmação de escrita): pula a IA — o desfecho é verdade que o
+    # motor conhece; não deixamos a IA inventar "salvei"/"não salvei". Conta no rate-limit, não no
+    # orçamento de IA (não houve AiCall).
+    if decision.reply is not None:
+        conversation.state = STATE_OPEN
+        conversation.save(update_fields=["last_activity"])
+        _send(text=decision.reply, phone=phone, conversation=conversation)
+        return "engine_replied"
+
     # histórico (últimas N, ordem cronológica), sem a inbound atual já gravada
     history = list(
         conversation.messages.order_by("-created_at")[: _HISTORY_LIMIT + 1][::-1]
@@ -238,6 +260,8 @@ def handle_inbound(inbound_event_id: int) -> str:
         user_external_id=user_external_id,
         history=history,
         user_text=text,
+        engine_directive=decision.directive,
+        engine_facts=decision.facts,
     )
 
     # IA chat — caída (cadeia esgotada) → canned + awaiting_human (fallback, nunca erro cru)
