@@ -326,3 +326,75 @@ def login(*, external_id: str, role: str, otp: str) -> dict:
     tokens = jwt_service.issue(external_id, active)
     logger.info("auth.login_ok", external_id=external_id, role=role)
     return tokens
+
+
+# ── login de STAFF (superuser puro, sem role de funil — Victor 2026-06-30) ──
+# O staff é superuser NATIVO do Django (api/auth.require_superuser confere is_superuser no DB). O
+# login normal (acima) EXIGE uma role de funil em active_roles → um superuser PURO tomava
+# NOT_IN_FUNNEL. Aqui o gate é is_superuser, não role: espelha check/login do cliente, mas só
+# enxerga staff. O JWT sai com as roles ativas (pode ser vazio — o gate de staff lê o DB, não claims).
+
+
+def _is_staff_user(user) -> bool:
+    """True se o user existe, está ativo e é superuser (mesma semântica de require_superuser)."""
+    return bool(user and user.is_active and user.is_superuser)
+
+
+def check_staff(
+    *, cpf: str | None = None, phone: str | None = None, external_id: str | None = None
+) -> dict:
+    """Acha o STAFF (superuser) por cpf/phone/external_id e dispara OTP se for staff.
+
+    Diferente do `check` do cliente (que VAZA existência por design, §5), aqui um usuário comum
+    (ou inexistente) sai `found:false` IGUAL — não vaza quem é staff. Validação só de FORMATO.
+    """
+    if cpf:
+        try:
+            cpf = validation.validate_cpf(cpf)
+        except ValueError as exc:
+            raise ValidationError(str(exc), code="CPF_INVALID") from exc
+    elif phone:
+        try:
+            phone = validation.validate_phone(phone)
+        except ValueError as exc:
+            raise ValidationError(str(exc), code="PHONE_INVALID") from exc
+    elif not external_id:
+        raise ValidationError(
+            "Informe cpf, phone ou external_id.", code="MISSING_FIELD"
+        )
+
+    user = _find_user(cpf=cpf, phone=phone, external_id=external_id)
+    if not _is_staff_user(user):
+        # não-staff (ou inexistente) → found:false honesto, sem vazar quem é staff.
+        _jitter()
+        return {
+            "otp_sent": False,
+            "otp_wait": None,
+            "found": False,
+            "external_id": None,
+        }
+
+    result = _send_or_wait(user)
+    return {**result, "found": True, "external_id": str(user.external_id)}
+
+
+def login_staff(*, external_id: str, otp: str) -> dict:
+    """Login do STAFF: exige is_superuser (NÃO role de funil) → valida OTP → emite JWT.
+
+    Não-superuser → 403 `NOT_STAFF`. As roles do JWT são as ativas do user (pode ser vazio); o
+    gate de staff (`require_superuser`) confere is_superuser no banco, não nos claims.
+    """
+    user = User.objects.filter(external_id=external_id).first()
+    if user is None:
+        raise NotFound("Usuário não encontrado.", code="USER_NOT_FOUND")
+    if not _is_staff_user(user):
+        logger.warning("auth.login_staff_denied", external_id=external_id)
+        raise Forbidden("Acesso restrito ao staff.", code="NOT_STAFF")
+
+    if not otp_service.verify(user, otp):
+        raise Unauthorized("OTP inválido ou expirado.", code="OTP_INVALID")
+
+    active = roles.active_roles(user)
+    tokens = jwt_service.issue(external_id, active)
+    logger.info("auth.login_staff_ok", external_id=external_id)
+    return tokens

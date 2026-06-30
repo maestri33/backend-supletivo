@@ -8,13 +8,13 @@ Todas as rotas exigem SUPERUSER (staff = superuser nativo do Django — Victor 2
 from __future__ import annotations
 
 from django.conf import settings
-from ninja import File, Form, Schema
+from ninja import File, Form, Router, Schema
 from ninja.errors import HttpError
 from ninja.files import UploadedFile
 
 from api.auth import require_superuser
-from api.base import build_group
-from api.schemas import MaterialIn, MaterialUpdateIn
+from api.base import add_auth_refresh, build_group
+from api.schemas import MaterialIn, MaterialUpdateIn, TokenOut
 from finance import interface as finance_iface
 from finance.interface import commissions as finance_closing
 from finance.interface import manual as finance_manual
@@ -32,6 +32,51 @@ from users.roles.training import interface as training_iface
 api = build_group(
     "staff", "Administração da plataforma: hub, coordenador, saúde dos serviços."
 )
+
+
+# ── staff/auth — login do STAFF (superuser puro, sem role de funil — Victor 2026-06-30) ──
+# O login do cliente (clients/auth) EXIGE uma role de funil → um superuser PURO tomava
+# NOT_IN_FUNNEL. Aqui o gate é is_superuser (não role): espelha o check/login do cliente, mas só
+# enxerga staff. Públicas (auth=None) — é a porta de ENTRADA do app de staff.
+auth_router = Router(tags=["auth"])
+
+
+class StaffCheckIn(Schema):
+    cpf: str | None = None
+    phone: str | None = None
+    external_id: str | None = None
+
+
+class StaffCheckOut(Schema):
+    found: bool
+    external_id: str | None = None
+    otp_sent: bool
+    otp_wait: int | None = None
+
+
+class StaffLoginIn(Schema):
+    external_id: str
+    otp: str
+
+
+@auth_router.post("/check", response=StaffCheckOut, auth=None)
+def staff_check(request, payload: StaffCheckIn):
+    """Acha o STAFF (superuser) por cpf/phone/external_id e dispara OTP. NÃO vaza quem é staff:
+    usuário comum (ou inexistente) sai `found:false` igual."""
+    return auth_iface.check_staff(
+        cpf=payload.cpf, phone=payload.phone, external_id=payload.external_id
+    )
+
+
+@auth_router.post("/login", response=TokenOut, auth=None)
+def staff_login(request, payload: StaffLoginIn):
+    """Login passwordless (OTP) do STAFF — exige is_superuser (não role de funil) e emite JWT.
+    Não-superuser → 403 `NOT_STAFF`."""
+    return auth_iface.login_staff(external_id=payload.external_id, otp=payload.otp)
+
+
+add_auth_refresh(auth_router)
+api.add_router("/auth", auth_router)
 
 
 # ── schemas ──────────────────────────────────────────────────────────────
@@ -609,3 +654,36 @@ def set_user_phone(request, external_id: str, payload: PhoneIn):
     return auth_iface.change_phone(
         user_external_id=external_id, new_phone=payload.phone
     )
+
+
+# ── notificação avulsa (staff manda whatsapp/email a um usuário ou destino LIVRE — Victor 2026-06-30) ──
+# ⚠️ PRODUÇÃO REAL: dispara WhatsApp/e-mail de verdade (enfileira no Django-Q). A função interface
+# (notify.send_adhoc) valida a borda; aqui é casca fina (CONVENTION §3).
+class StaffNotifyIn(Schema):
+    user_external_id: str | None = None
+    phone: str | None = None
+    email: str | None = None
+    subject: str | None = None
+    message: str
+    channels: list[str] | None = None  # subconjunto de {"whatsapp","email"}
+
+
+@api.post("/notify", tags=["staff"])
+def staff_notify(request, payload: StaffNotifyIn):
+    """Envia uma notificação avulsa (whatsapp e/ou e-mail) a um USUÁRIO (`user_external_id`, herda
+    phone/email do Profile) OU a um destino LIVRE (`phone`/`email` sem cadastro). `channels` opcional
+    (default: todos com destino). Valida na borda: mensagem não-vazia + pelo menos um destino.
+    Devolve o `external_id` da notificação enfileirada."""
+    require_superuser(request.auth)
+    from notify.interface.send import send_adhoc
+
+    external_id = send_adhoc(
+        message=payload.message,
+        to_user=payload.user_external_id,
+        phone=payload.phone,
+        email=payload.email,
+        subject=payload.subject,
+        channels=payload.channels,
+        caller="staff.notify",
+    )
+    return {"external_id": external_id}

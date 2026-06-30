@@ -18,6 +18,7 @@ import structlog
 from django.db import IntegrityError, transaction
 
 from notify.models import STATUS_PENDING, STATUS_SKIPPED, Notification
+from users.exceptions import NotFound, ValidationError
 
 logger = structlog.get_logger()
 
@@ -147,3 +148,75 @@ def get_by_external_id(external_id) -> Notification | None:
     if not external_id:
         return None
     return Notification.objects.filter(external_id=external_id).first()
+
+
+def send_adhoc(
+    *,
+    message: str,
+    to_user: str | None = None,
+    phone: str | None = None,
+    email: str | None = None,
+    subject: str | None = None,
+    channels: list[str] | None = None,
+    caller: str = "notify.adhoc",
+) -> str:
+    """Notificação AVULSA do staff: WhatsApp e/ou e-mail a um USUÁRIO (external_id) OU a um destino
+    LIVRE (phone/email sem cadastro). Devolve o `external_id` da Notification.
+
+    - `to_user`: external_id de um User — resolve phone/email pelo Profile (não precisa digitar).
+    - `phone`/`email`: destino livre (pode coexistir com `to_user` p/ sobrescrever um canal).
+    - `channels`: subconjunto de {"whatsapp","email"}; default = todos os que têm destino.
+
+    Valida na borda: mensagem não-vazia + pelo menos um destino. Reusa o dispatcher (`send`):
+    enfileira no Django-Q e nunca bloqueia. NÃO loga PII (telefone/e-mail).
+    """
+    message = (message or "").strip()
+    if not message:
+        raise ValidationError("Mensagem não pode ser vazia.", code="MISSING_FIELD")
+
+    phone = (phone or "").strip() or None
+    email = (email or "").strip().lower() or None
+
+    # usuário informado → herda phone/email do Profile (sem sobrescrever destino livre explícito).
+    if to_user:
+        from users.profiles import interface as profiles
+
+        profile = profiles.find_by_external_id(to_user)
+        if profile is None:
+            raise NotFound("Usuário não encontrado.", code="USER_NOT_FOUND")
+        phone = phone or (profile.phone or None)
+        email = email or (profile.email or None)
+
+    if not phone and not email:
+        raise ValidationError(
+            "Informe ao menos um destino (to_user, phone ou email).",
+            code="MISSING_FIELD",
+        )
+
+    # canais: default = todos os que têm destino; senão respeita o pedido (intersecção com destino).
+    requested = {c.strip().lower() for c in (channels or [])} or {"whatsapp", "email"}
+    want_whatsapp = "whatsapp" in requested and bool(phone)
+    want_email = "email" in requested and bool(email)
+    if not want_whatsapp and not want_email:
+        raise ValidationError(
+            "Nenhum canal com destino válido (whatsapp exige phone; email exige email).",
+            code="MISSING_FIELD",
+        )
+
+    logger.info(
+        "notify.adhoc",
+        caller=caller,
+        whatsapp=want_whatsapp,
+        email=want_email,
+        has_user=bool(to_user),
+    )
+    return send(
+        text=message,
+        caller=caller,
+        phone=phone if want_whatsapp else None,
+        email=email if want_email else None,
+        subject=subject,
+        title=subject,
+        whatsapp=want_whatsapp,
+        email_channel=want_email,
+    )
