@@ -38,6 +38,9 @@ urlpatterns = [
     # charge/payout/status/setup) foi FECHADA e migrada pro Ninja autenticado (Victor 2026-06-16).
     path("integrations/asaas/", include("integrations.bank.asaas.urls")),
     path("integrations/infinitepay/", include("integrations.bank.infinitepay.urls")),
+    # Webhook PÚBLICO inbound do WhatsApp (Evolution chama em cada mensagem recebida). Sibling dos
+    # gateways; auth = header x-webhook-token == WHATSAPP_WEBHOOK_SECRET (fail-closed). App `bot`.
+    path("integrations/whatsapp/", include("bot.urls")),
     # API Ninja versionada — /api/v1/<grupo>/ (cada grupo serve /docs e /openapi.json).
     path("api/v1/clients/", clients_api.urls),
     path("api/v1/collaborators/", collaborators_api.urls),

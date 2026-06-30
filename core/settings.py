@@ -82,6 +82,10 @@ INSTALLED_APPS = [
     # todo = casca de funcionalidades a desenvolver (mocks "não implementado"). Hoje: bot
     # matriculador (mock) + receiver do signal enrollment_ready_for_matricula. Sem models.
     "core.todo.apps.TodoConfig",
+    # bot = atendimento por IA no WhatsApp (FASE 0 + FASE 1 MVP: FAQ por público + leitura segura
+    # do próprio usuário + escalonamento a humano; ZERO escrita). Webhook inbound (sibling dos
+    # gateways), worker Django-Q, guardrail fail-closed (injeção/PII). Consome ai/notify/users.
+    "bot.apps.BotConfig",
 ]
 
 # User custom (palavra do Victor 2026-06-01; sobrepõe o "User padrão" da CONVENTION §4): a
@@ -371,6 +375,30 @@ if GEMINI_API_KEY and any(_p == "gemini" for _p, _m in IA_FALLBACK_CHAIN):
 WHATSAPP_API_BASE_URL = env("WHATSAPP_API_BASE_URL", default="")
 WHATSAPP_GLOBAL_API_KEY = env("WHATSAPP_GLOBAL_API_KEY", default="")
 WHATSAPP_INSTANCE_NAME = env("WHATSAPP_INSTANCE_NAME", default="default")
+
+
+# bot (app bot) — atendimento por IA no WhatsApp (FASE 0 + FASE 1 MVP). Config via .env (§8/§10).
+# Segredo do webhook inbound: a Evolution NÃO assina HMAC, então autenticamos por header-token
+# compartilhado (x-webhook-token == este valor), comparado em tempo constante. Sem ele o webhook
+# do bot dá 401 (fail-closed) e o check bot.W001 avisa no boot (não trava — padrão asaas.W001).
+WHATSAPP_WEBHOOK_SECRET = env("WHATSAPP_WEBHOOK_SECRET", default="")
+# Rate-limit por TELEFONE em DB (sem Redis), espelha o OTP: janela curta (1 a cada WINDOW_S) +
+# janela horária (máx HOURLY_MAX/h). Anti-abuso de custo de IA/WhatsApp; alto p/ não trancar
+# usuário legítimo. Estouro da janela curta = silêncio; da horária = FAQ estática (modo degradado).
+BOT_RATELIMIT_WINDOW_S = env.int("BOT_RATELIMIT_WINDOW_S", default=3)
+BOT_RATELIMIT_HOURLY_MAX = env.int("BOT_RATELIMIT_HOURLY_MAX", default=60)
+# Teto DIÁRIO de chamadas de IA do bot (soma AiCall caller=bot_atendimento do dia). Estourou =>
+# modo degradado (só FAQ estática, sem IA). <= 0 desliga o teto. Default conservador.
+BOT_DAILY_AI_CAP = env.int("BOT_DAILY_AI_CAP", default=2000)
+# Parâmetros do chat do bot (temperatura baixa = respostas mais previsíveis/seguras; teto de tokens
+# da resposta). max_tokens=0 => sem teto explícito (cai no default do provider/IA_MAX_TOKENS).
+BOT_AI_TEMPERATURE = env.float("BOT_AI_TEMPERATURE", default=0.3)
+BOT_AI_MAX_TOKENS = env.int("BOT_AI_MAX_TOKENS", default=500)
+# Guardrail externo OPCIONAL (aidefence HTTP): se setado, decide injeção (entrada) e PII (saída).
+# Contrato FAIL-CLOSED: configurado mas inalcançável/contrato inválido => BLOQUEIA. Vazio => o
+# detector LOCAL (regex injeção/PII em bot/guardrail.py) é o piso de segurança sempre ligado.
+BOT_GUARDRAIL_URL = env("BOT_GUARDRAIL_URL", default="")
+BOT_GUARDRAIL_TIMEOUT = env.float("BOT_GUARDRAIL_TIMEOUT", default=5.0)
 
 # Mail (integrations.communication.mail) — cliente SMTP STARTTLS:587 autenticado. Config via .env
 # (CONVENTION §8/§10). A senha do noreply tem "!"/"@" (sem "$"), mas lemos via os.environ literal
