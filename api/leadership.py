@@ -754,6 +754,24 @@ def list_reviews(request):
     }
 
 
+@api.get("/reviews/prioritized", tags=["review"])
+def list_reviews_prioritized(request):
+    """A MESMA fila do `/reviews`, mas achatada numa lista ÚNICA ordenada por urgência (triagem).
+
+    Quick win (Victor 2026-06-30): o `/reviews` entrega baldes separados sem ordem entre si — o
+    coordenador não sabe o que atacar primeiro. Aqui reusamos a fila já montada e aplicamos
+    `api.triage.prioritize` (score DETERMINÍSTICO: peso por tipo + tempo de espera). Read-only; não
+    altera o `/reviews` original. Devolve `{count, items:[...]}` com `priority_score`/`waiting_hours`
+    em cada item."""
+    from api import triage
+
+    reviews = list_reviews(
+        request
+    )  # reusa o endpoint (o decorator devolve a própria função)
+    items = triage.prioritize(reviews)
+    return {"count": len(items), "items": items}
+
+
 # ── funil do aluno: fase da TAXA (2 parcelas) → conclusão (plan/14) ─────────
 # Substitui o `/release` antigo (QRs juntos) — descartado pelo Victor 2026-06-12 ("delírio de IA").
 class FeeIn(Schema):

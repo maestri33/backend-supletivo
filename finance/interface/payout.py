@@ -66,6 +66,45 @@ def _dispatch_fee_hook(
     )
 
 
+def _notify_commission_paid(pr: PaymentRequest) -> None:
+    """Avisa o beneficiário que a comissão da semana CAIU (PIX confirmado pelo Asaas).
+
+    Só pra `Kind.COMMISSION` (fee/manual não têm User payee). UMA notificação por PaymentRequest
+    (idempotente por external_reference — re-reconciliação não renotifica). Confirmação de transação
+    JÁ concluída (não promete nada: o PIX do valor exato já saiu). Isola exceção: notificar nunca
+    pode derrubar o worker de pagamento (§12)."""
+    if pr.kind != PaymentRequest.Kind.COMMISSION:
+        return
+    try:
+        profile = get_profile(pr.payee)
+        phone = (profile.phone if profile else None) or None
+        if not phone:
+            return  # sem telefone não há canal — nada a fazer (não falha)
+        first = ((profile.name or "").strip().split() or [""])[0] if profile else ""
+        saudacao = f"Olá, {first}! " if first else "Olá! "
+        valor = f"{pr.amount:.2f}".replace(".", ",")
+        from notify.interface.send import send
+
+        send(
+            text=(
+                f"{saudacao}Sua comissão foi paga. 💸\n\n"
+                f"Acabamos de enviar o PIX de R$ {valor} referente ao fechamento da sua semana. "
+                f"O valor deve cair na sua conta em instantes."
+            ),
+            title="Comissão paga",
+            caller="finance.commission_paid",
+            phone=phone,
+            gender=(profile.gender if profile else None) or None,
+            idempotency_key=f"commission_paid:{pr.external_reference}",
+        )
+    except Exception as exc:  # noqa: BLE001 — notificar nunca derruba o pagamento (§12)
+        logger.warning(
+            "finance.commission_paid_notify_failed",
+            ref=pr.external_reference,
+            error=str(exc)[:160],
+        )
+
+
 def process_payment_requests() -> dict:
     """Uma passada do worker: envia as filas prontas e reconcilia as enviadas. Devolve um resumo."""
     now = timezone.now()
@@ -230,6 +269,9 @@ def _reconcile(pr: PaymentRequest, summary: dict) -> None:
         pr.save(update_fields=["status", "asaas_status", "updated_at"])
         _cascade(pr, Commission.Status.PAID)
         _dispatch_fee_hook(pr, "fee.paid")
+        _notify_commission_paid(
+            pr
+        )  # avisa o beneficiário (comissão); idempotente, isolado
         summary["paid"] += 1
         logger.info(
             "finance.payout_paid", ref=pr.external_reference, amount=str(pr.amount)

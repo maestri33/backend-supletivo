@@ -21,6 +21,7 @@ from integrations.communication.mail import client as mail_client
 from integrations.communication.mail import templates as mail_templates
 from integrations.communication.whatsapp.client import get_client as get_whatsapp_client
 from integrations.ai import service as ai_service
+from notify import sanitize
 from notify.models import STATUS_FAILED, STATUS_PENDING, STATUS_SENT, Notification
 
 logger = structlog.get_logger()
@@ -139,8 +140,11 @@ def _send_tts(notif: Notification) -> None:
     try:
         # ai.tts gera o mp3 e devolve o caminho RELATIVO a MEDIA_ROOT (ex.: "ai/audio/<uuid>.mp3").
         # gender (M/F) escolhe a voz — a resolução gênero→voz mora no integrations.ai (§7 do plano).
+        # sanitiza o texto pra leitura em voz (tira markdown/URL/emoji) — o WhatsApp/e-mail seguem
+        # com o texto ORIGINAL; só o áudio usa a versão falável.
+        speakable = sanitize.for_tts(notif.text)
         rel_path = ai_service.tts(
-            notif.text, caller=f"notify:{notif.caller}", gender=notif.gender or None
+            speakable, caller=f"notify:{notif.caller}", gender=notif.gender or None
         )
         notif.tts_audio_path = rel_path
         # a Evolution busca a URL: usa a base LAN (IP interno, mesma sub-rede, sem egress/TLS —

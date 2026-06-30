@@ -265,6 +265,59 @@ def extract_document(
     return data
 
 
+def extract_document_from_image(
+    image_bytes: bytes,
+    *,
+    doc_type: str,
+    holder_name: str | None,
+    caller: str,
+    mime_type: str = "image/jpeg",
+) -> dict:
+    """Extração DIRETA do documento pela imagem (1 chamada multimodal) — pula o Google Vision OCR.
+
+    Alternativa ADITIVA ao par `ocr_images`+`extract_document`: o modelo de visão (MiniMax-M3, que já
+    serve `check_photo`) é multimodal e lê o documento direto da foto, então dá pra extrair o JSON
+    numa única chamada — menos latência e menos um provedor no caminho (sem a ida ao Vision OCR).
+
+    NÃO substitui o caminho OCR→LLM atual (que roda em prod): é uma capacidade nova, pra o Victor
+    adotar quando validar a qualidade ponta-a-ponta. Mesmo contrato de saída de `extract_document`
+    (mesmo schema por `doc_type`, mesma regra de `name_match`). Erro de IA sobe (orquestrador decide).
+    """
+    if doc_type not in DOC_TYPES:
+        raise ValueError(f"doc_type inválido: {doc_type!r} (use um de {DOC_TYPES})")
+    import json as _json
+    import re
+
+    from integrations.ai import service as ai
+
+    expected = holder_name or "(nome não informado)"
+    schema = _EXTRACT_SCHEMAS[doc_type]
+    doc_hint = _DOC_TYPE_HINT[doc_type]
+    prompt = (
+        f"Esta imagem é {doc_hint} "
+        f"Leia o documento e extraia EXATAMENTE este JSON (sem texto fora dele): {schema}\n\n"
+        f"O titular esperado desta conta é: {expected}. Compare o nome do documento com o "
+        "esperado: variação por CASAMENTO (sobrenome acrescentado/alterado) ou abreviação = 'sim'; "
+        "outra pessoa = 'nao'; ilegível/ausente = 'duvida'. Explique em name_reason. NÃO invente: "
+        "campo que você não conseguir ler na imagem = null."
+    )
+    # Erro de IA SOBE (não captura): o orquestrador do funil decide (em regra, REVIEW) — igual a
+    # `extract_document`. Aqui só tratamos a resposta NÃO-JSON (modelo respondeu mas fora do contrato).
+    desc = ai.describe_image(
+        image_bytes, caller=caller, mime_type=mime_type, prompt=prompt
+    )
+    match = re.search(r"\{.*\}", desc or "", re.DOTALL)
+    if not match:
+        logger.warning("document_ai.direct_extract_no_json", caller=caller)
+        return {}
+    try:
+        data = _json.loads(match.group(0))
+    except _json.JSONDecodeError:
+        logger.warning("document_ai.direct_extract_bad_json", caller=caller)
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
 def crop_face(
     image_bytes: bytes, *, mime_type: str = "image/jpeg", caller: str
 ) -> bytes | None:

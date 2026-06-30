@@ -72,18 +72,29 @@ def _record(
     error: Exception | None,
     started_at: float,
 ) -> None:
-    """Grava uma linha AiCall com as métricas de UMA tentativa (cost null — CONVENTION §8)."""
+    """Grava uma linha AiCall com as métricas de UMA tentativa. `cost` fica null até a tabela de
+    preços (IA_PRICES no .env) estar configurada — aí `pricing.cost_for` calcula pelos tokens (§8)."""
+    from . import pricing
+
+    prompt_tokens = getattr(result, "prompt_tokens", 0) or 0
+    completion_tokens = getattr(result, "completion_tokens", 0) or 0
+    cost = pricing.cost_for(
+        provider=provider,
+        model=model,
+        prompt_tokens=prompt_tokens,
+        completion_tokens=completion_tokens,
+    )
     AiCall.objects.create(
         provider=provider,
         operation=operation,
         model=model,
         caller=caller,
         status=AiCall.Status.ERROR if error is not None else AiCall.Status.SUCCESS,
-        prompt_tokens=getattr(result, "prompt_tokens", 0) or 0,
-        completion_tokens=getattr(result, "completion_tokens", 0) or 0,
+        prompt_tokens=prompt_tokens,
+        completion_tokens=completion_tokens,
         cache_hit_tokens=getattr(result, "cache_hit_tokens", 0) or 0,
         cache_miss_tokens=getattr(result, "cache_miss_tokens", 0) or 0,
-        cost=None,
+        cost=cost,
         latency_ms=int((time.monotonic() - started_at) * 1000),
         finish_reason=getattr(result, "finish_reason", None),
         error=str(error)[:1000] if error is not None else None,

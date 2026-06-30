@@ -307,6 +307,20 @@ IA_DEFAULT_TEMPERATURE = env.float("IA_DEFAULT_TEMPERATURE", default=0.3)
 IA_MAX_TOKENS = env.int("IA_MAX_TOKENS", default=0)
 IA_TIMEOUT = env.float("IA_TIMEOUT", default=60.0)
 
+# IA — tabela de preços OPCIONAL (integrations.ai.pricing). Formato: "provider:model:in:out, ..."
+# (in/out = preço por 1 MILHÃO de tokens, moeda à escolha do Victor). VAZIO por padrão → AiCall.cost
+# segue null (§8: não invento dinheiro). Entrada malformada é ignorada (não derruba o boot).
+IA_PRICES = {}
+for _ia_price in env.list("IA_PRICES", default=[]):
+    _pp = [_s.strip() for _s in _ia_price.split(":")]
+    if len(_pp) == 4:
+        try:
+            from decimal import Decimal as _Dec
+
+            IA_PRICES[(_pp[0], _pp[1])] = (_Dec(_pp[2]), _Dec(_pp[3]))
+        except (ArithmeticError, ValueError):
+            pass
+
 # IA — modalidades de mídia (integrations.ai), via REST httpx. São OPCIONAIS: sem a key o check só
 # AVISA (ai.W001/W002/W003), não trava como a cadeia LLM (que é o núcleo). Keys AIza/sk_ (sem "$").
 # Gemini = visão (descrever imagem) + geração de imagem; ElevenLabs = TTS; Google Vision = OCR.
