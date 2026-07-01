@@ -40,6 +40,7 @@ class Command(BaseCommand):
         cpf = settings.DEFAULT_STAFF_CPF
         phone = settings.DEFAULT_STAFF_PHONE
         name = settings.DEFAULT_STAFF_NAME
+        email = settings.DEFAULT_STAFF_EMAIL
         password = settings.DEFAULT_STAFF_PASSWORD
         if not (cpf and phone and password):
             raise CommandError(
@@ -53,7 +54,7 @@ class Command(BaseCommand):
 
         with transaction.atomic():
             user, user_created = self._ensure_staff(
-                cpf=cpf, phone=phone, name=name, password=password
+                cpf=cpf, phone=phone, name=name, email=email, password=password
             )
             self._ensure_roles(user)
             self._ensure_pix(user)
@@ -76,7 +77,7 @@ class Command(BaseCommand):
             )
         )
 
-    def _ensure_staff(self, *, cpf, phone, name, password):
+    def _ensure_staff(self, *, cpf, phone, name, email, password):
         """Acha a conta-mãe pelo cpf (idempotente) ou cria como superuser + Profile + Address vazio."""
         existing = Profile.objects.filter(cpf=cpf).select_related("user").first()
         if existing is not None:
@@ -88,18 +89,29 @@ class Command(BaseCommand):
             if not user.is_staff:
                 user.is_staff = True
                 changed.append("is_staff")
+            # Email da conta-mãe: grava se veio do .env e o Profile está sem email (não sobrescreve).
+            if email and not existing.email:
+                existing.email = email
+                existing.save(update_fields=["email", "updated_at"])
             if changed:
                 user.save(update_fields=changed)
             return user, False
 
         user = User.objects.create_superuser(password=password)
-        profile = profiles.create(user=user, cpf=cpf, phone=phone, name=name)
+        profile = profiles.create(
+            user=user, cpf=cpf, phone=phone, name=name, email=email or None
+        )
         profiles.attach_address(profile, address_iface.create_empty())
         return user, True
 
     def _ensure_roles(self, user):
-        """promoter + coordinator DIRETO (bypass catálogo — seed de sistema). Idempotente."""
-        for role in ("promoter", "coordinator"):
+        """promoter + coordinator + staff DIRETO (bypass catálogo — seed de sistema). Idempotente.
+
+        `staff` NÃO é role de catálogo (o gate do painel /api/staff é `is_superuser`, não role), mas o
+        bot (`bot/router.resolve`) decide o público pelo `roles_set` de `active_roles` — que lê só
+        UserRole. Sem a row `staff`, o bot nunca trata a conta-mãe como staff, só como coordinator.
+        get_or_create direto é seguro: bypass do catálogo, mesmo caminho das outras duas roles."""
+        for role in ("promoter", "coordinator", "staff"):
             UserRole.objects.get_or_create(user=user, role=role, revoked_at=None)
 
     def _ensure_pix(self, user):
