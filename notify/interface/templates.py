@@ -19,7 +19,6 @@ from __future__ import annotations
 import re
 import structlog
 from dataclasses import dataclass
-from functools import lru_cache
 
 from django.db.models.signals import post_delete, post_save
 

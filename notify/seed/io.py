@@ -31,7 +31,7 @@ Formato (editável pelo Victor):
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 _EVENT_HEADER_RE = re.compile(r"^\[event:([a-z][a-z0-9_.-]*)\]\s*$")
 _FENCE = "~~~"

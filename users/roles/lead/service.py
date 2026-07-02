@@ -18,7 +18,6 @@ from users.auth import interface as auth_iface
 from users.auth.models import User
 from users.exceptions import DomainError
 from users.profiles import interface as profiles
-from users.roles import notifications as msgs
 from users.roles.lead import config
 from users.roles.lead.models import Checkout, Lead
 
