@@ -7,6 +7,7 @@ HTTP; o edge FastAPI (depois) chama a view por HTTP. A lógica não sai do Djang
 from users.auth.service import (
     change_phone,
     check,
+    check_bot,
     check_staff,
     login,
     login_staff,
@@ -17,6 +18,7 @@ from users.auth.service import (
 __all__ = [
     "register",
     "check",
+    "check_bot",
     "recover",
     "login",
     "change_phone",
