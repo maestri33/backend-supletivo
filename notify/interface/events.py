@@ -99,7 +99,9 @@ def send_event(
             logger.info("notify.event_inactive", event_key=event, caller="send_event")
             return None
 
-    prof, nome, nome_completo, p_phone, p_email, p_gender, birth = _resolve_profile(user, profile)
+    prof, nome, nome_completo, p_phone, p_email, p_gender, birth = _resolve_profile(
+        user, profile
+    )
     phone = phone or p_phone
     email = email or p_email
     gender = gender or p_gender
@@ -119,10 +121,18 @@ def send_event(
         else:
             channels = list(_DEFAULT_CHANNELS)
         t_title = title or (data.title if data is not None else None)
-        t_subject = subject or (data.subject if data is not None else None) or "Sua matrícula — atualização"
+        t_subject = (
+            subject
+            or (data.subject if data is not None else None)
+            or "Sua matrícula — atualização"
+        )
         t_media_url = media_url or (data.media_url if data is not None else None)
         t_media_type = media_type or (data.media_type if data is not None else None)
-        t_mail_tpl = mail_template or (data.mail_template if data is not None else None) or "default"
+        t_mail_tpl = (
+            mail_template
+            or (data.mail_template if data is not None else None)
+            or "default"
+        )
     elif data is not None:
         # ctx base: nome/nome-completo + aliases legados (`name` = `nome`).
         render_ctx: dict = {
@@ -156,7 +166,11 @@ def send_event(
             render_ctx.update(ctx)
         body = msgs.text(event, **render_ctx)
         is_tts = msgs.is_tts(event) if is_tts_override is None else is_tts_override
-        channels = list(channels_override) if channels_override is not None else list(_DEFAULT_CHANNELS)
+        channels = (
+            list(channels_override)
+            if channels_override is not None
+            else list(_DEFAULT_CHANNELS)
+        )
         t_title = title
         t_subject = subject
         t_media_url = media_url

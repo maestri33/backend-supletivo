@@ -31,10 +31,24 @@ class Command(BaseCommand):
     help = "Carrega notify/seed/templates.md no DB (Template + Trigger). Default cria só o que falta."
 
     def add_arguments(self, parser):
-        parser.add_argument("--path", default=str(_DEFAULT_PATH), help=f"Arquivo .md (default: {_DEFAULT_PATH})")
-        parser.add_argument("--force", action="store_true", help="Sobrescreve rows existentes pelo .md (perde edições manuais).")
-        parser.add_argument("--dry-run", action="store_true", help="Só relata o que faria, não grava.")
-        parser.add_argument("--active-only", action="store_true", help="Pula eventos marcados active: false no .md.")
+        parser.add_argument(
+            "--path",
+            default=str(_DEFAULT_PATH),
+            help=f"Arquivo .md (default: {_DEFAULT_PATH})",
+        )
+        parser.add_argument(
+            "--force",
+            action="store_true",
+            help="Sobrescreve rows existentes pelo .md (perde edições manuais).",
+        )
+        parser.add_argument(
+            "--dry-run", action="store_true", help="Só relata o que faria, não grava."
+        )
+        parser.add_argument(
+            "--active-only",
+            action="store_true",
+            help="Pula eventos marcados active: false no .md.",
+        )
 
     def handle(self, *args, **opts) -> None:
         path = Path(opts["path"])
@@ -65,7 +79,9 @@ class Command(BaseCommand):
                 existing = Template.objects.filter(event=spec.event).first()
                 if existing is None:
                     if dry:
-                        tpl = Template(event=spec.event, **fields)  # instância fictícia (não gravada)
+                        tpl = Template(
+                            event=spec.event, **fields
+                        )  # instância fictícia (não gravada)
                     else:
                         tpl = Template.objects.create(event=spec.event, **fields)
                     created += 1
@@ -79,7 +95,9 @@ class Command(BaseCommand):
                         if changed:
                             if not dry:
                                 existing.save()
-                                _db_cache.invalidate(spec.event)  # atualiza cache em memória
+                                _db_cache.invalidate(
+                                    spec.event
+                                )  # atualiza cache em memória
                             updated += 1
                         else:
                             unchanged += 1
@@ -108,7 +126,9 @@ class Command(BaseCommand):
                             triggers += 1
 
         verb = "DRY-RUN " if dry else ""
-        self.stdout.write(self.style.SUCCESS(
-            f"{verb}{len(specs)} specs: {created} criados, {updated} atualizados, "
-            f"{unchanged} unchanged, {skipped} pulados (active=false). Triggers: {triggers}."
-        ))
+        self.stdout.write(
+            self.style.SUCCESS(
+                f"{verb}{len(specs)} specs: {created} criados, {updated} atualizados, "
+                f"{unchanged} unchanged, {skipped} pulados (active=false). Triggers: {triggers}."
+            )
+        )

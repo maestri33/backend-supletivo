@@ -140,6 +140,7 @@ def is_tts(event: str) -> bool | None:
 
 # ── signals: invalidam o cache quando o Template muda. Conectados em notify.apps.ready ──
 
+
 def _on_template_save(sender, instance: Template, **_kwargs) -> None:
     invalidate(instance.event)
 
@@ -150,5 +151,13 @@ def _on_template_delete(sender, instance: Template, **_kwargs) -> None:
 
 def connect_signals() -> None:
     """Idempotente: conecta post_save/post_delete do Template ao invalidador de cache."""
-    post_save.connect(_on_template_save, sender=Template, dispatch_uid="notify.template.cache_invalidate")
-    post_delete.connect(_on_template_delete, sender=Template, dispatch_uid="notify.template.cache_invalidate_del")
+    post_save.connect(
+        _on_template_save,
+        sender=Template,
+        dispatch_uid="notify.template.cache_invalidate",
+    )
+    post_delete.connect(
+        _on_template_delete,
+        sender=Template,
+        dispatch_uid="notify.template.cache_invalidate_del",
+    )

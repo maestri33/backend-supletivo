@@ -42,7 +42,9 @@ def _parse_channels(raw: str | None) -> list[str]:
     """'whatsapp,email' -> ['whatsapp','email']. Vazio/inválido -> [] (o caller decide default)."""
     if not raw:
         return []
-    return [c.strip().lower() for c in raw.split(",") if c.strip().lower() in _ALL_CHANNELS]
+    return [
+        c.strip().lower() for c in raw.split(",") if c.strip().lower() in _ALL_CHANNELS
+    ]
 
 
 class Template(ExternalIdModel):
@@ -62,19 +64,29 @@ class Template(ExternalIdModel):
     event = models.SlugField(max_length=80, unique=True, db_index=True)
 
     title = models.CharField(max_length=200, null=True, blank=True)
-    subject = models.CharField(max_length=255, null=True, blank=True)  # e-mail; fallback: title
-    body_md = models.TextField(help_text="Conteúdo em Markdown. Placeholders {nome}, {nome-completo}, {valor}...")
+    subject = models.CharField(
+        max_length=255, null=True, blank=True
+    )  # e-mail; fallback: title
+    body_md = models.TextField(
+        help_text="Conteúdo em Markdown. Placeholders {nome}, {nome-completo}, {valor}..."
+    )
 
     # flags de geração
-    is_tts = models.BooleanField(default=False, help_text="Tenta voice-note; falha -> texto.")
-    storytelling = models.BooleanField(default=False, help_text="IA gera o teor (body_md = fallback).")
+    is_tts = models.BooleanField(
+        default=False, help_text="Tenta voice-note; falha -> texto."
+    )
+    storytelling = models.BooleanField(
+        default=False, help_text="IA gera o teor (body_md = fallback)."
+    )
     story_prompt = models.TextField(
         null=True, blank=True, help_text="Instrução p/ o LLM (só se storytelling=True)."
     )
 
     # canais default e mídia default
     channels = models.CharField(
-        max_length=40, default="whatsapp,email", help_text="Canais separados por vírgula."
+        max_length=40,
+        default="whatsapp,email",
+        help_text="Canais separados por vírgula.",
     )
     media_url = models.CharField(max_length=500, null=True, blank=True)
     media_type = models.CharField(max_length=20, null=True, blank=True)
@@ -82,7 +94,9 @@ class Template(ExternalIdModel):
         max_length=50, default="default", help_text="Slug do wrapper HTML do app mail."
     )
 
-    notes = models.CharField(max_length=200, null=True, blank=True)  # anotação livre do Victor
+    notes = models.CharField(
+        max_length=200, null=True, blank=True
+    )  # anotação livre do Victor
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
@@ -95,7 +109,9 @@ class Template(ExternalIdModel):
             flags.append("tts")
         if self.storytelling:
             flags.append("story")
-        return f"Template({self.event}" + (f" [{','.join(flags)}]" if flags else "") + ")"
+        return (
+            f"Template({self.event}" + (f" [{','.join(flags)}]" if flags else "") + ")"
+        )
 
     @property
     def channel_list(self) -> list[str]:
@@ -111,12 +127,18 @@ class Trigger(ExternalIdModel):
     `delay_minutes` é informativo por ora (fase 2: programar no Django-Q).
     """
 
-    template = models.OneToOneField(Template, on_delete=models.CASCADE, related_name="trigger")
+    template = models.OneToOneField(
+        Template, on_delete=models.CASCADE, related_name="trigger"
+    )
     fires_on = models.CharField(
-        max_length=200, help_text="Descrição humana do gatilho (ex.: 'Após pagamento confirmado')."
+        max_length=200,
+        help_text="Descrição humana do gatilho (ex.: 'Após pagamento confirmado').",
     )
     source = models.CharField(
-        max_length=100, null=True, blank=True, help_text="App/serviço emissor (ex.: 'users.roles.lead')."
+        max_length=100,
+        null=True,
+        blank=True,
+        help_text="App/serviço emissor (ex.: 'users.roles.lead').",
     )
     delay_minutes = models.PositiveIntegerField(default=0)
     active = models.BooleanField(default=True, db_index=True)

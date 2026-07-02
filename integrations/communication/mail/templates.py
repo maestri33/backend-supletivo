@@ -53,6 +53,7 @@ def _md_inline(escaped: str) -> str:
     """Transforms inline markdown (JÁ escapado): bold, italic, code, links. Ordem importa."""
     # code `x` → <code> (antes de italic/bold pra não comer o `*` dentro)
     escaped = re.sub(r"`([^`]+)`", r"<code>\1</code>", escaped)
+
     # links [text](url) — só schemes seguros; senão emite texto plano (text + url visível).
     def _link(m: re.Match) -> str:
         label, url = m.group(1), m.group(2).strip()
@@ -98,7 +99,11 @@ def md_to_html(md: str) -> str:
         nonlocal list_buf, list_type
         if list_type:
             tag = "ul" if list_type == "ul" else "ol"
-            out.append(f"<{tag}>" + "".join(f"<li>{_md_inline(it)}</li>" for it in list_buf) + f"</{tag}>")
+            out.append(
+                f"<{tag}>"
+                + "".join(f"<li>{_md_inline(it)}</li>" for it in list_buf)
+                + f"</{tag}>"
+            )
             list_buf, list_type = [], None
 
     for raw in lines:
@@ -250,7 +255,9 @@ def render(
     if content_is_html:
         safe_content = content
     else:
-        safe_content = md_to_html(content)  # full markdown, já escapa internamente (XSS-safe)
+        safe_content = md_to_html(
+            content
+        )  # full markdown, já escapa internamente (XSS-safe)
     return (
         template.replace("{{title}}", safe_title)
         .replace("{{content}}", safe_content)

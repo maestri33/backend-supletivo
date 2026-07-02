@@ -36,7 +36,9 @@ _DEFAULT_SUBJECT = ""
 
 
 class Command(BaseCommand):
-    help = "Gera notify/seed/templates.md a partir do catálogo in-memory de notificações."
+    help = (
+        "Gera notify/seed/templates.md a partir do catálogo in-memory de notificações."
+    )
 
     def add_arguments(self, parser):
         parser.add_argument(
@@ -77,6 +79,10 @@ class Command(BaseCommand):
             return
         from pathlib import Path
 
-        path = Path(opts["path"]) if opts["path"] else Path(__file__).resolve().parents[2] / "seed" / "templates.md"
+        path = (
+            Path(opts["path"])
+            if opts["path"]
+            else Path(__file__).resolve().parents[2] / "seed" / "templates.md"
+        )
         path.write_text(text, encoding="utf-8")
         self.stdout.write(self.style.SUCCESS(f"{len(specs)} eventos → {path}"))

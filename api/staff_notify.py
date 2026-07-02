@@ -181,7 +181,9 @@ def _validate_channels(raw: str) -> str:
     parts = [p.strip() for p in (raw or "").split(",") if p.strip()]
     bad = [p for p in parts if p not in _VALID_CHANNELS]
     if bad:
-        raise HttpError(422, f"canais inválidos: {bad} (válido: {sorted(_VALID_CHANNELS)})")
+        raise HttpError(
+            422, f"canais inválidos: {bad} (válido: {sorted(_VALID_CHANNELS)})"
+        )
     return ",".join(parts) if parts else "whatsapp,email"
 
 
@@ -408,32 +410,42 @@ def list_events(request):
     from users.roles import notifications as msgs
 
     # 1. Eventos do catálogo in-memory (legado — fonte dos textos antes do DB).
-    in_memory = set(msgs._MESSAGES.keys()) | set(msgs._TTS_EVENTS) | set(getattr(msgs, "_STORY_EVENTS", set()))
+    in_memory = (
+        set(msgs._MESSAGES.keys())
+        | set(msgs._TTS_EVENTS)
+        | set(getattr(msgs, "_STORY_EVENTS", set()))
+    )
 
     # 2. Eventos do DB (Templates + seus Triggers).
     db_events = {t.event: t for t in Template.objects.all()}
-    triggers = {tr.template_id: tr for tr in Trigger.objects.select_related("template").all()}
+    triggers = {
+        tr.template_id: tr for tr in Trigger.objects.select_related("template").all()
+    }
 
     out: list[EventCatalogItem] = []
     seen: set[str] = set()
     for ev, tpl in sorted(db_events.items()):
         tr = triggers.get(tpl.id)
-        out.append(EventCatalogItem(
-            event=ev,
-            has_template=True,
-            has_in_memory=ev in in_memory,
-            active=tr.active if tr else None,
-        ))
+        out.append(
+            EventCatalogItem(
+                event=ev,
+                has_template=True,
+                has_in_memory=ev in in_memory,
+                active=tr.active if tr else None,
+            )
+        )
         seen.add(ev)
     for ev in sorted(in_memory):
         if ev in seen:
             continue
-        out.append(EventCatalogItem(
-            event=ev,
-            has_template=False,
-            has_in_memory=True,
-            active=None,
-        ))
+        out.append(
+            EventCatalogItem(
+                event=ev,
+                has_template=False,
+                has_in_memory=True,
+                active=None,
+            )
+        )
     return out
 
 
@@ -486,7 +498,9 @@ def preview_template(request, event: str, payload: PreviewIn):
 class TestSendIn(Schema):
     """Disparo REAL do evento PROPRIO STAFF LOGADO. Channels default do Template."""
 
-    channels: list[str] | None = None  # subconjunto de {"whatsapp","email"}; default = Template
+    channels: list[str] | None = (
+        None  # subconjunto de {"whatsapp","email"}; default = Template
+    )
     ctx: dict | None = None
 
 
@@ -506,7 +520,9 @@ def test_template(request, event: str, payload: TestSendIn):
         run_sync=True,  # síncrono pra o staff ver o resultado AGORA
     )
     if ext is None:
-        raise HttpError(404, f"evento '{event}' não existe (nem Template, nem catálogo in-memory).")
+        raise HttpError(
+            404, f"evento '{event}' não existe (nem Template, nem catálogo in-memory)."
+        )
     return {"external_id": ext}
 
 
