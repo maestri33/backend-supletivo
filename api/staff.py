@@ -15,6 +15,7 @@ from ninja.files import UploadedFile
 from api.auth import require_superuser
 from api.base import add_auth_refresh, build_group
 from api.schemas import MaterialIn, MaterialUpdateIn, TokenOut
+from api.staff_notify import router as notify_router
 from finance import interface as finance_iface
 from finance.interface import commissions as finance_closing
 from finance.interface import manual as finance_manual
@@ -642,8 +643,6 @@ def list_users(request, role: str | None = None, limit: int = 200):
 
 # ── gestor de notificações (envio avulso + histórico + CRUD Template/Trigger) ──
 # Sub-router dedicado (api/staff_notify.py) pra não inflar este arquivo. Montado em /notify.
-from api.staff_notify import router as notify_router
-
 api.add_router("/notify", notify_router)
 
 
