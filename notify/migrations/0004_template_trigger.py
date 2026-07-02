@@ -7,7 +7,7 @@ from django.db import migrations, models
 
 class Migration(migrations.Migration):
     dependencies = [
-        ("notify", "0001_initial"),
+        ("notify", "0003_remove_notification_want_sanitize"),
     ]
 
     operations = [
