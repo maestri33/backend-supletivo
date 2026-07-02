@@ -972,8 +972,12 @@ def _selfie_story(enr: Enrollment, p, first: str) -> str | None:
 def _notify_resolution(enr: Enrollment, event_key: str, **placeholders) -> None:
     """Notify de RESOLUÇÃO de análise pro ALUNO (aprovado/reprovado — automático OU decisão do
     coordenador): **multicanal** (WhatsApp + e-mail) com **deep-link** de volta pro wizard
-    (proposta #11) — o aluno não precisa segurar a tela pollando. Best-effort, nunca quebra o fluxo."""
-    from notify.interface.send import send
+    (proposta #11) — o aluno não precisa segurar a tela pollando. Best-effort, nunca quebra o fluxo.
+
+    wave-2: usa `body_md_override` no `send_event` pra preservar o storytelling RICO da selfie
+    (Opus 4.8 + visão da foto) e o link de "continuar matrícula" concatenado. O `Trigger.active`
+    gate é mantido (desativar o evento no DB desliga tudo)."""
+    from notify.interface.events import send_event
     from users.roles import notifications as msgs
 
     p = profiles.get(enr.user)
@@ -1002,15 +1006,14 @@ def _notify_resolution(enr: Enrollment, event_key: str, **placeholders) -> None:
         text += f"\n\nContinue sua matrícula por aqui: {link}"
     tts = msgs.is_tts(event_key)
     try:
-        send(
-            text=text,
-            caller=event_key,
-            phone=p.phone if p else None,
-            email=p.email if p else None,
-            email_channel=bool(p and p.email),
+        # wave-2: body_md_override preserva o texto composto (selfie_story + link); is_tts_override
+        # honra o catálogo in-memory (msgs.is_tts). Os demais defaults vêm do DB (se houver Template).
+        send_event(
+            event_key,
+            profile=p,
             subject="Sua matrícula — atualização",
-            tts=tts,
-            gender=p.gender if (p and tts) else None,
+            body_md_override=text,
+            is_tts_override=tts,
         )
     except Exception as exc:  # noqa: BLE001
         logger.warning(
@@ -1023,23 +1026,19 @@ def _notify_rg_rejected(enr: Enrollment, reason: str | None) -> None:
 
 
 def _notify_rg_review(enr: Enrollment, reason: str | None) -> None:
-    from notify.interface.send import send
-
-    from users.roles import notifications as msgs
+    # wave-2: send_event lê teor/canais/is_tts do Template no DB. WhatsApp-only (coordenador).
+    from notify.interface.events import send_event
 
     coord = enr.hub.coordinator
     if coord is None:
         return
     cp = profiles.get(coord)
     try:
-        send(
-            text=msgs.text(
-                "enrollment.rg_in_review",
-                name=msgs.first_name(cp.name if cp else None),
-                detail=(reason or "").strip(),
-            ),
-            caller="enrollment.rg_in_review",
-            phone=cp.phone if cp else None,
+        send_event(
+            "enrollment.rg_in_review",
+            profile=cp,
+            ctx={"detail": (reason or "").strip()},
+            channels_override=("whatsapp",),
         )
     except Exception as exc:  # noqa: BLE001
         logger.warning("enrollment.notify_rg_review_failed", error=str(exc))
@@ -1354,21 +1353,18 @@ def _notify_selfie_approved(enr: Enrollment) -> None:
 
 
 def _notify_selfie_review(enr: Enrollment) -> None:
-    from notify.interface.send import send
-    from users.roles import notifications as msgs
+    # wave-2: send_event lê teor/canais/is_tts do Template no DB. WhatsApp-only (coordenador).
+    from notify.interface.events import send_event
 
     coord = enr.hub.coordinator
     if coord is None:
         return
     cp = profiles.get(coord)
     try:
-        send(
-            text=msgs.text(
-                "enrollment.selfie_in_review",
-                name=msgs.first_name(cp.name if cp else None),
-            ),
-            caller="enrollment.selfie_in_review",
-            phone=cp.phone if cp else None,
+        send_event(
+            "enrollment.selfie_in_review",
+            profile=cp,
+            channels_override=("whatsapp",),
         )
     except Exception as exc:  # noqa: BLE001
         logger.warning("enrollment.notify_selfie_review_failed", error=str(exc))
@@ -1436,21 +1432,18 @@ def _save_selfie(enr: Enrollment, image_bytes: bytes, content_type: str) -> str:
 
 
 def _notify_coordinator_awaiting(enr: Enrollment) -> None:
-    from notify.interface.send import send
-    from users.roles import notifications as msgs
+    # wave-2: send_event lê teor/canais/is_tts do Template no DB. WhatsApp-only (coordenador).
+    from notify.interface.events import send_event
 
     coord = enr.hub.coordinator
     if coord is None:
         return
     cp = profiles.get(coord)
     try:
-        send(
-            text=msgs.text(
-                "enrollment.awaiting_release",
-                name=msgs.first_name(cp.name if cp else None),
-            ),
-            caller="enrollment.awaiting_release",
-            phone=cp.phone if cp else None,
+        send_event(
+            "enrollment.awaiting_release",
+            profile=cp,
+            channels_override=("whatsapp",),
             idempotency_key=f"enr_awaiting_{enr.external_id}",
         )
     except Exception as exc:  # noqa: BLE001
@@ -1754,9 +1747,11 @@ def apply_fee_problem(
 def _notify_fee_event(
     enr: Enrollment, event: str, idem_suffix: str = "", **placeholders
 ) -> None:
-    """Notify do ciclo da taxa → SEMPRE o COORDENADOR, nunca o aluno (política interna). Sem TTS."""
-    from notify.interface.send import send
-    from users.roles import notifications as msgs
+    """Notify do ciclo da taxa → SEMPRE o COORDENADOR, nunca o aluno (política interna). Sem TTS.
+
+    wave-2: send_event lê teor/canais/is_tts do Template no DB. injeção de placeholders via ctx
+    (student_name, amount, etc.)."""
+    from notify.interface.events import send_event
 
     coord = enr.hub.coordinator
     if coord is None:
@@ -1767,17 +1762,13 @@ def _notify_fee_event(
     cp = profiles.get(coord)
     sp = profiles.get(enr.user)
     try:
-        send(
-            text=msgs.text(
-                event,
-                name=msgs.first_name(cp.name if cp else None),
-                student_name=(sp.name if sp else None) or "um aluno",
+        send_event(
+            event,
+            profile=cp,
+            ctx={
+                "student_name": (sp.name if sp else None) or "um aluno",
                 **placeholders,
-            ),
-            caller=event,
-            phone=cp.phone if cp else None,
-            email=cp.email if cp else None,
-            email_channel=bool(cp and cp.email),
+            },
             idempotency_key=f"{event}_{enr.external_id}{idem_suffix}",
         )
     except Exception as exc:  # noqa: BLE001 — notify nunca quebra o fluxo (§12)
@@ -1960,23 +1951,14 @@ def list_reviews_for_hub(*, hub) -> dict:
 
 
 def _notify_released(enr: Enrollment) -> None:
-    from notify.interface.send import send
-    from users.roles import notifications as msgs
+    # wave-2: send_event lê teor/canais/is_tts do Template no DB.
+    from notify.interface.events import send_event
 
     p = profiles.get(enr.user)
     try:
-        send(
-            text=msgs.text(
-                "enrollment.released", name=msgs.first_name(p.name if p else None)
-            ),
-            caller="enrollment.released",
-            phone=p.phone if p else None,
-            email=p.email if p else None,
-            email_channel=bool(p and p.email),
-            tts=msgs.is_tts(
-                "enrollment.released"
-            ),  # virou aluno = momento especial (voz)
-            gender=p.gender if p else None,
+        send_event(
+            "enrollment.released",
+            profile=p,
             idempotency_key=f"enr_released_{enr.external_id}",
         )
     except Exception as exc:  # noqa: BLE001
@@ -1985,25 +1967,18 @@ def _notify_released(enr: Enrollment) -> None:
 
 def _notify_credentials(enr: Enrollment, *, login: str, password: str) -> None:
     """Manda login/senha/link da plataforma ao novo ALUNO (WhatsApp + e-mail; SEM TTS — não se lê
-    senha em voz). Link = INSTITUTION_LOGIN_URL. Best-effort (§12); idempotente por chave."""
-    from notify.interface.send import send
-    from users.roles import notifications as msgs
+    senha em voz). Link = INSTITUTION_LOGIN_URL. Best-effort (§12); idempotente por chave.
+
+    wave-2: send_event com ctx={login,password,link} — o body_md do Template contém {login}/{password}/{link}."""
+    from notify.interface.events import send_event
 
     p = profiles.get(enr.user)
     link = getattr(settings, "INSTITUTION_LOGIN_URL", "") or ""
     try:
-        send(
-            text=msgs.text(
-                "enrollment.credentials",
-                name=msgs.first_name(p.name if p else None),
-                login=login,
-                password=password,
-                link=link,
-            ),
-            caller="enrollment.credentials",
-            phone=p.phone if p else None,
-            email=p.email if p else None,
-            email_channel=bool(p and p.email),
+        send_event(
+            "enrollment.credentials",
+            profile=p,
+            ctx={"login": login, "password": password, "link": link},
             idempotency_key=f"enr_credentials_{enr.external_id}",
         )
     except Exception as exc:  # noqa: BLE001

@@ -260,22 +260,52 @@ def first_name(full_name: str | None) -> str:
     return full_name.strip().split()[0]
 
 
+def full_name(name: str | None) -> str:
+    """Nome COMPLETO do destinatário (placeholder `{nome-completo}`). Sem nome → fallback neutro."""
+    if not name or not name.strip():
+        return _FALLBACK_NAME
+    return " ".join(name.strip().split())
+
+
+def get_template(event: str):
+    """Snapshot do Template no DB (`notify.interface.templates.TemplateData`) ou None se não há row.
+    Expõe p/ o `send_event` ler channels/mídia/story sem acoplar o caller ao model do notify."""
+    from notify.interface import templates as _db
+
+    return _db.get(event)
+
+
 def text(event: str, **ctx) -> str:
-    """Renderiza o teor do evento. `name` (1º nome do destinatário) deve vir no ctx (≥2× no texto)."""
-    template = _MESSAGES.get(event)
-    if template is None:
-        raise KeyError(f"notify event sem teor no catálogo: {event}")
+    """Renderiza o teor do evento. `name` (1º nome do destinatário) deve vir no ctx (≥2× no texto).
+
+    Fonte de verdade = DB (`notify.Template`); catálogo `_MESSAGES` (in-memory) é fallback quando
+    a row não existe (bootstrap, DB fora do ar). Renderer por regex: placeholders ausentes ficam
+    literais (não quebra o envio); `{nome}`/`{nome-completo}` funcionam (hífen)."""
     ctx.setdefault("name", _FALLBACK_NAME)
-    # compat: alguns notifies recebem `reason`; quem não usa o placeholder ignora via .format()
-    # (format só exige chaves presentes no template). Adicionamos `reason_text` vazio por padrão.
+    # compat: alguns notifies recebem `reason`; o template pode usar {reason_text}.
     if "reason" in ctx and "reason_text" not in ctx:
         reason = ctx.get("reason")
         ctx["reason_text"] = f" Motivo: {reason}." if reason else ""
-    return template.format(**ctx)
+    from notify.interface import templates as _db
+
+    body, _data = _db.render_event(event, ctx)
+    if body is not None:
+        return body
+    template = _MESSAGES.get(event)
+    if template is None:
+        raise KeyError(f"notify event sem teor no catálogo: {event}")
+    return _db.render(template, ctx)
 
 
 def is_tts(event: str) -> bool:
-    """True se o evento é um MOMENTO ESPECIAL (vai por voz). Default = texto."""
+    """True se o evento é um MOMENTO ESPECIAL (vai por voz). Default = texto.
+
+    DB (`notify.Template.is_tts`) é fonte de verdade; `_TTS_EVENTS` (in-memory) é fallback."""
+    from notify.interface import templates as _db
+
+    db = _db.is_tts(event)
+    if db is not None:
+        return db
     return event in _TTS_EVENTS
 
 
@@ -324,9 +354,24 @@ def story_text(
     """Texto caloroso gerado por 1 LLM (temperatura baixa) nos marcos especiais; cai no `fallback`
     fixo se o evento não for de história, se a IA falhar, ou se o texto vier ruim (curto/sem o nome).
     Enriquece com a DATA de hoje e adapta o tom à IDADE (Victor 2026-06-21). Roda síncrono no caller;
-    mantenha o caller fora do request quando possível (o de selfie é async)."""
-    if event not in _STORY_EVENTS:
-        return fallback
+    mantenha o caller fora do request quando possível (o de selfie é async).
+
+    DB (`notify.Template`) é fonte de verdade: `storytelling=False` DESLIGA o story (mesmo se o
+    evento estiver no catálogo in-memory); `story_prompt` sobrescreve a instrução. Sem row no DB,
+    cai no `_STORY_EVENTS`/`_STORY_INSTRUCTIONS` in-memory."""
+    from notify.interface import templates as _db
+
+    data = _db.get(event)
+    if data is not None:
+        if not data.storytelling:
+            return fallback  # DB diz: não é story — honra mesmo se o catálogo in-memory dissesse sim
+        instruction_raw = data.story_prompt or _STORY_INSTRUCTIONS.get(event)
+        if not instruction_raw:
+            return fallback
+    else:
+        if event not in _STORY_EVENTS:
+            return fallback
+        instruction_raw = _STORY_INSTRUCTIONS[event]
     try:
         from datetime import date
 
@@ -366,8 +411,9 @@ def story_text(
                 "futuro cedo."
             )
 
-        instruction = _STORY_INSTRUCTIONS[event].format(
-            name=name, data_hoje=data_hoje, faixa_etaria=faixa
+        instruction = _db.render(
+            instruction_raw,
+            {"name": name, "nome": name, "data_hoje": data_hoje, "faixa_etaria": faixa},
         )
         out = ai.generate_text(
             f"Escreva a mensagem para {name}.",

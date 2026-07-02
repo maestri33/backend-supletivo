@@ -10,4 +10,8 @@ staticfiles/
 # ruflo/claude-flow workspace (nunca versionar)
 .claude-flow/
 .hive-mind/
+.swarm/
+.mcp.json
+ruvector.db
 dev.sqlite3
+data/

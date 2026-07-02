@@ -11,5 +11,8 @@ class NotifyConfig(AppConfig):
         from django.core.checks import register
 
         from .checks import check_notify_env
+        from .interface.templates import connect_signals
 
         register(check_notify_env)
+        # invalida o cache de Template quando uma row muda/sai (mantém msgs.text() sempre fresco).
+        connect_signals()

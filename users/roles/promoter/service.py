@@ -187,16 +187,15 @@ def list_for_hub(hub) -> list[dict]:
 
 
 def _notify_status(promoter: Promoter, event: str) -> None:
-    from notify.interface.send import send
+    # wave-2: send_event lê teor/canais/is_tts do Template no DB.
     from users.profiles import interface as profiles
-    from users.roles import notifications as msgs
+    from notify.interface.events import send_event
 
     p = profiles.get(promoter.user)
     try:
-        send(
-            text=msgs.text(event, name=msgs.first_name(p.name if p else None)),
-            caller=event,
-            phone=p.phone if p else None,
+        send_event(
+            event,
+            profile=p,
             # chave por toggle (updated_at muda a cada mudança real de status) → retry dedupa, toggles não.
             idempotency_key=f"{event}_{promoter.user.external_id}_{int(promoter.updated_at.timestamp())}",
         )

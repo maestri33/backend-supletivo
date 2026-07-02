@@ -2,13 +2,15 @@
 
 Cada canal é isolado em try/except: a falha de um não derruba os outros nem o caller (§12). Os
 clientes externos do `integrations/` são async → rodam via `async_to_sync` (padrão do codebase);
-`ai.service.tts` já é síncrona. Retry simples: uma tentativa por passada — o Django-Q re-executa
-a task em caso de erro não tratado (aqui tratamos por canal, então a task termina "ok" com o
-status gravado).
+`ai.service.tts` já é síncrona. Retry simples: uma tentativa por passada — o Django-Q re-executa a
+task em caso de erro não tratado (aqui tratamos por canal, então a task termina "ok" com o status).
 
-Mídia (§0.2 do plano): WhatsApp busca a mídia/áudio pela URL **LAN** (IP interno, sem egress —
-`_to_lan`, padrão do legado); o e-mail embute a mídia pela URL **pública** (o cliente do
-destinatário busca pela internet).
+Entrega do WhatsApp (Victor 2026-07-02 — TTS como MODO de entrega, não canal paralelo):
+ - se `media_url`  → envia MÍDIA (legenda = body); TTS fica SKIPPED (mídia tem precedência).
+ - senão se `want_tts` → tenta voice-note (áudio); se a IA falhar, CAI PRA TEXTO (fallback).
+ - senão → envia TEXTO.
+E-mail SEMPRE texto (md→HTML); o áudio nunca vai por e-mail. Mídia (§0.2): WhatsApp busca pela URL
+LAN (IP interno, sem egress — `_to_lan`); e-mail embute pela URL pública.
 """
 
 from __future__ import annotations
@@ -22,7 +24,7 @@ from integrations.communication.mail import templates as mail_templates
 from integrations.communication.whatsapp.client import get_client as get_whatsapp_client
 from integrations.ai import service as ai_service
 from notify import sanitize
-from notify.models import STATUS_FAILED, STATUS_PENDING, STATUS_SENT, Notification
+from notify.models import STATUS_FAILED, STATUS_PENDING, STATUS_SENT, STATUS_SKIPPED, Notification
 
 logger = structlog.get_logger()
 
@@ -36,12 +38,22 @@ def dispatch(notification_id: int) -> None:
 
     notif.attempts += 1
 
+    # ── WhatsApp: mídia > TTS(áudio, fallback texto) > texto ──
     if notif.whatsapp_status == STATUS_PENDING:
-        _send_whatsapp(notif)
+        if notif.media_url:
+            if notif.want_tts and notif.tts_status == STATUS_PENDING:
+                notif.tts_status = STATUS_SKIPPED  # mídia tem precedência sobre voice-note
+            _send_whatsapp_media(notif)
+        elif notif.want_tts:
+            _send_tts(notif)  # áudio; falha → texto (fallback interno)
+        else:
+            _send_whatsapp_text(notif)
+    elif notif.want_tts and notif.tts_status == STATUS_PENDING:
+        # whatsapp sem destino (SKIPPED) mas TTS pendente: áudio não tem pra onde ir → skipa.
+        notif.tts_status = STATUS_SKIPPED
+
     if notif.email_status == STATUS_PENDING:
         _send_email(notif)
-    if notif.tts_status == STATUS_PENDING:
-        _send_tts(notif)
 
     notif.save()
     logger.info(
@@ -75,30 +87,42 @@ def _whatsapp_body(notif: Notification) -> str:
     return notif.text
 
 
-def _send_whatsapp(notif: Notification) -> None:
+def _send_whatsapp_text(notif: Notification) -> None:
+    """Envia só texto (sem mídia) pelo WhatsApp."""
     async def _run():
         async with get_whatsapp_client() as wa:
             number = await wa.resolve_br_number(notif.recipient_phone)
-            if notif.media_url:
-                # WhatsApp busca a mídia pela URL LAN (IP interno); legenda = corpo da mensagem.
-                wa_url = _to_lan(notif.media_url)
-                return await wa.send_media(
-                    number,
-                    wa_url,
-                    notif.media_type or "document",
-                    caption=_whatsapp_body(notif),
-                )
             return await wa.send_text(number, _whatsapp_body(notif))
 
     try:
         async_to_sync(_run)()
         notif.whatsapp_status = STATUS_SENT
-    except Exception as exc:  # noqa: BLE001 — um canal não pode derrubar os outros (§12)
+    except Exception as exc:  # noqa: BLE001 — um canal não derruba os outros (§12)
         notif.whatsapp_status = STATUS_FAILED
         notif.whatsapp_error = f"{type(exc).__name__}: {exc}"
-        logger.warning(
-            "notify.whatsapp_failed", external_id=str(notif.external_id), error=str(exc)
-        )
+        logger.warning("notify.whatsapp_failed", external_id=str(notif.external_id), error=str(exc))
+
+
+def _send_whatsapp_media(notif: Notification) -> None:
+    """Envia mídia (URL LAN) com legenda = body. E-mail embute a mesma mídia pela URL pública."""
+    async def _run():
+        async with get_whatsapp_client() as wa:
+            number = await wa.resolve_br_number(notif.recipient_phone)
+            wa_url = _to_lan(notif.media_url)
+            return await wa.send_media(
+                number,
+                wa_url,
+                notif.media_type or "document",
+                caption=_whatsapp_body(notif),
+            )
+
+    try:
+        async_to_sync(_run)()
+        notif.whatsapp_status = STATUS_SENT
+    except Exception as exc:  # noqa: BLE001 — isola a falha do canal (§12)
+        notif.whatsapp_status = STATUS_FAILED
+        notif.whatsapp_error = f"{type(exc).__name__}: {exc}"
+        logger.warning("notify.whatsapp_failed", external_id=str(notif.external_id), error=str(exc))
 
 
 def _send_email(notif: Notification) -> None:
@@ -106,7 +130,7 @@ def _send_email(notif: Notification) -> None:
         subject = notif.subject or notif.title or "(sem assunto)"
         if notif.media_url:
             # e-mail embute a mídia pela URL PÚBLICA (destinatário busca pela internet).
-            content_html = mail_templates.text_to_html(
+            content_html = mail_templates.md_to_html(
                 notif.text
             ) + mail_templates.media_html(
                 notif.media_url,
@@ -137,18 +161,16 @@ def _send_email(notif: Notification) -> None:
 
 
 def _send_tts(notif: Notification) -> None:
+    """Tenta voice-note (áudio). Se a IA falhar, CAI PRA TEXTO (WhatsApp) — o marco nunca fica sem
+    mensagem. E-mail já foi/será enviado como texto por `_send_email` (áudio nunca vai pro e-mail)."""
     try:
         # ai.tts gera o mp3 e devolve o caminho RELATIVO a MEDIA_ROOT (ex.: "ai/audio/<uuid>.mp3").
-        # gender (M/F) escolhe a voz — a resolução gênero→voz mora no integrations.ai (§7 do plano).
-        # sanitiza o texto pra leitura em voz (tira markdown/URL/emoji) — o WhatsApp/e-mail seguem
-        # com o texto ORIGINAL; só o áudio usa a versão falável.
+        # gender (M/F) escolhe a voz; sanitiza o texto pra leitura (tira markdown/URL/emoji).
         speakable = sanitize.for_tts(notif.text)
         rel_path = ai_service.tts(
             speakable, caller=f"notify:{notif.caller}", gender=notif.gender or None
         )
         notif.tts_audio_path = rel_path
-        # a Evolution busca a URL: usa a base LAN (IP interno, mesma sub-rede, sem egress/TLS —
-        # padrão do legado `_to_lan`); sem ela, cai na pública EXTERNAL_URL.
         base = settings.MEDIA_LAN_BASE or settings.EXTERNAL_URL
         audio_url = f"{base}{settings.MEDIA_URL}{rel_path}"
 
@@ -159,9 +181,11 @@ def _send_tts(notif: Notification) -> None:
 
         async_to_sync(_run)()
         notif.tts_status = STATUS_SENT
-    except Exception as exc:  # noqa: BLE001 — isola a falha do canal (§12)
+        notif.whatsapp_status = STATUS_SENT  # entregue (como áudio)
+    except Exception as exc:  # noqa: BLE001 — fallback texto: áudio falhou, mas o marco não fica mudo
         notif.tts_status = STATUS_FAILED
         notif.tts_error = f"{type(exc).__name__}: {exc}"
-        logger.warning(
-            "notify.tts_failed", external_id=str(notif.external_id), error=str(exc)
-        )
+        logger.warning("notify.tts_failed_fallback_text", external_id=str(notif.external_id), error=str(exc))
+        # fallback: entrega o corpo como TEXTO no WhatsApp (idempotente: só se ainda não foi enviado).
+        if notif.whatsapp_status != STATUS_SENT:
+            _send_whatsapp_text(notif)

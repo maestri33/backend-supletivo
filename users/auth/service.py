@@ -304,6 +304,40 @@ def recover(*, cpf: str | None = None, phone: str | None = None) -> dict:
     return {"found": True, **result}
 
 
+# ── check_bot (WhatsApp bot — sem OTP) ────────────────────────────────────
+
+
+def check_bot(*, phone: str) -> dict:
+    """Check SEM OTP para o bot WhatsApp. O número do WhatsApp é a prova de identidade.
+
+    Retorna found + external_id + roles + JWT direto. Não dispara OTP — o bot já tem o
+    número do WhatsApp como canal autenticado. Usado EXCLUSIVAMENTE pelo bot_v2 (FastAPI)
+    que roda em LXC separada e chama este endpoint via HTTP."""
+    try:
+        phone = validation.validate_phone(phone)
+    except ValueError as exc:
+        raise ValidationError(str(exc), code="PHONE_INVALID") from exc
+
+    user = _find_user(phone=phone)
+    if user is None:
+        return {
+            "found": False,
+            "external_id": None,
+            "roles": None,
+            "token": None,
+        }
+
+    active = roles.active_roles(user)
+    tokens = jwt_service.issue(str(user.external_id), active)
+    logger.info("auth.check_bot", external_id=str(user.external_id), roles=active)
+    return {
+        "found": True,
+        "external_id": str(user.external_id),
+        "roles": active,
+        "token": tokens["access_token"],
+    }
+
+
 # ── login ────────────────────────────────────────────────────────────────
 
 

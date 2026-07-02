@@ -113,6 +113,17 @@ class LoginIn(Schema):
     otp: str
 
 
+class CheckBotIn(Schema):
+    phone: str
+
+
+class CheckBotOut(Schema):
+    found: bool
+    external_id: str | None = None
+    roles: list[str] | None = None
+    token: str | None = None
+
+
 class CardPriceOut(Schema):
     installments: int
     installment: str  # valor da parcela em reais (string), ex.: "99.00"
@@ -279,6 +290,13 @@ def check(request, payload: CheckIn):
     return auth_iface.check(
         cpf=payload.cpf, phone=payload.phone, external_id=payload.external_id
     )
+
+
+@auth_router.post("/check-bot", response=CheckBotOut, auth=None, tags=["bot"])
+def check_bot(request, payload: CheckBotIn):
+    """Check SEM OTP para o bot WhatsApp — o número do zap é a prova de identidade.
+    Retorna JWT direto se o usuário existir. Usado EXCLUSIVAMENTE pelo bot_v2 (FastAPI)."""
+    return auth_iface.check_bot(phone=payload.phone)
 
 
 @auth_router.post("/login", response=TokenOut, auth=None)

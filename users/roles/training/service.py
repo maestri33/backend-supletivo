@@ -494,22 +494,14 @@ def list_locked_promoters_for_hub(*, hub) -> list[dict]:
 
 
 def _notify(user, event: str, *, key: str, tts: bool = False) -> None:
-    from notify.interface.send import send
+    # Migração 2026-07-02: send_event lê teor/canais/is_tts do Template no DB. O arg `tts` ficou só
+    # pra compat dos callers (_notify_cleared passa tts=True) — a fonte de verdade agora é o DB.
+    from notify.interface.events import send_event
     from users.profiles import interface as profiles
-    from users.roles import notifications as msgs
 
     p = profiles.get(user)
     try:
-        send(
-            text=msgs.text(event, name=msgs.first_name(p.name if p else None)),
-            caller=event,
-            phone=p.phone if p else None,
-            email=p.email if p else None,
-            email_channel=bool(p and p.email),
-            tts=tts,
-            gender=p.gender if (p and tts) else None,
-            idempotency_key=key,
-        )
+        send_event(event, profile=p, idempotency_key=key)
     except Exception as exc:  # noqa: BLE001
         logger.warning("training.notify_failed", event=event, error=str(exc))
 

@@ -43,9 +43,120 @@ def _md_bold_to_html(text: str) -> str:
     return text
 
 
+# schemes permitidos em links markdown (defesa-in-depth: o texto já é escaped; mesmo assim,
+# rejeita javascript:/data: etc.). O resto vira texto plano.
+_SAFE_URL_SCHEMES = {"http", "https", "mailto"}
+_LINK_RE = re.compile(r"\[([^\]]+)\]\(([^)]+)\)")
+
+
+def _md_inline(escaped: str) -> str:
+    """Transforms inline markdown (JÁ escapado): bold, italic, code, links. Ordem importa."""
+    # code `x` → <code> (antes de italic/bold pra não comer o `*` dentro)
+    escaped = re.sub(r"`([^`]+)`", r"<code>\1</code>", escaped)
+    # links [text](url) — só schemes seguros; senão emite texto plano (text + url visível).
+    def _link(m: re.Match) -> str:
+        label, url = m.group(1), m.group(2).strip()
+        scheme = url.split(":", 1)[0].lower() if ":" in url else ""
+        if scheme and scheme not in _SAFE_URL_SCHEMES:
+            return f"{label} ({url})"
+        return f'<a href="{url}" target="_blank" rel="noopener">{label}</a>'
+
+    escaped = _LINK_RE.sub(_link, escaped)
+    # bold **x** (específico) antes do italic *x* / _x_
+    escaped = re.sub(r"\*\*(.+?)\*\*", r"<strong>\1</strong>", escaped, flags=re.DOTALL)
+    escaped = re.sub(
+        r"(?<![*\w])\*([^*\s](?:.*?[^*\s])?)\*(?![*\w])",
+        r"<em>\1</em>",
+        escaped,
+        flags=re.DOTALL,
+    )
+    escaped = re.sub(
+        r"(?<![\w])_([^_\s](?:.*?[^_\s])?)_(?![\w])",
+        r"<em>\1</em>",
+        escaped,
+        flags=re.DOTALL,
+    )
+    return escaped
+
+
+def md_to_html(md: str) -> str:
+    """Markdown → HTML seguro pro e-mail. Escape primeiro, depois transforms (XSS-safe).
+
+    Suporta: headings (#/##/###), listas (-/*/1.), parágrafos (\\n\\n), quebra de linha (\\n),
+    bold **x**, italic *x* / _x_, code `x`, links [text](url) (scheme-check). Conteúdo é de autor
+    (Victor), mas a defesa-in-depth escape-antes-tudo + scheme-check protege contra descuido.
+    """
+    if not md:
+        return ""
+    escaped = _html.escape(md)
+    lines = escaped.split("\n")
+    out: list[str] = []
+    list_buf: list[str] = []
+    list_type: str | None = None  # "ul" | "ol"
+
+    def _flush_list() -> None:
+        nonlocal list_buf, list_type
+        if list_type:
+            tag = "ul" if list_type == "ul" else "ol"
+            out.append(f"<{tag}>" + "".join(f"<li>{_md_inline(it)}</li>" for it in list_buf) + f"</{tag}>")
+            list_buf, list_type = [], None
+
+    for raw in lines:
+        line = raw.rstrip()
+        if not line:
+            _flush_list()
+            out.append("")  # separador de parágrafo
+            continue
+        # heading
+        m = re.match(r"^(#{1,3})\s+(.*)$", line)
+        if m:
+            _flush_list()
+            level = len(m.group(1))
+            out.append(f"<h{level}>{_md_inline(m.group(2))}</h{level}>")
+            continue
+        # lista ordenada
+        mo = re.match(r"^\d+\.\s+(.*)$", line)
+        if mo:
+            if list_type != "ol":
+                _flush_list()
+                list_type = "ol"
+            list_buf.append(mo.group(1))
+            continue
+        # lista não-ordenada
+        mu = re.match(r"^[-*]\s+(.*)$", line)
+        if mu:
+            if list_type != "ul":
+                _flush_list()
+                list_type = "ul"
+            list_buf.append(mu.group(1))
+            continue
+        _flush_list()
+        out.append(_md_inline(line))
+
+    _flush_list()
+    # junta parágrafos: blocos separados por string vazia viram <p>; quebra de linha simples <br>.
+    html_parts: list[str] = []
+    para: list[str] = []
+    for blk in out:
+        if blk == "":
+            if para:
+                html_parts.append("<p>" + "<br>".join(para) + "</p>")
+                para = []
+        elif blk.startswith(("<h1", "<h2", "<h3", "<ul", "<ol")):
+            if para:
+                html_parts.append("<p>" + "<br>".join(para) + "</p>")
+                para = []
+            html_parts.append(blk)
+        else:
+            para.append(blk)
+    if para:
+        html_parts.append("<p>" + "<br>".join(para) + "</p>")
+    return "\n".join(html_parts)
+
+
 def text_to_html(text: str) -> str:
-    """Texto humano → HTML seguro: html.escape + bold markdown → <strong> + `\\n` → `<br>`."""
-    return _md_bold_to_html(_html.escape(text)).replace("\n", "<br>")
+    """Compat: markdown → HTML seguro (alias de `md_to_html`). Mantido p/ callers antigos."""
+    return md_to_html(text)
 
 
 def media_html(media_url: str, media_type: str, caption: str = "") -> str:
@@ -139,7 +250,7 @@ def render(
     if content_is_html:
         safe_content = content
     else:
-        safe_content = _md_bold_to_html(_html.escape(content)).replace("\n", "<br>")
+        safe_content = md_to_html(content)  # full markdown, já escapa internamente (XSS-safe)
     return (
         template.replace("{{title}}", safe_title)
         .replace("{{content}}", safe_content)

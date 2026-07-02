@@ -640,6 +640,13 @@ def list_users(request, role: str | None = None, limit: int = 200):
     return out
 
 
+# ── gestor de notificações (envio avulso + histórico + CRUD Template/Trigger) ──
+# Sub-router dedicado (api/staff_notify.py) pra não inflar este arquivo. Montado em /notify.
+from api.staff_notify import router as notify_router
+
+api.add_router("/notify", notify_router)
+
+
 class PhoneIn(Schema):
     phone: str
 
@@ -656,34 +663,6 @@ def set_user_phone(request, external_id: str, payload: PhoneIn):
     )
 
 
-# ── notificação avulsa (staff manda whatsapp/email a um usuário ou destino LIVRE — Victor 2026-06-30) ──
-# ⚠️ PRODUÇÃO REAL: dispara WhatsApp/e-mail de verdade (enfileira no Django-Q). A função interface
-# (notify.send_adhoc) valida a borda; aqui é casca fina (CONVENTION §3).
-class StaffNotifyIn(Schema):
-    user_external_id: str | None = None
-    phone: str | None = None
-    email: str | None = None
-    subject: str | None = None
-    message: str
-    channels: list[str] | None = None  # subconjunto de {"whatsapp","email"}
-
-
-@api.post("/notify", tags=["staff"])
-def staff_notify(request, payload: StaffNotifyIn):
-    """Envia uma notificação avulsa (whatsapp e/ou e-mail) a um USUÁRIO (`user_external_id`, herda
-    phone/email do Profile) OU a um destino LIVRE (`phone`/`email` sem cadastro). `channels` opcional
-    (default: todos com destino). Valida na borda: mensagem não-vazia + pelo menos um destino.
-    Devolve o `external_id` da notificação enfileirada."""
-    require_superuser(request.auth)
-    from notify.interface.send import send_adhoc
-
-    external_id = send_adhoc(
-        message=payload.message,
-        to_user=payload.user_external_id,
-        phone=payload.phone,
-        email=payload.email,
-        subject=payload.subject,
-        channels=payload.channels,
-        caller="staff.notify",
-    )
-    return {"external_id": external_id}
+# ── notificação avulsa / gestor ──────────────────────────────────────────────
+# Movido pra `api/staff_notify.py` (sub-router /notify): POST /notify (avulso),
+# GET /notify/history (o que foi enviado), GET/PUT /notify/templates[/...] (CRUD Template/Trigger).

@@ -922,33 +922,29 @@ def _notify_doc_event(
       • `candidate.document_rejected` / `candidate.document_approved` → candidato
 
     Falha do `send` vira WARNING (a análise IA segue válida — o destinatário pode descobrir pelo
-    app; o notify tem retry/canal alternativo internamente, então engolir aqui é proposital)."""
-    from notify.interface.send import send
-    from users.roles import notifications as msgs
+    app; o notify tem retry/canal alternativo internamente, então engolir aqui é proposital).
+
+    wave-2: send_event lê teor/canais/is_tts do Template no DB."""
+    from notify.interface.events import send_event
 
     if event == "candidate.document_in_review":
         coord = cand.hub.coordinator
         if coord is None:
             return
         cp = profiles.get(coord)
-        target_name = msgs.first_name(cp.name if cp else None)
-        target_phone = cp.phone if cp else None
-        target_email = None
+        target_profile = cp
+        channels = ("whatsapp",)  # coordenador: WhatsApp-only (legado)
     else:
-        p = profiles.get(cand.user)
-        target_name = msgs.first_name(p.name if p else None)
-        target_phone = p.phone if p else None
-        target_email = p.email if p else None
+        target_profile = profiles.get(cand.user)
+        channels = None  # Template decide os canais
 
-    text = msgs.text(event, name=target_name, detail=detail or "")
     try:
-        send(
-            text=text,
-            caller=event,
-            phone=target_phone,
-            email=target_email,
-            email_channel=bool(target_email),
+        send_event(
+            event,
+            profile=target_profile,
+            ctx={"detail": detail or ""},
             subject=subject,
+            channels_override=channels,
         )
     except Exception as exc:  # noqa: BLE001
         logger.warning("candidate.notify_doc_event_failed", event=event, error=str(exc))
@@ -1230,21 +1226,16 @@ def _resolve_selfie(cand: Candidate) -> None:
 
 
 def _notify_selfie_approved(cand: Candidate) -> None:
-    """Notify do aprovado (plan/15 C — paridade com `enrollment.selfie_approved`). Sem TTS."""
-    from notify.interface.send import send
-    from users.roles import notifications as msgs
+    """Notify do aprovado (plan/15 C — paridade com `enrollment.selfie_approved`). Sem TTS.
+
+    wave-2: send_event lê teor/canais/is_tts do Template no DB."""
+    from notify.interface.events import send_event
 
     p = profiles.get(cand.user)
     try:
-        send(
-            text=msgs.text(
-                "candidate.selfie_approved",
-                name=msgs.first_name(p.name if p else None),
-            ),
-            caller="candidate.selfie_approved",
-            phone=p.phone if p else None,
-            email=p.email if p else None,
-            email_channel=bool(p and p.email),
+        send_event(
+            "candidate.selfie_approved",
+            profile=p,
             idempotency_key=f"candidate_selfie_approved_{cand.external_id}",
         )
     except Exception as exc:  # noqa: BLE001
@@ -1305,60 +1296,53 @@ def decide_selfie(
 
 
 def _notify_selfie_rejected(cand: Candidate) -> None:
-    from notify.interface.send import send
-    from users.roles import notifications as msgs
+    # wave-2: send_event lê teor/canais/is_tts do Template no DB. WhatsApp-only (legado).
+    from notify.interface.events import send_event
 
     p = profiles.get(cand.user)
     try:
-        send(
-            text=msgs.text(
-                "candidate.selfie_rejected", name=msgs.first_name(p.name if p else None)
-            ),
-            caller="candidate.selfie_rejected",
-            phone=p.phone if p else None,
+        send_event(
+            "candidate.selfie_rejected",
+            profile=p,
+            channels_override=("whatsapp",),
         )
     except Exception as exc:  # noqa: BLE001
         logger.warning("candidate.notify_selfie_rejected_failed", error=str(exc))
 
 
 def _notify_selfie_review(cand: Candidate) -> None:
-    from notify.interface.send import send
-    from users.roles import notifications as msgs
+    # wave-2: send_event lê teor/canais/is_tts do Template no DB. WhatsApp-only (coordenador).
+    from notify.interface.events import send_event
 
     coord = cand.hub.coordinator
     if coord is None:
         return
     cp = profiles.get(coord)
     try:
-        send(
-            text=msgs.text(
-                "candidate.selfie_in_review",
-                name=msgs.first_name(cp.name if cp else None),
-            ),
-            caller="candidate.selfie_in_review",
-            phone=cp.phone if cp else None,
+        send_event(
+            "candidate.selfie_in_review",
+            profile=cp,
+            channels_override=("whatsapp",),
         )
     except Exception as exc:  # noqa: BLE001
         logger.warning("candidate.notify_selfie_review_failed", error=str(exc))
 
 
 def _notify_awaiting_approval(cand: Candidate) -> None:
-    """Candidato concluiu a coleta → avisa o COORDENADOR que há candidato aguardando aprovação."""
-    from notify.interface.send import send
-    from users.roles import notifications as msgs
+    """Candidato concluiu a coleta → avisa o COORDENADOR que há candidato aguardando aprovação.
+
+    wave-2: send_event lê teor/canais/is_tts do Template no DB. WhatsApp-only (coordenador)."""
+    from notify.interface.events import send_event
 
     coord = cand.hub.coordinator
     if coord is None:
         return
     cp = profiles.get(coord)
     try:
-        send(
-            text=msgs.text(
-                "candidate.awaiting_approval",
-                name=msgs.first_name(cp.name if cp else None),
-            ),
-            caller="candidate.awaiting_approval",
-            phone=cp.phone if cp else None,
+        send_event(
+            "candidate.awaiting_approval",
+            profile=cp,
+            channels_override=("whatsapp",),
             idempotency_key=f"candidate_awaiting_{cand.external_id}",
         )
     except Exception as exc:  # noqa: BLE001
@@ -1412,21 +1396,16 @@ def reset_doc_type(*, candidate_external_id: str, coordinator) -> dict:
 
 
 def _notify_doc_type_reset(cand: Candidate) -> None:
-    """Avisa o candidato que pode reenviar o documento (o coordenador destravou o tipo)."""
-    from notify.interface.send import send
-    from users.roles import notifications as msgs
+    """Avisa o candidato que pode reenviar o documento (o coordenador destravou o tipo).
+
+    wave-2: send_event lê teor/canais/is_tts do Template no DB. Channels default (Template decide)."""
+    from notify.interface.events import send_event
 
     p = profiles.get(cand.user)
     try:
-        send(
-            text=msgs.text(
-                "candidate.doc_type_reset", name=msgs.first_name(p.name if p else None)
-            ),
-            caller="candidate.doc_type_reset",
-            phone=p.phone if p else None,
-            email=p.email if p else None,
-            email_channel=bool(p and p.email),
-            gender=p.gender if p else None,
+        send_event(
+            "candidate.doc_type_reset",
+            profile=p,
             idempotency_key=f"cand_doctype_reset_{cand.external_id}_{cand.updated_at.timestamp()}",
         )
     except Exception as exc:  # noqa: BLE001
@@ -1501,39 +1480,31 @@ def reject_candidate(
 
 
 def _notify_became_promoter(cand: Candidate, *, locked: bool) -> None:
-    """Virou promotor: travado → `training.must_train` (texto); liberado → `training.approved` (TTS)."""
-    from notify.interface.send import send
-    from users.roles import notifications as msgs
+    """Virou promotor: travado → `training.must_train` (texto); liberado → `training.approved` (TTS).
+
+    Migração 2026-07-02: send_event lê teor/canais/is_tts do Template no DB; `{nome}` do profile."""
+    from notify.interface.events import send_event
 
     event = "training.must_train" if locked else "training.approved"
     p = profiles.get(cand.user)
     try:
-        send(
-            text=msgs.text(event, name=msgs.first_name(p.name if p else None)),
-            caller=event,
-            phone=p.phone if p else None,
-            email=p.email if p else None,
-            email_channel=bool(p and p.email),
-            tts=msgs.is_tts(event),
-            gender=p.gender if (p and msgs.is_tts(event)) else None,
-            idempotency_key=f"candidate_promoted_{cand.external_id}",
+        send_event(
+            event, profile=p, idempotency_key=f"candidate_promoted_{cand.external_id}"
         )
     except Exception as exc:  # noqa: BLE001
         logger.warning("candidate.notify_promoted_failed", error=str(exc))
 
 
 def _notify_candidate_rejected(cand: Candidate) -> None:
-    from notify.interface.send import send
-    from users.roles import notifications as msgs
+    # wave-2: send_event lê teor/canais/is_tts do Template no DB. WhatsApp-only (legado).
+    from notify.interface.events import send_event
 
     p = profiles.get(cand.user)
     try:
-        send(
-            text=msgs.text(
-                "candidate.rejected", name=msgs.first_name(p.name if p else None)
-            ),
-            caller="candidate.rejected",
-            phone=p.phone if p else None,
+        send_event(
+            "candidate.rejected",
+            profile=p,
+            channels_override=("whatsapp",),
             idempotency_key=f"candidate_rejected_{cand.external_id}",
         )
     except Exception as exc:  # noqa: BLE001

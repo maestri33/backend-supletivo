@@ -1064,51 +1064,30 @@ def veteran_detail(*, user_external_id: str) -> dict:
 
 
 def _notify(student: Student, *, event: str, key: str, **ctx) -> None:
-    """Notifica o ALUNO. Teor + regra de TTS vêm do catálogo `notifications` (nome do destinatário 2×)."""
-    from notify.interface.send import send
+    """Notifica o ALUNO. Teor/canais/is_tts/storytelling vêm do Template no DB (`send_event`):
+    `student.diploma_issued` é TTS+story (voz + discurso motivacional da IA); `{nome}` do profile."""
+    from notify.interface.events import send_event
     from users.profiles import interface as profiles
-    from users.roles import notifications as msgs
 
     p = profiles.get(student.user)
-    name = msgs.first_name(p.name if p else None)
-    tts = msgs.is_tts(event)
     try:
-        send(
-            text=msgs.story_text(
-                event,
-                name=name,
-                fallback=msgs.text(event, name=name, **ctx),
-                age=msgs.age_from(getattr(p, "birth_date", None)),
-            ),
-            caller=event,
-            phone=p.phone if p else None,
-            email=p.email if p else None,
-            email_channel=bool(p and p.email),
-            tts=tts,
-            gender=p.gender if (p and tts) else None,
-            idempotency_key=key,
-        )
+        send_event(event, profile=p, ctx=ctx or None, idempotency_key=key)
     except Exception as exc:  # noqa: BLE001 — notificação é best-effort (§12, canais isolados)
         logger.warning("student.notify_failed", caller=event, error=str(exc))
 
 
 def _notify_coordinator(student: Student, *, event: str, key: str, **ctx) -> None:
-    """Notifica o COORDENADOR do polo do aluno. Teor no catálogo (nome do coordenador 2×)."""
-    from notify.interface.send import send
+    """Notifica o COORDENADOR do polo do aluno. Teor/canais do DB; `{nome}` do profile do coordenador.
+    Sem coordenador ou sem profile → send_event devolve None (no-op, sem row morto)."""
+    from notify.interface.events import send_event
     from users.profiles import interface as profiles
-    from users.roles import notifications as msgs
 
     coord = student.hub.coordinator
     if coord is None:
         return
     cp = profiles.get(coord)
     try:
-        send(
-            text=msgs.text(event, name=msgs.first_name(cp.name if cp else None), **ctx),
-            caller=event,
-            phone=cp.phone if cp else None,
-            idempotency_key=key,
-        )
+        send_event(event, profile=cp, ctx=ctx or None, idempotency_key=key)
     except Exception as exc:  # noqa: BLE001
         logger.warning("student.notify_coord_failed", caller=event, error=str(exc))
 

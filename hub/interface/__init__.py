@@ -64,19 +64,17 @@ def _ensure_coordinator_role(user: User) -> None:
 
 
 def _notify_coordinator_assigned(user: User) -> None:
-    """Avisa o usuário que acabou de virar coordenador de um polo (best-effort, §12)."""
-    from notify.interface.send import send
+    """Avisa o usuário que acabou de virar coordenador de um polo (best-effort, §12).
+
+    wave-2: send_event lê teor/canais/is_tts do Template no DB."""
+    from notify.interface.events import send_event
     from users.profiles import interface as profiles
-    from users.roles import notifications as msgs
 
     p = profiles.get(user)
     try:
-        send(
-            text=msgs.text(
-                "hub.coordinator_assigned", name=msgs.first_name(p.name if p else None)
-            ),
-            caller="hub.coordinator_assigned",
-            phone=p.phone if p else None,
+        send_event(
+            "hub.coordinator_assigned",
+            profile=p,
             idempotency_key=f"hub_coord_assigned_{user.external_id}",
         )
     except Exception as exc:  # noqa: BLE001
