@@ -36,6 +36,8 @@ jobs:
           /usr/local/bin/uv pip install -q gunicorn "uvicorn[standard]" "psycopg[binary]"
           .venv/bin/python manage.py check
           .venv/bin/python manage.py migrate --noinput
+          # seed templates de notificação (idempotente: default cria só o que falta no DB)
+          .venv/bin/python manage.py notify_seed_templates || true
           .venv/bin/python manage.py collectstatic --noinput
           systemctl restart backend-web backend-qcluster
           # health no LOOPBACK (a URL pública de dentro do server pode ser bloqueada — egress)
