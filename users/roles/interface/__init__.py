@@ -11,6 +11,7 @@ from users.roles.service import (
     grant,
     is_blocked,
     promote,
+    purge_funnel_user,
     revoke,
     users_with_role,
 )
@@ -30,5 +31,6 @@ __all__ = [
     "is_blocked",
     "is_entry_role",
     "users_with_role",
+    "purge_funnel_user",
     "all_rules",
 ]
