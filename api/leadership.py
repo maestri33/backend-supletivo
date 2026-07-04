@@ -104,6 +104,8 @@ class CheckIn(Schema):
     cpf: str | None = None
     phone: str | None = None
     external_id: str | None = None  # re-dispara OTP de usuário já conhecido (do USER)
+    # O NORMAL é disparar OTP. `false` = modo sem OTP: espia found/roles e devolve `token` direto.
+    send_otp: bool = True
 
 
 class HubOut(Schema):
@@ -120,6 +122,8 @@ class CoordinatorCheckOut(Schema):
     otp_wait: int | None = None
     whatsapp: bool | None = None
     roles: list[str] | None = None
+    # só no modo `send_otp=false`: JWT de acesso direto.
+    token: str | None = None
     is_coordinator: bool = False
     hub: HubOut | None = Field(
         None, description="o polo que a pessoa coordena (se coordena)"
@@ -605,7 +609,10 @@ def check(request, payload: CheckIn):
     `detail` + `roles` — o front redireciona pra área certa levando o `external_id`, e a pessoa
     loga lá com o MESMO OTP já enviado (palavra do Victor 2026-06-12)."""
     result = auth_iface.check(
-        cpf=payload.cpf, phone=payload.phone, external_id=payload.external_id
+        cpf=payload.cpf,
+        phone=payload.phone,
+        external_id=payload.external_id,
+        send_otp=payload.send_otp,
     )
     if not result.get("found"):
         return result

@@ -94,6 +94,9 @@ class CheckIn(Schema):
     external_id: str | None = (
         None  # re-dispara OTP de usuário já conhecido (o service já aceitava)
     )
+    # O NORMAL é disparar OTP. `false` = modo sem OTP (ex-/auth/check-bot): só espia found/roles
+    # e devolve `token` direto (o canal do chamador é a prova de identidade — bot WhatsApp).
+    send_otp: bool = True
 
 
 class CheckOut(Schema):
@@ -106,6 +109,8 @@ class CheckOut(Schema):
     otp_wait: int | None = None
     whatsapp: bool | None = None
     roles: list[str] | None = None
+    # só no modo `send_otp=false` (ex-check-bot): JWT de acesso direto.
+    token: str | None = None
 
 
 class LoginIn(Schema):
@@ -285,18 +290,24 @@ def register(request, payload: LeadCreateIn):
 
 @auth_router.post("/check", response=CheckOut, auth=None)
 def check(request, payload: CheckIn):
-    """Dispara OTP por cpf/phone e **VAZA existência** (CONVENTION §5): devolve `found`+`roles` honestos —
-    o front decide cadastro novo × login e pra qual fase do funil mandar."""
+    """**O check NORMAL: dispara OTP** por cpf/phone e **VAZA existência** (CONVENTION §5): devolve
+    `found`+`roles` honestos — o front decide cadastro novo × login e pra qual fase do funil mandar.
+
+    `send_otp=false` = o antigo `/auth/check-bot` integrado aqui: mesma função SEM disparar OTP,
+    devolvendo o `token` (JWT) direto — o canal do chamador é a prova de identidade."""
     return auth_iface.check(
-        cpf=payload.cpf, phone=payload.phone, external_id=payload.external_id
+        cpf=payload.cpf,
+        phone=payload.phone,
+        external_id=payload.external_id,
+        send_otp=payload.send_otp,
     )
 
 
 @auth_router.post("/check-bot", response=CheckBotOut, auth=None, tags=["bot"])
 def check_bot(request, payload: CheckBotIn):
-    """Check SEM OTP para o bot WhatsApp — o número do zap é a prova de identidade.
-    Retorna JWT direto se o usuário existir. Usado EXCLUSIVAMENTE pelo bot_v2 (FastAPI)."""
-    return auth_iface.check_bot(phone=payload.phone)
+    """DEPRECATED: use `POST /auth/check` com `send_otp=false` (mesma função, integrada).
+    Mantido como alias fino pra compat do bot_v2 (FastAPI)."""
+    return auth_iface.check(phone=payload.phone, send_otp=False)
 
 
 @auth_router.post("/login", response=TokenOut, auth=None)
