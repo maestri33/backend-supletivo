@@ -21,7 +21,5 @@ class Migration(migrations.Migration):
     ]
 
     operations = [
-        migrations.RunPython(
-            create_missing_address_proofs, migrations.RunPython.noop
-        ),
+        migrations.RunPython(create_missing_address_proofs, migrations.RunPython.noop),
     ]

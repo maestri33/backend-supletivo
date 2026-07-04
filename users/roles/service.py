@@ -167,7 +167,11 @@ def purge_funnel_user(
     if user_external_id:
         user = User.objects.filter(external_id=user_external_id).first()
     elif lead_external_id:
-        lead = Lead.objects.filter(external_id=lead_external_id).select_related("user").first()
+        lead = (
+            Lead.objects.filter(external_id=lead_external_id)
+            .select_related("user")
+            .first()
+        )
         user = lead.user if lead else None
     elif candidate_external_id:
         cand = (

@@ -21,7 +21,10 @@ def _transcribe_audio(sub) -> bool:
     from users.roles.training.service import _AUDIO_EXT
 
     mime_by_ext: dict[str, str] = {}
-    for mime, ext in _AUDIO_EXT.items():  # 1º MIME de cada ext (o canônico: audio/mpeg, audio/mp4…)
+    for (
+        mime,
+        ext,
+    ) in _AUDIO_EXT.items():  # 1º MIME de cada ext (o canônico: audio/mpeg, audio/mp4…)
         mime_by_ext.setdefault(ext, mime)
     full = Path(settings.MEDIA_ROOT) / sub.audio
     try:
@@ -31,7 +34,9 @@ def _transcribe_audio(sub) -> bool:
             caller="training.transcribe",
         )
     except Exception as exc:  # noqa: BLE001 — IA/arquivo fora → fica pending (degrade gracioso)
-        logger.warning("training.transcribe_failed", submission_id=sub.id, error=str(exc))
+        logger.warning(
+            "training.transcribe_failed", submission_id=sub.id, error=str(exc)
+        )
         return False
     if not transcript.strip():
         logger.warning("training.transcript_empty", submission_id=sub.id)

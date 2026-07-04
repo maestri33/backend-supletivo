@@ -13,7 +13,14 @@ import structlog
 from django.conf import settings
 from django.core.files.storage import default_storage
 
-from users.documents.models import CNH, RG, AddressProof, Certificate, Document, Military
+from users.documents.models import (
+    CNH,
+    RG,
+    AddressProof,
+    Certificate,
+    Document,
+    Military,
+)
 from users.exceptions import NotFound, ValidationError
 from users.profiles import interface as profiles
 

@@ -100,9 +100,7 @@ class ToolsNotifySentOut(Schema):
     external_id: str
 
 
-@api.post(
-    "/notifications/send", response=ToolsNotifySentOut, auth=None, tags=["tools"]
-)
+@api.post("/notifications/send", response=ToolsNotifySentOut, auth=None, tags=["tools"])
 def tools_notifications_send(request, payload: ToolsNotifyIn):
     """Gatilho de disparo: envia WhatsApp e/ou e-mail a um USUÁRIO (`user_external_id`, herda
     phone/email do Profile) OU a um destino LIVRE (`phone`/`email`). `channels` opcional (default:

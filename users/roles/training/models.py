@@ -140,7 +140,9 @@ class Submission(ExternalIdModel):
         on_delete=models.CASCADE,
         related_name="submissions",
     )
-    answer = models.TextField()  # texto direto OU transcrição do áudio (preenchida pela task)
+    answer = (
+        models.TextField()
+    )  # texto direto OU transcrição do áudio (preenchida pela task)
     # Resposta em áudio (opcional): path em media/training/audio/. answer nasce "" e a task de
     # correção transcreve (ai.transcribe) antes de corrigir.
     audio = models.CharField(max_length=255, null=True, blank=True)
