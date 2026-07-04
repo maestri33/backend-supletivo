@@ -82,6 +82,37 @@ def _week_bounds(reference):
     return week_start, week_end, monday, friday
 
 
+def week_window(reference=None) -> tuple[datetime, datetime]:
+    """Janela da semana corrente: (segunda 00:00 SP, segunda seguinte 00:00 SP).
+
+    Mesma janela que `run_weekly_closing` usa — consumida pelo painel do promotor
+    (`/promoter/me/summary`) pra contagem/soma "desta semana" bater com o fechamento.
+    """
+    now = reference or timezone.now()
+    if timezone.is_naive(now):
+        now = timezone.make_aware(now, SP_TZ)
+    week_start, week_end, _monday, _friday = _week_bounds(now)
+    return week_start, week_end
+
+
+def next_closing_at(reference=None) -> datetime:
+    """Próximo fechamento (closing_weekday/closing_hour em SP). Se o desta semana já passou,
+    devolve o da semana seguinte."""
+    now = reference or timezone.now()
+    if timezone.is_naive(now):
+        now = timezone.make_aware(now, SP_TZ)
+    local = now.astimezone(SP_TZ)
+    monday = (local - timedelta(days=local.weekday())).date()
+    closing = datetime.combine(
+        monday + timedelta(days=config.closing_weekday()),
+        time(hour=config.closing_hour()),
+        tzinfo=SP_TZ,
+    )
+    if local >= closing:
+        closing += timedelta(days=7)
+    return closing
+
+
 def _external_reference(friday, payee) -> str:
     """`{ordinal-sexta-no-mês}_{MM}_{AAAA}_{payee.external_id}` (formato do legado)."""
     ordinal = (friday.day - 1) // 7 + 1  # 1ª..5ª sexta do mês

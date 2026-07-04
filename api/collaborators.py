@@ -12,7 +12,7 @@ wizard sem re-fetch).
 
 from __future__ import annotations
 
-from ninja import Field, File, Router, Schema
+from ninja import Field, File, Form, Router, Schema
 from ninja.files import UploadedFile
 
 from api.auth import require_roles
@@ -43,6 +43,8 @@ _ERROR_REGISTRY = """
 | `MATERIAL_NOT_FOUND` / `TRAINEE_NOT_FOUND` / `CANDIDATE_NOT_FOUND` / `PROMOTER_NOT_FOUND` / `USER_NOT_FOUND` | recurso não existe (404) | — |
 | `MATERIAL_INACTIVE` | submissão em matéria desativada (422) | — |
 | `ALREADY_GRADING` | já há uma resposta em correção (409) | — |
+| `INVALID_AUDIO_TYPE` | áudio fora de mp3/m4a/aac/ogg/webm/wav (422) | — |
+| `AUDIO_TOO_LARGE` | áudio acima de MAX_UPLOAD_MB (422) | — |
 | `SELFIE_NOT_IN_REVIEW` | decisão de selfie fora de revisão (422) | `selfie_status` |
 | `NOT_HUB_COORDINATOR` | coordenador não é do polo (403) | — |
 | `CPF_EXISTS` / `PHONE_EXISTS` / `EMAIL_EXISTS` | cadastro duplicado (409) | — |
@@ -143,7 +145,8 @@ class DocumentsIn(Schema):
 
 class PixIn(Schema):
     key: str
-    key_type: str  # CPF | CNPJ | EMAIL | PHONE | EVP
+    # CPF | CNPJ | EMAIL | PHONE | EVP — apelidos PT também valem (celular→PHONE, aleatoria→EVP…)
+    key_type: str
 
 
 class SubmissionIn(Schema):
@@ -196,6 +199,12 @@ class CandidateDocumentSubOut(Schema):
     validation_reason: str | None = None
 
 
+class AddressProofOut(Schema):
+    """Comprovante de residência (opcional, foto só)."""
+
+    photo: str | None = None
+
+
 class CandidateDocumentsOut(Schema):
     """Bloco de documentos do candidato."""
 
@@ -204,6 +213,7 @@ class CandidateDocumentsOut(Schema):
     cnh: CandidateDocumentSubOut | None = None
     certificate: CandidateDocumentSubOut | None = None
     military: CandidateDocumentSubOut | None = None
+    address_proof: AddressProofOut | None = None
 
 
 class CandidateSelfieOut(Schema):
@@ -304,6 +314,7 @@ class SubmissionOut(Schema):
     material_external_id: str
     grade: str | None = None
     justification: str | None = None
+    audio: str | None = None
     status: str
 
 
@@ -319,10 +330,13 @@ class PromoterMeOut(Schema):
 
 
 class PromoterLeadOut(Schema):
-    """Lead captado pelo promotor (read-only)."""
+    """Lead captado pelo promotor (read-only). name/phone vêm do Profile do lead
+    (card de leads + link de WhatsApp no app do promotor)."""
 
     external_id: str
     status: str
+    name: str | None = None
+    phone: str | None = None
     created_at: str
 
 
@@ -334,6 +348,29 @@ class PromoterCommissionOut(Schema):
     source: str
     status: str
     created_at: str
+
+
+class PromoterLifetimeOut(Schema):
+    """Totais vitalícios do promotor (alunos pagos, bônus batidos, total recebido)."""
+
+    total_students: int
+    goals_hit: int
+    total_received: str
+
+
+class PromoterSummaryOut(Schema):
+    """Resumo do painel do promotor: semana corrente (mesma janela do fechamento) + vitalício.
+    Valores monetários em string decimal (reais)."""
+
+    week_start: str
+    week_end: str
+    week_paid_leads: int
+    week_goal: int
+    goal_reached: bool
+    week_commission_total: str
+    bonus_amount: str
+    next_closing_at: str
+    lifetime: PromoterLifetimeOut
 
 
 class StudyPricingCardOut(Schema):
@@ -524,6 +561,17 @@ def candidate_document_photo(request, slot: str, file: UploadedFile = File(...))
     )
 
 
+@api.post(
+    "/candidate/documents/address-proof", response=CandidateMeOut, tags=["candidate"]
+)
+def candidate_address_proof(request, file: UploadedFile = File(...)):
+    """Comprovante de residência (JPEG/PNG/WEBP/PDF, multipart) — documento OPCIONAL: não define
+    `doc_type`, não passa pela IA e não gateia o wizard. Devolve o `me_dict` canônico (a foto
+    aparece em `documents.address_proof.photo`)."""
+    ext = _guard(request, "candidate")
+    return candidate_iface.upload_address_proof(user_external_id=ext, upload=file)
+
+
 @api.post("/candidate/pix", response=CandidateMeOut, tags=["candidate"])
 def candidate_pix(request, payload: PixIn):
     """Valida a chave Pix no Asaas/DICT (confere o titular) e grava. Devolve o `me_dict` canônico.
@@ -590,6 +638,24 @@ def training_submit(request, payload: SubmissionIn):
     return training_iface.submission_to_dict(sub)
 
 
+@api.post("/training/submissions/audio", response=SubmissionOut, tags=["training"])
+def training_submit_audio(
+    request,
+    material_external_id: str = Form(...),
+    file: UploadedFile = File(...),
+):
+    """Resposta em ÁUDIO (multipart, espelha os uploads de documento/selfie): o backend transcreve
+    (Gemini STT) e corrige na mesma task assíncrona. mp3/m4a/aac/ogg/webm/wav, até MAX_UPLOAD_MB."""
+    ext = _guard(request, "promoter")
+    sub = training_iface.submit_audio(
+        user_external_id=ext,
+        material_external_id=material_external_id,
+        data=file.read(),
+        content_type=getattr(file, "content_type", ""),
+    )
+    return training_iface.submission_to_dict(sub)
+
+
 # ── promotor (autenticado, role promoter) ───────────────────────────────────
 def _promoter(request):
     ext = _guard(request, "promoter")
@@ -614,6 +680,13 @@ def promoter_leads(request):
 )
 def promoter_commissions(request):
     return promoter_iface.list_commissions(_promoter(request).user)
+
+
+@api.get("/promoter/me/summary", response=PromoterSummaryOut, tags=["promoter"])
+def promoter_summary(request):
+    """Agregado da semana (matrículas pagas × meta, comissão acumulada, bônus, próximo fechamento
+    sexta 18h SP) + totais vitalícios — o front não precisa mais calcular isso."""
+    return promoter_iface.summary(_promoter(request).user)
 
 
 # ── promotor ESTUDA (entra no funil do aluno por endpoint logado; Victor 2026-06-16) ──

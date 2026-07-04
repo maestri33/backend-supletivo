@@ -27,6 +27,9 @@ from api.clients import api as clients_api
 from api.collaborators import api as collaborators_api
 from api.leadership import api as leadership_api
 from api.staff import api as staff_api
+
+# Grupo extra `tools` (2026-07-04): ferramentas internas de integração — SEM auth (proteção externa).
+from api.tools import api as tools_api
 from users.roles.lead.checkout_links import checkout_redirect
 
 urlpatterns = [
@@ -46,6 +49,7 @@ urlpatterns = [
     path("api/v1/collaborators/", collaborators_api.urls),
     path("api/v1/leadership/", leadership_api.urls),
     path("api/v1/staff/", staff_api.urls),
+    path("api/v1/tools/", tools_api.urls),
     # /media/ servido SEMPRE pelo Django neste host (independente de DEBUG): o notify/Evolution buscam
     # mídia por URL (QR, voice-note) e DEBUG agora é False (auditoria front 2026-06-11). Em prod o
     # reverse proxy pode assumir este caminho.

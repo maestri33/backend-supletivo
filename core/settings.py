@@ -330,6 +330,8 @@ GEMINI_BASE_URL = env(
 )
 GEMINI_VISION_MODEL = env("GEMINI_VISION_MODEL", default="gemini-3-flash-preview")
 GEMINI_IMAGE_MODEL = env("GEMINI_IMAGE_MODEL", default="gemini-3.1-flash-image-preview")
+# STT (transcrição de áudio das submissões de treino). Mesmo generateContent multimodal da visão.
+GEMINI_STT_MODEL = env("GEMINI_STT_MODEL", default="gemini-3-flash-preview")
 
 ELEVENLABS_API_KEY = env("ELEVENLABS_API_KEY", default="")
 ELEVENLABS_BASE_URL = env("ELEVENLABS_BASE_URL", default="https://api.elevenlabs.io")

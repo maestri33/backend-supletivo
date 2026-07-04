@@ -22,6 +22,7 @@ from users.roles.training.service import (
     set_material_video,
     submission_to_dict,
     submit,
+    submit_audio,
     update_material,
 )
 
@@ -45,6 +46,7 @@ __all__ = [
     "list_locked_promoters_for_hub",
     # submissão
     "submit",
+    "submit_audio",
     "submission_to_dict",
     "progress",
 ]

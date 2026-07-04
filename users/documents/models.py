@@ -159,6 +159,22 @@ class Certificate(models.Model):
         verbose_name_plural = "certidões"
 
 
+class AddressProof(models.Model):
+    """Comprovante de residência — foto só (sem campos digitados nem validação IA por ora).
+    Documento OPCIONAL do funil do colaborador: não gateia o wizard."""
+
+    document = models.OneToOneField(
+        Document, on_delete=models.CASCADE, related_name="address_proof"
+    )
+    photo = models.CharField("foto", max_length=500, null=True, blank=True)
+
+    class Meta:
+        app_label = "users"
+        db_table = "users_document_address_proof"
+        verbose_name = "comprovante de residência"
+        verbose_name_plural = "comprovantes de residência"
+
+
 class Military(models.Model):
     """Documento de serviço militar (reservista). Criado pra todos; só `gender='M'` preenche (Q4)."""
 
