@@ -28,6 +28,7 @@ from users.roles.candidate.service import (
     set_profile,
     set_selfie,
     to_dict,
+    upload_address_proof,
     upload_document_photo,
 )
 from users.roles.candidate.tasks import (
@@ -50,6 +51,7 @@ __all__ = [
     "get_document_section",
     "patch_document_section",
     "upload_document_photo",
+    "upload_address_proof",
     "set_pix",
     "set_selfie",
     "get_selfie",

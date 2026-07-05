@@ -229,9 +229,17 @@ def _send_or_wait(user) -> dict:
 
 
 def check(
-    *, cpf: str | None = None, phone: str | None = None, external_id: str | None = None
+    *,
+    cpf: str | None = None,
+    phone: str | None = None,
+    external_id: str | None = None,
+    send_otp: bool = True,
 ) -> dict:
-    """Acha o usuário por cpf/phone/external_id e dispara OTP se existir.
+    """Acha o usuário por cpf/phone/external_id. **O NORMAL é disparar OTP** (`send_otp=True`).
+
+    `send_otp=False` = o antigo `check_bot` integrado como parâmetro (Victor 2026-07-04): mesma
+    função, mas NÃO dispara OTP e devolve o `token` (JWT) direto — o canal do chamador é a prova
+    de identidade (bot WhatsApp) ou o front só quer espiar (`found`/`roles`) sem gastar o OTP.
 
     **VAZA existência DE PROPÓSITO (CONVENTION §5):** devolve `found` honesto — se existe, manda OTP e
     retorna `external_id`+`roles`; se NÃO existe, `found:false`+`otp_sent:false`. O front decide cadastro
@@ -268,6 +276,24 @@ def check(
             "found": False,
             "external_id": None,
             "whatsapp": whatsapp,
+            "token": None,
+        }
+
+    active = roles.active_roles(user)
+    if not send_otp:
+        # modo sem OTP (ex-check_bot): JWT direto — o canal do chamador é a prova de identidade.
+        tokens = jwt_service.issue(str(user.external_id), active)
+        logger.info(
+            "auth.check_no_otp", external_id=str(user.external_id), roles=active
+        )
+        return {
+            "otp_sent": False,
+            "otp_wait": None,
+            "found": True,
+            "external_id": str(user.external_id),
+            "whatsapp": None,
+            "roles": active,
+            "token": tokens["access_token"],
         }
 
     result = _send_or_wait(user)
@@ -276,7 +302,8 @@ def check(
         "found": True,
         "external_id": str(user.external_id),
         "whatsapp": None,
-        "roles": roles.active_roles(user),
+        "roles": active,
+        "token": None,
     }
 
 
@@ -308,34 +335,9 @@ def recover(*, cpf: str | None = None, phone: str | None = None) -> dict:
 
 
 def check_bot(*, phone: str) -> dict:
-    """Check SEM OTP para o bot WhatsApp. O número do WhatsApp é a prova de identidade.
-
-    Retorna found + external_id + roles + JWT direto. Não dispara OTP — o bot já tem o
-    número do WhatsApp como canal autenticado. Usado EXCLUSIVAMENTE pelo bot_v2 (FastAPI)
-    que roda em LXC separada e chama este endpoint via HTTP."""
-    try:
-        phone = validation.validate_phone(phone)
-    except ValueError as exc:
-        raise ValidationError(str(exc), code="PHONE_INVALID") from exc
-
-    user = _find_user(phone=phone)
-    if user is None:
-        return {
-            "found": False,
-            "external_id": None,
-            "roles": None,
-            "token": None,
-        }
-
-    active = roles.active_roles(user)
-    tokens = jwt_service.issue(str(user.external_id), active)
-    logger.info("auth.check_bot", external_id=str(user.external_id), roles=active)
-    return {
-        "found": True,
-        "external_id": str(user.external_id),
-        "roles": active,
-        "token": tokens["access_token"],
-    }
+    """DEPRECATED (Victor 2026-07-04): virou `check(phone=..., send_otp=False)` — mantido como
+    alias fino pra compat do bot_v2 (FastAPI em LXC separada, chama via HTTP)."""
+    return check(phone=phone, send_otp=False)
 
 
 # ── login ────────────────────────────────────────────────────────────────

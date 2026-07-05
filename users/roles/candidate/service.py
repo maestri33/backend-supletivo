@@ -323,6 +323,16 @@ def upload_document_photo(*, user_external_id, slot: str, upload) -> dict:
     return {"stored": path, **_analysis.ack(_analysis.PENDING, _doc_started_at(sub))}
 
 
+def upload_address_proof(*, user_external_id, upload) -> dict:
+    """Comprovante de residência (foto/PDF) — documento OPCIONAL: não mexe no `doc_type` (rg/cnh),
+    não entra no pipeline de IA nem gateia o wizard. Aceito de `address` até `selfie`."""
+    cand = _require(
+        user_external_id, _S.ADDRESS, _S.DOCUMENTS, _S.PIX, _S.SELFIE, _S.COMPLETED
+    )
+    documents_iface.upload_photo(user_external_id, "address_proof_photo", upload)
+    return me_dict(cand)
+
+
 # ── validação do documento por IA (plan/12+15 B3) ───────────────────────────
 # Espelha `enrollment.run_rg_validation` mas GENERALIZADO por `doc_type` (rg|cnh) — uma
 # implementação só, alimentada pela `_document_ai` que já é polimórfica (B1). Roda na task
@@ -1015,6 +1025,9 @@ def set_pix(*, user_external_id, key: str, key_type: str) -> dict:
     """Valida a chave Pix no Asaas/DICT (confere que é do candidato, CPF do Profile) e grava. MEXE R$0,01."""
     from integrations.bank.asaas import pixkey
 
+    # apelidos PT do front (celular/aleatoria/…) → tipo canônico do DICT (PHONE/EVP/…); o Profile
+    # guarda SEMPRE o canônico.
+    key_type = pixkey.normalize_key_type(key_type)
     cand = _require(user_external_id, _S.DOCUMENTS, _S.PIX)
     profile = profiles.find_by_external_id(user_external_id)
     if profile is None or not profile.cpf:
@@ -1033,7 +1046,7 @@ def set_pix(*, user_external_id, key: str, key_type: str) -> dict:
         ) from exc
 
     # chave Pix canônica → SÓ no Profile (Victor 2026-06-16); no candidate fica só o flag de processo.
-    profiles.set_pix(user_external_id, key.strip(), key_type.strip().upper())
+    profiles.set_pix(user_external_id, key.strip(), key_type)
     cand.pix_validated = True
     cand.save(update_fields=["pix_validated", "updated_at"])
     if cand.status == _S.DOCUMENTS:

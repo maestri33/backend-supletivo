@@ -32,6 +32,7 @@ class GeminiClient:
         self._base_url = (base_url or settings.GEMINI_BASE_URL).rstrip("/")
         self._vision_model = settings.GEMINI_VISION_MODEL
         self._image_model = settings.GEMINI_IMAGE_MODEL
+        self._stt_model = settings.GEMINI_STT_MODEL
         self._timeout = timeout
 
     async def _generate(self, model: str, body: dict) -> dict:
@@ -77,6 +78,39 @@ class GeminiClient:
             "gemini.vision_done",
             model=self._vision_model,
             bytes=len(image_bytes),
+            chars=len(text),
+        )
+        return text.strip()
+
+    async def transcribe(
+        self, audio_bytes: bytes, *, mime_type: str = "audio/mpeg"
+    ) -> str:
+        """Transcreve um áudio (STT) — mesmo generateContent da visão, com parte de áudio inline."""
+        instruction = (
+            "Transcreva fielmente o audio a seguir em portugues brasileiro. "
+            "Responda APENAS a transcricao, sem comentarios nem formatacao."
+        )
+        body = {
+            "contents": [
+                {
+                    "parts": [
+                        {"text": instruction},
+                        {
+                            "inlineData": {
+                                "mimeType": mime_type,
+                                "data": base64.b64encode(audio_bytes).decode(),
+                            }
+                        },
+                    ]
+                }
+            ]
+        }
+        data = await self._generate(self._stt_model, body)
+        text = self._first_text(data)
+        logger.info(
+            "gemini.stt_done",
+            model=self._stt_model,
+            bytes=len(audio_bytes),
             chars=len(text),
         )
         return text.strip()

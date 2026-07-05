@@ -536,6 +536,29 @@ def tts(
     return _save_media("audio", "mp3", audio)
 
 
+def transcribe(
+    audio_bytes: bytes, *, caller: str, mime_type: str = "audio/mpeg"
+) -> str:
+    """Gemini STT: transcreve um áudio pra texto (pt-br). Devolve a transcrição.
+
+    Single-provider (MiniMax/ElevenLabs não recebem áudio como input hoje) — sem fallback.
+    """
+    from .gemini import GeminiClient
+
+    client = GeminiClient()
+
+    async def coro():
+        return await client.transcribe(audio_bytes, mime_type=mime_type)
+
+    return _media_call(
+        operation=AiCall.Operation.STT,
+        provider="gemini",
+        model=settings.GEMINI_STT_MODEL,
+        caller=caller,
+        coro=coro,
+    )
+
+
 def ocr(image_bytes: bytes, *, caller: str, document: bool = False) -> str:
     """Google Vision OCR: extrai o texto de uma imagem. Devolve o texto."""
     from .vision_ocr import VisionOCRClient

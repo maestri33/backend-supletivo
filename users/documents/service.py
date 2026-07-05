@@ -13,7 +13,14 @@ import structlog
 from django.conf import settings
 from django.core.files.storage import default_storage
 
-from users.documents.models import CNH, RG, Certificate, Document, Military
+from users.documents.models import (
+    CNH,
+    RG,
+    AddressProof,
+    Certificate,
+    Document,
+    Military,
+)
 from users.exceptions import NotFound, ValidationError
 from users.profiles import interface as profiles
 
@@ -43,6 +50,7 @@ _PHOTO_SLOTS = {
     "cnh_full": ("cnh", "full_photo"),  # CNH inteira (frente+verso) — plan/15 B2
     "certificate_photo": ("certificate", "photo"),
     "military_photo": ("military", "photo"),
+    "address_proof_photo": ("address_proof", "photo"),
 }
 
 # MIME aceito → extensão do arquivo salvo.
@@ -56,19 +64,20 @@ _PDF_MAX_PAGES = (
 
 
 def create_empty(user) -> Document:
-    """Cria o Document + os 4 sub-docs vazios. DENTRO da transação do provisionamento (auth)."""
+    """Cria o Document + os 5 sub-docs vazios. DENTRO da transação do provisionamento (auth)."""
     document = Document.objects.create(user=user)
     RG.objects.create(document=document)
     CNH.objects.create(document=document)
     Certificate.objects.create(document=document)
     Military.objects.create(document=document)
+    AddressProof.objects.create(document=document)
     return document
 
 
 def _get_document(external_id: str) -> Document:
     document = (
         Document.objects.filter(user__external_id=external_id)
-        .select_related("rg", "cnh", "certificate", "military")
+        .select_related("rg", "cnh", "certificate", "military", "address_proof")
         .first()
     )
     if document is None:
@@ -139,6 +148,9 @@ def as_dict(document: Document) -> dict:
             "category": mil.category,
             "ra": mil.ra,
             "photo": mil.photo,
+        },
+        "address_proof": {
+            "photo": document.address_proof.photo,
         },
     }
 

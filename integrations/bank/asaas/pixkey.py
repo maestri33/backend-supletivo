@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import secrets
+import unicodedata
 from datetime import timedelta
 
 import structlog
@@ -23,6 +24,32 @@ from .models import PixKey
 logger = structlog.get_logger()
 
 VALID_KEY_TYPES = {"CPF", "CNPJ", "EMAIL", "PHONE", "EVP"}
+
+# Apelidos PT/EN → tipo canônico do DICT. O front manda "celular"/"aleatoria" etc.; aqui vira o
+# código que o Asaas entende (e que é persistido no Profile/PixKey).
+_KEY_TYPE_ALIASES = {
+    "cpf": "CPF",
+    "cnpj": "CNPJ",
+    "email": "EMAIL",
+    "e-mail": "EMAIL",
+    "mail": "EMAIL",
+    "phone": "PHONE",
+    "celular": "PHONE",
+    "telefone": "PHONE",
+    "fone": "PHONE",
+    "evp": "EVP",
+    "aleatoria": "EVP",
+    "chave aleatoria": "EVP",
+    "random": "EVP",
+}
+
+
+def normalize_key_type(raw: str | None) -> str:
+    """Apelido PT/EN → tipo canônico do DICT (CPF/CNPJ/EMAIL/PHONE/EVP). Fold de acentos: "aleatória"
+    também casa. Desconhecido → upper cru (rejeitado adiante por `invalid_key_type`)."""
+    folded = unicodedata.normalize("NFKD", (raw or "").strip().lower())
+    folded = "".join(ch for ch in folded if not unicodedata.combining(ch))
+    return _KEY_TYPE_ALIASES.get(folded, (raw or "").strip().upper())
 
 
 class PixKeyError(Exception):
@@ -99,7 +126,7 @@ def validate_pix_key(*, key: str, key_type: str, expected_document: str) -> PixK
     Persiste/atualiza o registro `PixKey`. Titular diferente / formato inválido / DICT fora → `PixKeyError`.
     """
     key = key.strip()
-    key_type = key_type.strip().upper()
+    key_type = normalize_key_type(key_type)
     expected = _only_digits(expected_document)
     if key_type not in VALID_KEY_TYPES:
         raise PixKeyError("invalid_key_type")

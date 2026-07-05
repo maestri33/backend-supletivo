@@ -348,9 +348,8 @@ def _recheck_lock(user, *, trigger=None) -> None:
 # ── submissão (autenticado, role promoter) ──────────────────────────────────
 
 
-def submit(
-    *, user_external_id: str, material_external_id: str, answer: str
-) -> Submission:
+def _check_can_submit(user_external_id: str, material_external_id: str):
+    """Guards comuns às submissões (texto e áudio). Devolve (user, material)."""
     from users.auth.models import User
 
     user = User.objects.filter(external_id=user_external_id).first()
@@ -371,18 +370,76 @@ def submit(
             "Já existe uma resposta em correção para esta matéria.",
             code="ALREADY_GRADING",
         )
+    return user, material
 
-    sub = Submission.objects.create(
-        user=user, material=material, answer=answer, status=Submission.Status.PENDING
-    )
 
+def _queue_grade(sub: Submission) -> None:
     def _queue():
         from django_q.tasks import async_task
 
         async_task("users.roles.training.tasks.grade_submission", sub.id)
 
     transaction.on_commit(_queue)
+
+
+def submit(
+    *, user_external_id: str, material_external_id: str, answer: str
+) -> Submission:
+    user, material = _check_can_submit(user_external_id, material_external_id)
+    sub = Submission.objects.create(
+        user=user, material=material, answer=answer, status=Submission.Status.PENDING
+    )
+    _queue_grade(sub)
     logger.info("training.submitted", external_id=str(sub.external_id))
+    return sub
+
+
+# MIME de áudio aceito na resposta falada → extensão salva (espelha o _VIDEO_EXT da matéria).
+_AUDIO_EXT = {
+    "audio/mpeg": "mp3",
+    "audio/mp3": "mp3",
+    "audio/mp4": "m4a",
+    "audio/x-m4a": "m4a",
+    "audio/aac": "aac",
+    "audio/ogg": "ogg",
+    "audio/webm": "webm",
+    "audio/wav": "wav",
+    "audio/x-wav": "wav",
+}
+
+
+def submit_audio(
+    *, user_external_id: str, material_external_id: str, data: bytes, content_type: str
+) -> Submission:
+    """Resposta em ÁUDIO: salva o arquivo e cria a submissão com `answer=""` — a task de correção
+    transcreve (ai.transcribe) e corrige na sequência. Mesmos guards do texto (ALREADY_GRADING etc.)."""
+    from django.conf import settings
+
+    from core.media import save_media
+
+    ext = _AUDIO_EXT.get((content_type or "").split(";")[0].strip().lower())
+    if ext is None:
+        raise TrainingError(
+            "Formato de áudio não suportado (use mp3/m4a/aac/ogg/webm/wav).",
+            code="INVALID_AUDIO_TYPE",
+        )
+    if len(data) > settings.MAX_UPLOAD_MB * 1024 * 1024:
+        raise TrainingError(
+            f"Áudio maior que {settings.MAX_UPLOAD_MB} MB.", code="AUDIO_TOO_LARGE"
+        )
+    user, material = _check_can_submit(user_external_id, material_external_id)
+    path = save_media(prefix="training/audio", data=data, ext=ext)
+    sub = Submission.objects.create(
+        user=user,
+        material=material,
+        answer="",
+        audio=path,
+        status=Submission.Status.PENDING,
+    )
+    _queue_grade(sub)
+    logger.info(
+        "training.submitted_audio", external_id=str(sub.external_id), bytes=len(data)
+    )
     return sub
 
 
@@ -392,6 +449,7 @@ def submission_to_dict(s: Submission) -> dict:
         "material_external_id": str(s.material.external_id),
         "grade": str(s.grade) if s.grade is not None else None,
         "justification": s.justification,
+        "audio": s.audio,
         "status": s.status,
     }
 

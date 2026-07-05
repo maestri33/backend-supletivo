@@ -7,6 +7,7 @@ consome pra amarrar o lead ao promotor. Listagens (leads/comissões) são read-o
 from __future__ import annotations
 
 import uuid
+from decimal import Decimal
 
 import structlog
 from django.conf import settings
@@ -96,17 +97,28 @@ def to_dict(promoter: Promoter) -> dict:
 
 def list_leads(user) -> list[dict]:
     """Leads captados por este promotor (read-only, do funil do aluno)."""
+    from users.profiles import interface as profiles
     from users.roles.lead.models import Lead
 
-    rows = Lead.objects.filter(promoter=user).order_by("-created_at")[:200]
-    return [
-        {
-            "external_id": str(row.external_id),
-            "status": row.status,
-            "created_at": row.created_at.isoformat(),
-        }
-        for row in rows
-    ]
+    rows = list(
+        Lead.objects.filter(promoter=user)
+        .select_related("user")
+        .order_by("-created_at")[:200]
+    )
+    pmap = profiles.get_map([row.user for row in rows])
+    out = []
+    for row in rows:
+        p = pmap.get(row.user_id)
+        out.append(
+            {
+                "external_id": str(row.external_id),
+                "status": row.status,
+                "name": p.name if p else None,
+                "phone": p.phone if p else None,
+                "created_at": row.created_at.isoformat(),
+            }
+        )
+    return out
 
 
 def list_commissions(user) -> list[dict]:
@@ -124,6 +136,54 @@ def list_commissions(user) -> list[dict]:
         }
         for row in rows
     ]
+
+
+def summary(user) -> dict:
+    """Resumo semanal + vitalício pro painel do promotor (`/promoter/me/summary`).
+
+    Janela = a MESMA do fechamento (`week_window`, seg→seg SP). Contagens da semana NÃO filtram
+    status: as comissões viram PROCESSED na sexta 18h e o contador zeraria no fim de semana.
+    """
+    from django.db.models import Sum
+
+    from finance import config
+    from finance.interface.commissions import next_closing_at, week_window
+    from finance.models import Commission
+    from users.roles.lead.models import Lead
+
+    week_start, week_end = week_window()
+    week_qs = Commission.objects.filter(
+        payee=user, created_at__gte=week_start, created_at__lt=week_end
+    )
+    week_paid_leads = week_qs.filter(source_type=Commission.Source.LEAD).count()
+    week_goal = config.bonus_threshold()
+    week_total = week_qs.aggregate(total=Sum("amount"))["total"] or Decimal("0")
+
+    lifetime_qs = Commission.objects.filter(payee=user)
+    total_received = lifetime_qs.filter(status=Commission.Status.PAID).aggregate(
+        total=Sum("amount")
+    )["total"] or Decimal("0")
+
+    return {
+        "week_start": week_start.isoformat(),
+        "week_end": week_end.isoformat(),
+        "week_paid_leads": week_paid_leads,
+        "week_goal": week_goal,
+        "goal_reached": week_paid_leads >= week_goal,
+        "week_commission_total": str(week_total),
+        "bonus_amount": str(config.bonus_amount()),
+        "next_closing_at": next_closing_at().isoformat(),
+        "lifetime": {
+            # self_study fora: é a matrícula do próprio promotor, não capta comissão.
+            "total_students": Lead.objects.filter(
+                promoter=user, status=Lead.Status.PAID, self_study=False
+            ).count(),
+            "goals_hit": lifetime_qs.filter(
+                source_type=Commission.Source.BONUS
+            ).count(),
+            "total_received": str(total_received),
+        },
+    }
 
 
 # ── coordenador: suspender / reativar / listar promotores do polo (WP5, Victor 2026-06-16) ──

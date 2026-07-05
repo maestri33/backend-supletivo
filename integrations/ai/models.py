@@ -32,6 +32,7 @@ class AiCall(models.Model):
         IMAGE = "image", "image"
         TTS = "tts", "tts"
         OCR = "ocr", "ocr"
+        STT = "stt", "stt"
 
     class Status(models.TextChoices):
         SUCCESS = "success", "success"

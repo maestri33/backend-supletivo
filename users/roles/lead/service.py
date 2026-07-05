@@ -608,11 +608,12 @@ def get_lead(external_id: str) -> Lead | None:
     )
 
 
-def list_leads(*, hub=None, status=None) -> list[Lead]:
-    """Lista leads (mais novos primeiro), opcionalmente filtrados por HUB (do polo) e status.
+def list_leads(*, hub=None, status=None, created_after=None, limit=None) -> list[Lead]:
+    """Lista leads (mais novos primeiro), opcionalmente filtrados por HUB (do polo), status,
+    data mínima (`created_after`) e `limit`.
 
     HUB = o polo do lead: o promotor pertence ao hub (`Promoter.hub`) OU a matrícula já está no hub
-    (`Enrollment.hub`, pós-pagamento). Sem hub → todos (staff). Coordenador passa o seu hub."""
+    (`Enrollment.hub`, pós-pagamento). Sem hub → todos (staff/tools). Coordenador passa o seu hub."""
     from django.db.models import Q
 
     qs = Lead.objects.select_related("user", "promoter", "checkout").order_by(
@@ -620,10 +621,14 @@ def list_leads(*, hub=None, status=None) -> list[Lead]:
     )
     if status:
         qs = qs.filter(status=status)
+    if created_after is not None:
+        qs = qs.filter(created_at__gte=created_after)
     if hub is not None:
         qs = qs.filter(
             Q(promoter__promoter__hub=hub) | Q(user__enrollment__hub=hub)
         ).distinct()
+    if limit is not None:
+        qs = qs[:limit]
     return list(qs)
 
 
@@ -641,6 +646,7 @@ def lead_to_dict(lead: Lead) -> dict:
         "promoter_external_id": str(lead.promoter.external_id),
         "payment_link": checkout_links.short_url(c.short_token) if c else None,
         "receipt_url": c.receipt_url if c else None,
+        "created_at": lead.created_at.isoformat(),
     }
 
 

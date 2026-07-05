@@ -277,6 +277,33 @@ def list_all_leads(request, hub: str | None = None, status: str | None = None):
     return [lead_iface.lead_to_dict(lead) for lead in leads]
 
 
+# ── purge de lead/candidato (staff apaga registro de teste por completo — Victor 2026-07-04) ──
+@api.delete("/funnel-user", tags=["staff"])
+def purge_funnel_user(
+    request,
+    user_external_id: str | None = None,
+    lead_external_id: str | None = None,
+    candidate_external_id: str | None = None,
+    cpf: str | None = None,
+    phone: str | None = None,
+):
+    """APAGA por completo um usuário do funil (lead e/ou candidato) — ATÔMICO e IRREVERSÍVEL.
+
+    Identifique por UM dos parâmetros: `user_external_id`, `lead_external_id`,
+    `candidate_external_id`, `cpf` ou `phone`. Cascade leva Profile, Lead+Checkout, Candidate,
+    documentos, matrícula, aluno, OTPs, biometria… — libera CPF/telefone pra novo cadastro.
+    Recusa staff (`PURGE_STAFF_FORBIDDEN` 403), coordenador/promotor/quem tem financeiro
+    (`USER_NOT_PURGEABLE` 409 + `reason`). Sem identificador → 422 `MISSING_FIELD`."""
+    require_superuser(request.auth)
+    return roles.purge_funnel_user(
+        user_external_id=user_external_id,
+        lead_external_id=lead_external_id,
+        candidate_external_id=candidate_external_id,
+        cpf=cpf,
+        phone=phone,
+    )
+
+
 # ── financeiro (WP6: saldo Asaas + comissões + fila de payouts + resumo) ─────
 @api.get("/finance/balance", tags=["staff"])
 def finance_balance(request):
