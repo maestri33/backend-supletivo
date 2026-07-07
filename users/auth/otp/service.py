@@ -117,7 +117,12 @@ def generate_and_send(user) -> OtpCode:
 
     _check_and_record_rate_limit(user)  # pode levantar RateLimited (429)
 
-    code = _generate_code()
+    # A4 — TEST_MODE: código fixo (TEST_MODE_OTP_CODE) p/ o fluxo de teste ser determinístico.
+    code = (
+        settings.TEST_MODE_OTP_CODE
+        if getattr(settings, "TEST_MODE", False)
+        else _generate_code()
+    )
     otp = OtpCode.objects.create(
         user=user, code_hash=_hash_code(code), status=STATUS_GENERATED
     )

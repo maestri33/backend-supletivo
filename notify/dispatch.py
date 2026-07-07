@@ -44,6 +44,24 @@ def dispatch(notification_id: int) -> None:
 
     notif.attempts += 1
 
+    # A4 — TEST_MODE: dry-run — marca todos os canais pendentes como SENT e NÃO envia nada pela
+    # rede (sem WhatsApp/e-mail/TTS). O caller (ex.: OTP service) completa normalmente porque só
+    # lê o status; nada chega a um destinatário real.
+    if getattr(settings, "TEST_MODE", False):
+        if notif.whatsapp_status == STATUS_PENDING:
+            notif.whatsapp_status = STATUS_SENT
+        if notif.email_status == STATUS_PENDING:
+            notif.email_status = STATUS_SENT
+        if notif.tts_status == STATUS_PENDING:
+            notif.tts_status = STATUS_SENT
+        notif.save()
+        logger.info(
+            "notify.dispatched_dry_run",
+            external_id=str(notif.external_id),
+            caller=notif.caller,
+        )
+        return
+
     # ── WhatsApp: mídia > TTS(áudio, fallback texto) > texto ──
     if notif.whatsapp_status == STATUS_PENDING:
         if notif.media_url:

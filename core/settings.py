@@ -11,6 +11,7 @@ https://docs.djangoproject.com/en/5.2/ref/settings/
 """
 
 import os
+import socket
 from datetime import timedelta
 from pathlib import Path
 
@@ -34,6 +35,37 @@ SECRET_KEY = env("SECRET_KEY")
 DEBUG = env("DEBUG")
 
 ALLOWED_HOSTS = env.list("ALLOWED_HOSTS", default=[])
+
+# ── A4 — TEST_MODE ────────────────────────────────────────────────────────
+# Modo de teste integrado: simula CPFHub (aceita qualquer CPF bem formado), força WhatsApp
+# check_numbers=True, usa código OTP fixo e aponta Asaas pro sandbox. Ligado pelo .env
+# (`TEST_MODE=1`). Tem DUAS TRAVAS anti-prod ativas no boot:
+#   1. DJANGO_SETTINGS_MODULE ≠ "core.prod_settings"  (módulo de prod fica INACEITÁVEL)
+#   2. socket.gethostname() ∈ TEST_MODE_ALLOWED_HOSTS  (lista explícita, default vazia)
+# Falha em qualquer uma → ImproperlyConfigured no import. Source of truth único: este settings.
+TEST_MODE = env.bool("TEST_MODE", default=False)
+TEST_MODE_ALLOWED_HOSTS = env.list("TEST_MODE_ALLOWED_HOSTS", default=[])
+TEST_MODE_OTP_CODE = env("TEST_MODE_OTP_CODE", default="000000")
+TEST_MODE_ASAAS_SANDBOX_URL = env(
+    "TEST_MODE_ASAAS_SANDBOX_URL", default="https://api-sandbox.asaas.com"
+)
+if TEST_MODE:
+    from django.core.exceptions import ImproperlyConfigured
+
+    _settings_mod = os.environ.get("DJANGO_SETTINGS_MODULE", "")
+    _hostname = socket.gethostname()
+    if _settings_mod == "core.prod_settings":
+        raise ImproperlyConfigured(
+            f"TEST_MODE=1 recusado: DJANGO_SETTINGS_MODULE={_settings_mod!r} "
+            "(módulo prod). TEST_MODE só pode rodar com 'core.settings'."
+        )
+    if _hostname not in TEST_MODE_ALLOWED_HOSTS:
+        raise ImproperlyConfigured(
+            f"TEST_MODE=1 recusado: hostname {_hostname!r} não está em "
+            f"TEST_MODE_ALLOWED_HOSTS={TEST_MODE_ALLOWED_HOSTS}. "
+            "Anti-prod: TEST_MODE só roda em hosts explicitamente autorizados."
+        )
+
 
 # CORS (django-cors-headers) — config no .env (CONVENTION §10: um .env, nada hardcoded).
 # Em dev liberamos geral p/ a rede interna acessar fácil; em prod = lista explícita + allow_all False.
