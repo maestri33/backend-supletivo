@@ -371,7 +371,7 @@ class AddressCepIn(Schema):
 
 
 class AddressDataIn(Schema):
-    # PATCH — o backend só preenche os que estão VAZIOS (não sobrescreve o que o CEP trouxe).
+    # PATCH — sobrescreve o que vier no payload (corrige valor errado); vazio/None é ignorado.
     street: str | None = None
     number: str | None = None
     complement: str | None = None
@@ -636,8 +636,8 @@ def enrollment_address(request, payload: AddressCepIn):
 
 @api.patch("/enrollment/address", response=EnrollmentMeOut, tags=["enrollment"])
 def enrollment_address_patch(request, payload: AddressDataIn):
-    """Preenche os demais campos — SÓ os que estão VAZIOS (não sobrescreve o que o CEP trouxe).
-    Devolve o EnrollmentMe canônico (proposta #3)."""
+    """Preenche/CORRIGE os demais campos — sobrescreve o que vier no payload (vazio/None é
+    ignorado). Devolve o EnrollmentMe canônico (proposta #3)."""
     ext = _enr_guard(request)
     return enrollment_iface.set_address_data(
         user_external_id=ext, **payload.dict(exclude_none=True)

@@ -286,10 +286,13 @@ def _advance_to(enr: Enrollment, target: str) -> None:
     _set_status(enr, status)
 
 
-# ── seção ENDEREÇO (plan/13): POST só com CEP · PATCH só-vazios · GET ────────
+# ── seção ENDEREÇO (plan/13): POST só com CEP · PATCH corrige/sobrescreve · GET ────────
 # `missing_fields` em toda resposta: o front renderiza input SÓ do que está na lista
 # (ex.: ["number"] = ViaCEP achou tudo, falta o número; rua/bairro na lista = CEP único).
+# `zipcode` incluso (fix 2026-07-05): alinha com `address.is_complete` — sem ele o wizard
+# podia ficar preso com `missing_fields: []`.
 _ADDRESS_FIELDS = (
+    "zipcode",
     "street",
     "number",
     "neighborhood",
@@ -323,10 +326,13 @@ def set_address_cep(*, user_external_id: str, cep: str) -> dict:
 
 
 def set_address_data(*, user_external_id: str, **fields) -> dict:
-    """PATCH do endereço — preenche SÓ o que está VAZIO (não sobrescreve o que o CEP trouxe).
-    Devolve o EnrollmentMe canônico (proposta #3)."""
+    """PATCH do endereço — preenche/CORRIGE: sobrescreve o que vier no payload (fix 2026-07-05,
+    espelha o candidato: o `fill_empty` antigo descartava correções em silêncio). Valor vazio/None
+    é ignorado. Devolve o EnrollmentMe canônico (proposta #3)."""
     enr = _require(user_external_id, _S.ADDRESS)
-    address_iface.fill_empty(external_id=user_external_id, **fields)
+    fields = {k: v for k, v in fields.items() if v not in (None, "")}
+    if fields:
+        address_iface.patch(external_id=user_external_id, **fields)
     _advance_address(enr, user_external_id)
     return me_dict(enr)
 

@@ -127,7 +127,7 @@ class AddressCepIn(Schema):
 
 
 class AddressDataIn(Schema):
-    # PATCH — o backend só preenche os que estão VAZIOS (não sobrescreve o que o CEP trouxe).
+    # PATCH — sobrescreve o que vier no payload (corrige valor errado); vazio/None é ignorado.
     street: str | None = None
     number: str | None = None
     complement: str | None = None
@@ -160,7 +160,9 @@ class SubmissionIn(Schema):
 
 # ── schemas de SAÍDA (response=) — espelham o snake_case real dos services (candidate/promoter/training)
 class CandidateProfileOut(Schema):
-    """Perfil do candidato como aparece no /me (inclui name/birth_date que o CPFHub manda)."""
+    """Perfil do candidato como aparece no /me (inclui name/birth_date que o CPFHub manda).
+    `locked_fields` = campos autoritativos (CPFHub) que o candidato NÃO edita — o front trava
+    e destaca esses inputs (sombra verde + ✓)."""
 
     mother_name: str | None = None
     father_name: str | None = None
@@ -169,6 +171,7 @@ class CandidateProfileOut(Schema):
     nationality: str | None = None
     name: str | None = None
     birth_date: str | None = None
+    locked_fields: list[str] = []
 
 
 class CandidateAddressOut(Schema):
@@ -513,8 +516,8 @@ def candidate_address(request, payload: AddressCepIn):
 
 @api.patch("/candidate/address", response=CandidateMeOut, tags=["candidate"])
 def candidate_address_patch(request, payload: AddressDataIn):
-    """Preenche os demais campos — SÓ os que estão VAZIOS (não sobrescreve o que o CEP trouxe).
-    Devolve o `me_dict` canônico."""
+    """Preenche/CORRIGE os demais campos — sobrescreve o que vier no payload (vazio/None é
+    ignorado). Devolve o `me_dict` canônico."""
     ext = _guard(request, "candidate")
     return candidate_iface.set_address_data(
         user_external_id=ext, **payload.dict(exclude_none=True)

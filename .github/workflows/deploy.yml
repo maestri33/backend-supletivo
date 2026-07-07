@@ -38,6 +38,10 @@ jobs:
           .venv/bin/python manage.py migrate --noinput
           # seed templates de notificação (idempotente: default cria só o que falta no DB)
           .venv/bin/python manage.py notify_seed_templates || true
+          # pré-baixa/carrega o modelo InsightFace (~326MB) AQUI — nunca dentro de um request/task
+          # (fix Marilu 2026-07-05: 1º upload de documento pendurava o worker baixando o modelo).
+          # best-effort: egress bloqueado não derruba o deploy (biometria degrada pra `review`).
+          .venv/bin/python manage.py biometric_health || true
           .venv/bin/python manage.py collectstatic --noinput
           systemctl restart backend-web backend-qcluster
           # health no LOOPBACK (a URL pública de dentro do server pode ser bloqueada — egress)

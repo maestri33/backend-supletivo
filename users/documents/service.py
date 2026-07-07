@@ -61,6 +61,8 @@ _PDF_MIME = (
 _PDF_MAX_PAGES = (
     2  # scan comum: pág 1 = frente, pág 2 = verso; >2 páginas → usa as 2 primeiras
 )
+# lado maior (px) do render de cada página do PDF — teto de memória; sobra resolução pro OCR.
+_PDF_MAX_RENDER_SIDE = 2500.0
 
 
 def create_empty(user) -> Document:
@@ -227,7 +229,11 @@ def _decode_image(data: bytes) -> None:
 
 
 def _pdf_to_jpeg(data: bytes) -> bytes:
-    """Renderiza o PDF (até 2 páginas, empilhadas) numa imagem JPEG única — plan/12."""
+    """Renderiza o PDF (até 2 páginas, empilhadas) numa imagem JPEG única — plan/12.
+
+    Escala com TETO por página (fix Marilu 2026-07-05): scan "foto→PDF" tem MediaBox do tamanho da
+    foto — scale fixa 2.0 virava bitmap de centenas de MB (risco de OOM no worker; o PDF não passa
+    pelo guard anti-bomba do Pillow). Lado maior limitado a `_PDF_MAX_RENDER_SIDE` px."""
     from io import BytesIO
 
     import pypdfium2 as pdfium
@@ -235,10 +241,12 @@ def _pdf_to_jpeg(data: bytes) -> bytes:
 
     try:
         pdf = pdfium.PdfDocument(data)
-        pages = [
-            pdf[i].render(scale=2.0).to_pil()
-            for i in range(min(len(pdf), _PDF_MAX_PAGES))
-        ]
+        pages = []
+        for i in range(min(len(pdf), _PDF_MAX_PAGES)):
+            page = pdf[i]
+            w, h = page.get_size()  # pontos (1pt ≈ 1px em scale=1)
+            scale = min(2.0, _PDF_MAX_RENDER_SIDE / max(w, h, 1.0))
+            pages.append(page.render(scale=scale).to_pil())
     except Exception as exc:  # noqa: BLE001 — PDF corrompido/protegido
         raise ValidationError(
             "Arquivo não é um PDF válido (corrompido ou protegido).",
