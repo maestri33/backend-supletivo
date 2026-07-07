@@ -6,9 +6,9 @@ class BotConfig(AppConfig):
     label = "bot"
 
     def ready(self):
-        # Registra o system check de env no boot (padrão asaas/whatsapp): sem WHATSAPP_WEBHOOK_SECRET
-        # o webhook do bot dá 401 (fail-closed), então avisa recorrente — NÃO trava (não faz sentido
-        # travar migração por falta de token de webhook; o asaas.W001 segue a mesma régua).
+        # Registra o system check de env no boot (padrão whatsapp.E001/E002): A6.3 elevou o
+        # WHATSAPP_WEBHOOK_SECRET de Warning p/ Error — o webhook inbound é exposto à internet,
+        # então sem o segredo o manage.py TRAVA (igual ao lado outbound da Evolution).
         from django.core.checks import register
 
         from .checks import check_bot_webhook_secret
