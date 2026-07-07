@@ -442,13 +442,16 @@ def check(request, payload: CheckIn):
     """**O check NORMAL: dispara OTP** por cpf/phone e **VAZA existência** (CONVENTION §5): devolve
     `found`+`roles` honestos — o front decide cadastro novo × login.
 
-    `send_otp=false` = modo sem OTP (integração do ex-/auth/check-bot): mesma função sem gastar o
-    OTP, devolvendo `token` (JWT) direto."""
+    `send_otp=false` = modo sem OTP. **RESTRITO AO BOT_V2** (plano A6.1): exige `X-Bot-Token`
+    validado contra `settings.BOT_V2_SECRET`. O caminho público do colaborador NÃO emite JWT sem
+    OTP — se chegar aqui com `send_otp=false`, o backend exige o header."""
+    bot_token = request.headers.get("X-Bot-Token")
     return auth_iface.check(
         cpf=payload.cpf,
         phone=payload.phone,
         external_id=payload.external_id,
         send_otp=payload.send_otp,
+        bot_token=bot_token,
     )
 
 

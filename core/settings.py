@@ -35,6 +35,41 @@ DEBUG = env("DEBUG")
 
 ALLOWED_HOSTS = env.list("ALLOWED_HOSTS", default=[])
 
+# ── TEST_MODE (A4, plano de testes) ────────────────────────────────────────────────
+# Liga o modo "cadastro automatizável sem CPF+WhatsApp real": simula CPFHub (aceita CPF
+# bem-formado), simula a checagem de WhatsApp, usa Asaas sandbox e OTP fixo pra teste.
+# Default OFF (comportamento inalterado). DOIS gates obrigatórios pra ligar (anti-prod):
+#   1) DJANGO_SETTINGS_MODULE != "core.prod_settings" (não estamos no módulo prod).
+#   2) Hostname ATUAL ∈ TEST_MODE_ALLOWED_HOSTS (lista de hosts de teste, NÃO prod).
+# Falha em qualquer gate → ImproperlyConfigured no boot (fail-closed). Config via .env.
+import socket
+
+TEST_MODE = env.bool("TEST_MODE", default=False)
+TEST_MODE_ALLOWED_HOSTS = env.list("TEST_MODE_ALLOWED_HOSTS", default=[])
+# OTP fixo em TEST_MODE (sobrescreve o randômico); default "000000" — único conhecido de QA.
+TEST_MODE_OTP_CODE = env("TEST_MODE_OTP_CODE", default="000000")
+# Em TEST_MODE, força a base do Asaas pra sandbox (não mexe em prod).
+TEST_MODE_ASAAS_SANDBOX_URL = env(
+    "TEST_MODE_ASAAS_SANDBOX_URL", default="https://api-sandbox.asaas.com"
+)
+if TEST_MODE:
+    import os as _os
+    from django.core.exceptions import ImproperlyConfigured
+
+    _settings_mod = _os.environ.get("DJANGO_SETTINGS_MODULE", "")
+    _hostname = socket.gethostname()
+    if _settings_mod == "core.prod_settings":
+        raise ImproperlyConfigured(
+            f"TEST_MODE=1 recusado: DJANGO_SETTINGS_MODULE={_settings_mod!r} "
+            "(módulo prod). TEST_MODE só pode rodar com 'core.settings'."
+        )
+    if _hostname not in TEST_MODE_ALLOWED_HOSTS:
+        raise ImproperlyConfigured(
+            f"TEST_MODE=1 recusado: hostname {_hostname!r} não está em "
+            f"TEST_MODE_ALLOWED_HOSTS={TEST_MODE_ALLOWED_HOSTS}. "
+            "Anti-prod: TEST_MODE só roda em hosts explicitamente autorizados."
+        )
+
 # CORS (django-cors-headers) — config no .env (CONVENTION §10: um .env, nada hardcoded).
 # Em dev liberamos geral p/ a rede interna acessar fácil; em prod = lista explícita + allow_all False.
 CORS_ALLOW_ALL_ORIGINS = env.bool("CORS_ALLOW_ALL_ORIGINS", default=False)
@@ -398,6 +433,11 @@ WHATSAPP_INSTANCE_NAME = env("WHATSAPP_INSTANCE_NAME", default="default")
 # compartilhado (x-webhook-token == este valor), comparado em tempo constante. Sem ele o webhook
 # do bot dá 401 (fail-closed) e o check bot.W001 avisa no boot (não trava — padrão asaas.W001).
 WHATSAPP_WEBHOOK_SECRET = env("WHATSAPP_WEBHOOK_SECRET", default="")
+# A6.1: segredo do BOT_V2 (FastAPI em LXC separada — plano/18). O modo `send_otp=false` do
+# /auth/check emite JWT direto, então PROTEGE com token comparado em tempo constante. SEM
+# BOT_V2_SECRET o modo é FAIL-CLOSED (qualquer chamada HTTP com send_otp=false cai em 403
+# BOT_TOKEN_DISABLED — só chamadas internas, que conhecem o secret, passam).
+BOT_V2_SECRET = env("BOT_V2_SECRET", default="")
 # Rate-limit por TELEFONE em DB (sem Redis), espelha o OTP: janela curta (1 a cada WINDOW_S) +
 # janela horária (máx HOURLY_MAX/h). Anti-abuso de custo de IA/WhatsApp; alto p/ não trancar
 # usuário legítimo. Estouro da janela curta = silêncio; da horária = FAQ estática (modo degradado).

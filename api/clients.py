@@ -293,21 +293,30 @@ def check(request, payload: CheckIn):
     """**O check NORMAL: dispara OTP** por cpf/phone e **VAZA existência** (CONVENTION §5): devolve
     `found`+`roles` honestos — o front decide cadastro novo × login e pra qual fase do funil mandar.
 
-    `send_otp=false` = o antigo `/auth/check-bot` integrado aqui: mesma função SEM disparar OTP,
-    devolvendo o `token` (JWT) direto — o canal do chamador é a prova de identidade."""
+    `send_otp=false` = modo sem OTP. **RESTRITO AO BOT_V2** (plano A6.1): exige header
+    `X-Bot-Token` validado contra `settings.BOT_V2_SECRET`. Sem o header → 403. O caminho público
+    (front aberto) NÃO emite JWT sem OTP — toda chamada HTTP chega com `send_otp=true`."""
+    bot_token = request.headers.get("X-Bot-Token")
     return auth_iface.check(
         cpf=payload.cpf,
         phone=payload.phone,
         external_id=payload.external_id,
         send_otp=payload.send_otp,
+        bot_token=bot_token,
     )
 
 
 @auth_router.post("/check-bot", response=CheckBotOut, auth=None, tags=["bot"])
 def check_bot(request, payload: CheckBotIn):
     """DEPRECATED: use `POST /auth/check` com `send_otp=false` (mesma função, integrada).
-    Mantido como alias fino pra compat do bot_v2 (FastAPI)."""
-    return auth_iface.check(phone=payload.phone, send_otp=False)
+    Mantido como alias fino pra compat do bot_v2 (FastAPI). Exige `X-Bot-Token` (header)."""
+    bot_token = request.headers.get("X-Bot-Token")
+    if not bot_token:
+        raise Forbidden(
+            "X-Bot-Token obrigatório (modo sem OTP é restrito ao bot_v2).",
+            code="BOT_TOKEN_REQUIRED",
+        )
+    return auth_iface.check(phone=payload.phone, send_otp=False, bot_token=bot_token)
 
 
 @auth_router.post("/login", response=TokenOut, auth=None)

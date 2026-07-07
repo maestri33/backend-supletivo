@@ -234,12 +234,14 @@ def check(
     phone: str | None = None,
     external_id: str | None = None,
     send_otp: bool = True,
+    bot_token: str | None = None,
 ) -> dict:
     """Acha o usuário por cpf/phone/external_id. **O NORMAL é disparar OTP** (`send_otp=True`).
 
-    `send_otp=False` = o antigo `check_bot` integrado como parâmetro (Victor 2026-07-04): mesma
-    função, mas NÃO dispara OTP e devolve o `token` (JWT) direto — o canal do chamador é a prova
-    de identidade (bot WhatsApp) ou o front só quer espiar (`found`/`roles`) sem gastar o OTP.
+    `send_otp=False` = modo sem OTP. **RESTRITO AO BOT_V2** (FastAPI em LXC separada, plano/18):
+    exige `bot_token` válido (comparado em tempo constante a `settings.BOT_V2_SECRET`). Sem token
+    bate → 403 `BOT_TOKEN_REQUIRED`/`BOT_TOKEN_INVALID`. Sem `BOT_V2_SECRET` configurado, o modo é
+    FAIL-CLOSED (não dá pra emitir JWT direto pra qualquer um da internet — plano A6.1).
 
     **VAZA existência DE PROPÓSITO (CONVENTION §5):** devolve `found` honesto — se existe, manda OTP e
     retorna `external_id`+`roles`; se NÃO existe, `found:false`+`otp_sent:false`. O front decide cadastro
@@ -281,7 +283,19 @@ def check(
 
     active = roles.active_roles(user)
     if not send_otp:
-        # modo sem OTP (ex-check_bot): JWT direto — o canal do chamador é a prova de identidade.
+        # A6.1: modo sem OTP é SÓ pro bot_v2 — exige bot_token (X-Bot-Token) batendo em
+        # tempo constante com settings.BOT_V2_SECRET. Sem secret configurado, FAIL-CLOSED.
+        import hmac
+        from django.conf import settings as _s
+
+        expected = getattr(_s, "BOT_V2_SECRET", "") or ""
+        if not expected:
+            raise Forbidden(
+                "Modo sem OTP desabilitado (BOT_V2_SECRET ausente no .env).",
+                code="BOT_TOKEN_DISABLED",
+            )
+        if not bot_token or not hmac.compare_digest(bot_token, expected):
+            raise Forbidden("Token do bot inválido.", code="BOT_TOKEN_INVALID")
         tokens = jwt_service.issue(str(user.external_id), active)
         logger.info(
             "auth.check_no_otp", external_id=str(user.external_id), roles=active
@@ -334,10 +348,11 @@ def recover(*, cpf: str | None = None, phone: str | None = None) -> dict:
 # ── check_bot (WhatsApp bot — sem OTP) ────────────────────────────────────
 
 
-def check_bot(*, phone: str) -> dict:
-    """DEPRECATED (Victor 2026-07-04): virou `check(phone=..., send_otp=False)` — mantido como
-    alias fino pra compat do bot_v2 (FastAPI em LXC separada, chama via HTTP)."""
-    return check(phone=phone, send_otp=False)
+def check_bot(*, phone: str, bot_token: str) -> dict:
+    """Mantido pra compat do bot_v2 (FastAPI em LXC separada). O `bot_token` é obrigatório
+    e bate com `settings.BOT_V2_SECRET` em tempo constante. Sem BOT_V2_SECRET o modo é
+    FAIL-CLOSED (não emite JWT direto)."""
+    return check(phone=phone, send_otp=False, bot_token=bot_token)
 
 
 # ── login ────────────────────────────────────────────────────────────────

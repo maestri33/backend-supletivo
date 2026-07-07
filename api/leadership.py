@@ -607,12 +607,18 @@ def check(request, payload: CheckIn):
     """REUSA o check geral (acha a pessoa e dispara o OTP normal — §5: vaza existência de
     propósito) e soma a resposta do coordenador: coordena um polo? Quem NÃO coordena recebe
     `detail` + `roles` — o front redireciona pra área certa levando o `external_id`, e a pessoa
-    loga lá com o MESMO OTP já enviado (palavra do Victor 2026-06-12)."""
+    loga lá com o MESMO OTP já enviado (palavra do Victor 2026-06-12).
+
+    `send_otp=false` = modo sem OTP. **RESTRITO AO BOT_V2** (plano A6.1): exige `X-Bot-Token`
+    validado contra `settings.BOT_V2_SECRET`. Sem o header → 403 (não emite JWT direto a partir
+    de uma chamada HTTP pública)."""
+    bot_token = request.headers.get("X-Bot-Token")
     result = auth_iface.check(
         cpf=payload.cpf,
         phone=payload.phone,
         external_id=payload.external_id,
         send_otp=payload.send_otp,
+        bot_token=bot_token,
     )
     if not result.get("found"):
         return result
