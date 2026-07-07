@@ -114,8 +114,10 @@ def to_dict(cand: Candidate) -> dict:
     }
 
 
-# campos essenciais do endereço (espelha enrollment._ADDRESS_FIELDS; complement é opcional)
-_ADDRESS_FIELDS = ("street", "number", "neighborhood", "city", "state")
+# campos essenciais do endereço (espelha enrollment._ADDRESS_FIELDS; complement é opcional).
+# `zipcode` incluso (fix 2026-07-05): sem ele, `missing_fields` podia ficar vazio com o
+# `address.is_complete` (que exige zipcode) ainda falso — wizard preso sem o front saber por quê.
+_ADDRESS_FIELDS = ("zipcode", "street", "number", "neighborhood", "city", "state")
 # perfil do candidato: filiação/naturalidade VÊM da extração do documento (Fatia B, plan/15);
 # estado civil/nacionalidade = o que o documento não traz (Portão 2: a etapa "perfil" coleta só esses).
 _PROFILE_FIELDS = (
@@ -134,8 +136,10 @@ def me_dict(cand: Candidate) -> dict:
     user_ext = str(cand.user.external_id)
     p = profiles.get(cand.user)
 
+    # SEMPRE presente quando há Profile (fix Marilu 2026-07-05): name/birth_date vêm do CPFHub no
+    # cadastro — o gate antigo (só montava se filiação preenchida) escondia birth_date do /me.
     profile = None
-    if p and any(getattr(p, f, None) for f in _PROFILE_FIELDS):
+    if p:
         profile = {
             "mother_name": p.mother_name,
             "father_name": p.father_name,
@@ -144,6 +148,9 @@ def me_dict(cand: Candidate) -> dict:
             "nationality": p.nationality,
             "name": p.name,
             "birth_date": p.birth_date.isoformat() if p.birth_date else None,
+            # autoritativos do CPFHub — nenhum endpoint do candidato os edita; o front usa
+            # esta flag pra travar/destacar os inputs (sombra verde + ✓).
+            "locked_fields": ["name", "birth_date"],
         }
 
     address = address_iface.as_public_dict(address_iface.get_by_external_id(user_ext))
@@ -206,9 +213,15 @@ def set_address_cep(*, user_external_id, cep) -> dict:
 
 
 def set_address_data(*, user_external_id, **fields) -> dict:
-    """Preenche os demais campos do endereço — SÓ os que estão VAZIOS (não sobrescreve o que o CEP trouxe)."""
+    """Preenche/CORRIGE os demais campos do endereço — sobrescreve o que vier no payload.
+
+    Fix Marilu 2026-07-05: o `fill_empty` antigo só escrevia em campo VAZIO — corrigir um número
+    errado era descartado em silêncio ("mandei, voltou"). Agora usa `patch` (sobrescreve); valor
+    vazio/None no payload é ignorado (só muda o que o front mandou de verdade)."""
     cand = _require(user_external_id, _S.PROFILE, _S.ADDRESS)
-    address_iface.fill_empty(external_id=user_external_id, **fields)
+    fields = {k: v for k, v in fields.items() if v not in (None, "")}
+    if fields:
+        address_iface.patch(external_id=user_external_id, **fields)
     _advance_address(cand, user_external_id)
     return me_dict(cand)
 
@@ -277,10 +290,10 @@ def patch_document_section(*, user_external_id, **fields) -> dict:
 
 def upload_document_photo(*, user_external_id, slot: str, upload) -> dict:
     """Foto do documento (slots `rg_front`/`rg_back`/`rg_full`/`cnh_front`/`cnh_back`/`cnh_full`).
-    Plan/15 B3: na FRENTE o rosto vira biometria (best-effort) e a foto entra no pipeline de IA
-    (visão+OCR+extração assíncrono) — devolve **ack** (análise começou) pra o front acompanhar."""
-    from pathlib import Path
-
+    Plan/15 B3: a foto entra no pipeline de IA (visão+OCR+extração assíncrono) — devolve **ack**
+    (análise começou) pra o front acompanhar. A biometria do rosto roda SÓ no caminho assíncrono
+    (`_doc_post_approval`): fix Marilu 2026-07-05 — o enroll síncrono aqui carregava/baixava o
+    InsightFace (~326MB) DENTRO do request e pendurava o worker (CNH em PDF "travava o app")."""
     from users.roles import _analysis
 
     # FOTO-PRIMEIRO (Victor 2026-06-16): o upload é a ENTRADA da etapa documento — nada de digitar
@@ -305,15 +318,6 @@ def upload_document_photo(*, user_external_id, slot: str, upload) -> dict:
     if cand.status == _S.ADDRESS:  # 1ª foto = entra na etapa documento
         _set_status(cand, _S.DOCUMENTS)
     path = documents_iface.upload_photo(user_external_id, slot, upload)
-    # biometria do documento (best-effort; rosto ruim → cai em review na selfie)
-    from integrations.tools.biometric import service as biometric
-
-    biometric.try_enroll_document(
-        user=cand.user,
-        slot=slot,
-        image_path=str(Path(settings.MEDIA_ROOT) / path),
-        caller="candidate.document",
-    )
     # pipeline IA async (visão → OCR → extração → biometria) — plan/12+15 B3
     _reset_doc_validation(user_external_id, cand.doc_type, slot)
     from django_q.tasks import async_task
