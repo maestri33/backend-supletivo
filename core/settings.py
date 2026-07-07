@@ -39,10 +39,12 @@ ALLOWED_HOSTS = env.list("ALLOWED_HOSTS", default=[])
 # ── A4 — TEST_MODE ────────────────────────────────────────────────────────
 # Modo de teste integrado: simula CPFHub (aceita qualquer CPF bem formado), força WhatsApp
 # check_numbers=True, usa código OTP fixo e aponta Asaas pro sandbox. Ligado pelo .env
-# (`TEST_MODE=1`). Tem DUAS TRAVAS anti-prod ativas no boot:
-#   1. DJANGO_SETTINGS_MODULE ≠ "core.prod_settings"  (módulo de prod fica INACEITÁVEL)
-#   2. socket.gethostname() ∈ TEST_MODE_ALLOWED_HOSTS  (lista explícita, default vazia)
-# Falha em qualquer uma → ImproperlyConfigured no import. Source of truth único: este settings.
+# (`TEST_MODE=1`). TRAVA anti-prod única e correta: `socket.gethostname() ∈
+# TEST_MODE_ALLOWED_HOSTS` (lista explícita, default vazia). **Não** trava por nome de
+# settings module — o `core.prod_settings` é usado tanto em prod real quanto em STAGING
+# ISOLADO (test-v7m), que não é prod: tem DB local + Asaas sandbox + DEBUG=true. O que
+# protege prod é o HOSTNAME, não o módulo (o .env do prod real fica num host NÃO listado).
+# Falha → ImproperlyConfigured no import. Source of truth único: este settings.
 TEST_MODE = env.bool("TEST_MODE", default=False)
 TEST_MODE_ALLOWED_HOSTS = env.list("TEST_MODE_ALLOWED_HOSTS", default=[])
 TEST_MODE_OTP_CODE = env("TEST_MODE_OTP_CODE", default="000000")
@@ -52,13 +54,7 @@ TEST_MODE_ASAAS_SANDBOX_URL = env(
 if TEST_MODE:
     from django.core.exceptions import ImproperlyConfigured
 
-    _settings_mod = os.environ.get("DJANGO_SETTINGS_MODULE", "")
     _hostname = socket.gethostname()
-    if _settings_mod == "core.prod_settings":
-        raise ImproperlyConfigured(
-            f"TEST_MODE=1 recusado: DJANGO_SETTINGS_MODULE={_settings_mod!r} "
-            "(módulo prod). TEST_MODE só pode rodar com 'core.settings'."
-        )
     if _hostname not in TEST_MODE_ALLOWED_HOSTS:
         raise ImproperlyConfigured(
             f"TEST_MODE=1 recusado: hostname {_hostname!r} não está em "
