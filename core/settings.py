@@ -398,6 +398,9 @@ WHATSAPP_INSTANCE_NAME = env("WHATSAPP_INSTANCE_NAME", default="default")
 # compartilhado (x-webhook-token == este valor), comparado em tempo constante. Sem ele o webhook
 # do bot dá 401 (fail-closed) e o check bot.W001 avisa no boot (não trava — padrão asaas.W001).
 WHATSAPP_WEBHOOK_SECRET = env("WHATSAPP_WEBHOOK_SECRET", default="")
+# A6.2 — grupo `tools` (radar de leads + disparo de notify): header X-Tools-Token validado
+# contra esse segredo (hmac.compare_digest). Vazio => grupo inteiro desabilitado (503 TOOLS_DISABLED).
+TOOLS_API_TOKEN = env("TOOLS_API_TOKEN", default="")
 # Rate-limit por TELEFONE em DB (sem Redis), espelha o OTP: janela curta (1 a cada WINDOW_S) +
 # janela horária (máx HOURLY_MAX/h). Anti-abuso de custo de IA/WhatsApp; alto p/ não trancar
 # usuário legítimo. Estouro da janela curta = silêncio; da horária = FAQ estática (modo degradado).
