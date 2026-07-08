@@ -17,7 +17,7 @@ from ninja.errors import AuthenticationError, HttpError
 from ninja.errors import ValidationError as NinjaValidationError
 
 from api.auth import JWTAuth
-from api.schemas import RefreshIn, TokenOut
+from api.schemas import LoginIn, RefreshIn, TokenOut
 from users.exceptions import DomainError
 
 logger = structlog.get_logger()
@@ -157,7 +157,6 @@ def add_auth_refresh(router) -> None:
 def add_funnel_login(router, *, funnel_roles: tuple[str, ...], not_in_funnel_msg: str) -> None:
     """Registra o `POST /login` passwordless (OTP) de um funil — idêntico entre grupos, só mudam a
     cadeia de papéis (`funnel_roles`, do mais avançado ao menos) e a mensagem do 403 (dedup)."""
-    from api.schemas import LoginIn
     from users.auth import interface as auth_iface
     from users.auth.models import User
     from users.exceptions import Forbidden, NotFound
