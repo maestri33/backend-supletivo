@@ -405,30 +405,13 @@ def describe_image(
             op="vision",
         )
 
-    try:
-        return _media_call(
-            operation=AiCall.Operation.VISION,
-            provider="omniroute",
-            model="auto/multimodal",
-            caller=caller,
-            coro=chained,
-        )
-    except Exception as exc:
-        # OmniRoute E MiniMax falharam — último recurso: Gemini (sem fallback adicional).
-        logger.warning("ai.vision_fallback_gemini", error=str(exc)[:160])
-        from .gemini import GeminiClient
-        gemini = GeminiClient()
-
-        async def gemini_coro():
-            return await gemini.describe(image_bytes, mime_type=mime_type, prompt=prompt)
-
-        return _media_call(
-            operation=AiCall.Operation.VISION,
-            provider="gemini",
-            model=settings.GEMINI_VISION_MODEL,
-            caller=caller,
-            coro=gemini_coro,
-        )
+    return _media_call(
+        operation=AiCall.Operation.VISION,
+        provider="omniroute",
+        model="auto/multimodal",
+        caller=caller,
+        coro=chained,
+    )
 
 
 def generate_image(prompt: str, *, caller: str) -> str:
@@ -490,8 +473,8 @@ def tts(
     """TTS: gera áudio a partir do texto. Salva em media/ai/audio/ e devolve o caminho.
 
     Wave 4 — IA centralizada: OmniRoute /v1/audio/speech é o primário (ElevenLabs via gateway);
-    em falha cai pro MiniMax-M3 direto (com a chave própria). Voz segue: gender → voz
-    cross-gender (regra de marketing).
+    em falha cai pro MiniMax-M3 direto (com a chave própria). Sem 3º nível — se ambos caírem,
+    exceção propaga. Voz segue: gender → voz cross-gender (regra de marketing).
     """
     from .elevenlabs import ElevenLabsClient
     from .fallback import try_gateway_or_direct
@@ -518,30 +501,13 @@ def tts(
             op="tts",
         )
 
-    try:
-        audio = _media_call(
-            operation=AiCall.Operation.TTS,
-            provider="omniroute",
-            model=settings.ELEVENLABS_MODEL_ID,
-            caller=caller,
-            coro=chained,
-        )
-    except Exception as exc:
-        # ambos falharam — último recurso: ElevenLabs direto (sem gateway)
-        logger.warning("ai.tts_final_fallback_elevenlabs_direct", error=str(exc)[:160])
-        from .elevenlabs import ElevenLabsClient as DirectEleven
-        direct_el = DirectEleven()
-
-        async def direct_el_coro():
-            return await direct_el.tts(text, voice_id=el_voice)
-
-        audio = _media_call(
-            operation=AiCall.Operation.TTS,
-            provider="elevenlabs",
-            model=settings.ELEVENLABS_MODEL_ID,
-            caller=caller,
-            coro=direct_el_coro,
-        )
+    audio = _media_call(
+        operation=AiCall.Operation.TTS,
+        provider="omniroute",
+        model=settings.ELEVENLABS_MODEL_ID,
+        caller=caller,
+        coro=chained,
+    )
     return _save_media("audio", "mp3", audio)
 
 
