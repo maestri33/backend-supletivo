@@ -599,11 +599,14 @@ def check(request, payload: CheckIn):
     propósito) e soma a resposta do coordenador: coordena um polo? Quem NÃO coordena recebe
     `detail` + `roles` — o front redireciona pra área certa levando o `external_id`, e a pessoa
     loga lá com o MESMO OTP já enviado (palavra do Victor 2026-06-12)."""
+    from core.webhook_auth import service_secret_ok
+
     result = auth_iface.check(
         cpf=payload.cpf,
         phone=payload.phone,
         external_id=payload.external_id,
         send_otp=payload.send_otp,
+        service_authed=service_secret_ok(request),
     )
     if not result.get("found"):
         return result

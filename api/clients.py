@@ -253,11 +253,14 @@ def check(request, payload: CheckIn):
 
     `send_otp=false` = o antigo `/auth/check-bot` integrado aqui: mesma função SEM disparar OTP,
     devolvendo o `token` (JWT) direto — o canal do chamador é a prova de identidade."""
+    from core.webhook_auth import service_secret_ok
+
     return auth_iface.check(
         cpf=payload.cpf,
         phone=payload.phone,
         external_id=payload.external_id,
         send_otp=payload.send_otp,
+        service_authed=service_secret_ok(request),
     )
 
 

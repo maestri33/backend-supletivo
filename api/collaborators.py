@@ -417,11 +417,14 @@ def check(request, payload: CheckIn):
 
     `send_otp=false` = modo sem OTP (integração do ex-/auth/check-bot): mesma função sem gastar o
     OTP, devolvendo `token` (JWT) direto."""
+    from core.webhook_auth import service_secret_ok
+
     return auth_iface.check(
         cpf=payload.cpf,
         phone=payload.phone,
         external_id=payload.external_id,
         send_otp=payload.send_otp,
+        service_authed=service_secret_ok(request),
     )
 
 

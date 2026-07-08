@@ -115,13 +115,30 @@ def _apply(order_nsu, payload):
     if not check.get("paid"):
         return None, {"ok": True, "paid": False}, "not_paid"
 
+    # VALOR: confia SÓ no payment_check (out-of-band verificado), NUNCA no payload forjável. E confirma
+    # que o pago cobre o esperado (amount_cents é fixo, gravado na criação do checkout). Parcelamento
+    # pode pagar a MAIS (juros do cliente) → exigimos >= esperado; pagar a MENOS é rejeitado.
+    paid_raw = check.get("paid_amount")
+    if paid_raw is not None and int(paid_raw) < row.amount_cents:
+        logger.warning(
+            "infinitepay_underpaid",
+            order_nsu=nsu,
+            expected_cents=row.amount_cents,
+            paid_cents=paid_raw,
+        )
+        return (
+            None,
+            {"ok": True, "paid": False},
+            f"amount_mismatch: expected={row.amount_cents} paid={paid_raw}",
+        )
+
     row.status = Checkout.Status.PAID
     row.transaction_nsu = transaction_nsu
     row.slug = slug
-    row.paid_amount_cents = payload.get("paid_amount") or check.get("paid_amount")
-    row.installments = payload.get("installments") or check.get("installments")
-    row.capture_method = payload.get("capture_method") or check.get("capture_method")
-    row.receipt_url = payload.get("receipt_url")
+    row.paid_amount_cents = int(paid_raw) if paid_raw is not None else row.amount_cents
+    row.installments = check.get("installments")
+    row.capture_method = check.get("capture_method")
+    row.receipt_url = payload.get("receipt_url")  # cosmético (link do recibo), não decide dinheiro
     row.save()
     logger.info(
         "checkout_paid",

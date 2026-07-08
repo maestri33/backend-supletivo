@@ -291,7 +291,11 @@ URL_VERIFY_NONCE_TTL = env.int("URL_VERIFY_NONCE_TTL", default=600)
 # às vezes é colado com "$" à esquerda (InfiniteTag); removemos pra não furar a chamada. Lemos via
 # os.environ por simetria com a key do asaas (read_env() já populou os.environ acima).
 INFINITEPAY_HANDLE = os.environ.get("INFINITEPAY_HANDLE", "").lstrip("$")
-INFINITEPAY_BASE_URL = env("INFINITEPAY_BASE_URL", default="https://api.infinitepay.io")
+# API de Checkout atual: api.checkout.infinitepay.io (paths /links e /payment_check). O endpoint antigo
+# api.infinitepay.io/invoices/public/checkout/* foi descontinuado — mesma lógica, só a URL mudou.
+INFINITEPAY_BASE_URL = env(
+    "INFINITEPAY_BASE_URL", default="https://api.checkout.infinitepay.io"
+)
 INFINITEPAY_HTTP_TIMEOUT = env.float("INFINITEPAY_HTTP_TIMEOUT", default=10.0)
 # URL de sucesso pós-pagamento (opcional; default = EXTERNAL_URL no serviço de checkout).
 INFINITEPAY_REDIRECT_URL = env("INFINITEPAY_REDIRECT_URL", default="")
@@ -426,6 +430,11 @@ WHATSAPP_INSTANCE_NAME = env("WHATSAPP_INSTANCE_NAME", default="default")
 # compartilhado (x-webhook-token == este valor), comparado em tempo constante. Sem ele o webhook
 # do bot dá 401 (fail-closed) e o check bot.W001 avisa no boot (não trava — padrão asaas.W001).
 WHATSAPP_WEBHOOK_SECRET = env("WHATSAPP_WEBHOOK_SECRET", default="")
+
+# Segredo de serviço p/ o login SEM OTP (bot_v2 externo chama /auth/check com send_otp=false).
+# Fail-closed: vazio no .env => a rota sem-OTP recusa (o segredo é a prova de identidade, não a rede).
+BOT_SERVICE_SECRET = env("BOT_SERVICE_SECRET", default="")
+BOT_SERVICE_HEADER = env("BOT_SERVICE_HEADER", default="x-bot-service-token")
 # Rate-limit por TELEFONE em DB (sem Redis), espelha o OTP: janela curta (1 a cada WINDOW_S) +
 # janela horária (máx HOURLY_MAX/h). Anti-abuso de custo de IA/WhatsApp; alto p/ não trancar
 # usuário legítimo. Estouro da janela curta = silêncio; da horária = FAQ estática (modo degradado).

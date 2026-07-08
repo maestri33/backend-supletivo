@@ -265,12 +265,14 @@ def check(
     phone: str | None = None,
     external_id: str | None = None,
     send_otp: bool = True,
+    service_authed: bool = False,
 ) -> dict:
     """Acha o usuário por cpf/phone/external_id. **O NORMAL é disparar OTP** (`send_otp=True`).
 
     `send_otp=False` = o antigo `check_bot` integrado como parâmetro (Victor 2026-07-04): mesma
-    função, mas NÃO dispara OTP e devolve o `token` (JWT) direto — o canal do chamador é a prova
-    de identidade (bot WhatsApp) ou o front só quer espiar (`found`/`roles`) sem gastar o OTP.
+    função, mas NÃO dispara OTP e devolve o `token` (JWT) direto. **Exige `service_authed=True`** —
+    o segredo de serviço interno checado na view (a rota é pública, então o "canal do chamador" NÃO
+    é prova de identidade sozinho). Sem o segredo, recusa com `SERVICE_SECRET_REQUIRED` (fail-closed).
 
     **VAZA existência DE PROPÓSITO (CONVENTION §5):** devolve `found` honesto — se existe, manda OTP e
     retorna `external_id`+`roles`; se NÃO existe, `found:false`+`otp_sent:false`. O front decide cadastro
@@ -312,7 +314,13 @@ def check(
 
     active = roles.active_roles(user)
     if not send_otp:
-        # modo sem OTP (ex-check_bot): JWT direto — o canal do chamador é a prova de identidade.
+        # modo sem OTP (bot_v2): JWT direto — SÓ com o segredo de serviço (service_authed).
+        # Sem o segredo, a rota pública `/auth/check` viraria bypass de OTP: recusa fail-closed.
+        if not service_authed:
+            raise Unauthorized(
+                "Login sem OTP exige segredo de serviço interno.",
+                code="SERVICE_SECRET_REQUIRED",
+            )
         tokens = jwt_service.issue(str(user.external_id), active)
         logger.info(
             "auth.check_no_otp", external_id=str(user.external_id), roles=active
@@ -366,9 +374,11 @@ def recover(*, cpf: str | None = None, phone: str | None = None) -> dict:
 
 
 def check_bot(*, phone: str) -> dict:
-    """DEPRECATED (Victor 2026-07-04): virou `check(phone=..., send_otp=False)` — mantido como
-    alias fino pra compat do bot_v2 (FastAPI em LXC separada, chama via HTTP)."""
-    return check(phone=phone, send_otp=False)
+    """DEPRECATED (Victor 2026-07-04): virou `check(phone=..., send_otp=False)`. Alias fino
+    **in-process** (só chamável de dentro do Django = confiável), por isso já entra com
+    `service_authed=True`. O bot_v2 externo NÃO usa isto — ele bate na view HTTP `/auth/check`,
+    que exige o header de segredo (`service_secret_ok`)."""
+    return check(phone=phone, send_otp=False, service_authed=True)
 
 
 # ── login ────────────────────────────────────────────────────────────────
