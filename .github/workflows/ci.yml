@@ -36,3 +36,9 @@ jobs:
         run: |
           /usr/local/bin/uvx ruff@0.15.14 check .
           /usr/local/bin/uvx ruff@0.15.14 format --check .
+
+      - name: Pytest (Wave 2 — auth, webhooks, consentimento)
+        run: DATABASE_URL="sqlite:///:memory:" .venv/bin/python -m pytest tests/ -v --tb=short
+
+      - name: pip-audit (deps vuln — wave 2; warn only)
+        run: .venv/bin/pip install pip-audit -q && .venv/bin/pip-audit || true

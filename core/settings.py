@@ -130,6 +130,8 @@ MIDDLEWARE = [
     "corsheaders.middleware.CorsMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
+    # ponytail: logging estruturado (request_id + method/path/status/duration) — após Common.
+    "core.logging_middleware.RequestLoggingMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
@@ -623,3 +625,34 @@ DEFAULT_STAFF_PASSWORD = os.environ.get("DEFAULT_STAFF_PASSWORD", "")
 # no Profile se estiver vazio (fecha o «rabo» "setei à mão" dos flashes de 06-06 e 06-10). Sem validação
 # DICT aqui: é seed de sistema; a chave já foi provada em payout real.
 DEFAULT_STAFF_PIX = env("DEFAULT_STAFF_PIX", default="")
+
+# ── Logging estruturado (structlog) ──────────────────────────────────────────
+# ponytail: structlog já está no pyproject.toml. Config mínima: console em dev, JSON em prod.
+import structlog
+
+_structlog_processors = [
+    structlog.stdlib.add_log_level,
+    structlog.processors.TimeStamper(fmt="iso"),
+]
+if DEBUG:
+    _structlog_processors.append(structlog.dev.ConsoleRenderer())
+else:
+    _structlog_processors.append(structlog.processors.JSONRenderer())
+
+structlog.configure(
+    processors=_structlog_processors,
+    wrapper_class=structlog.stdlib.BoundLogger,
+    context_class=dict,
+    logger_factory=structlog.stdlib.LoggerFactory(),
+    cache_logger_on_first_use=True,
+)
+
+# ── Sentry / GlitchTip (opcional — sem DSN = no-op) ──────────────────────────
+SENTRY_DSN = env("SENTRY_DSN", default="")
+if SENTRY_DSN:
+    import sentry_sdk
+    sentry_sdk.init(
+        dsn=SENTRY_DSN,
+        traces_sample_rate=env.float("SENTRY_TRACES_SAMPLE_RATE", default=0.1),
+        environment=env("SENTRY_ENVIRONMENT", default="development"),
+    )

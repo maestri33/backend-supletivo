@@ -20,3 +20,10 @@ dependencies = [
     "structlog>=25.5.0",
     "whitenoise>=6.12.0",
 ]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8",
+    "pytest-django>=4",
+    "factory-boy>=3",
+]

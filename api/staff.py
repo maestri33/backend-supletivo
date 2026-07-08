@@ -651,6 +651,10 @@ def list_users(request, role: str | None = None, limit: int = 200):
 # Sub-router dedicado (api/staff_notify.py) pra não inflar este arquivo. Montado em /notify.
 api.add_router("/notify", notify_router)
 
+# ── health check autenticado + run-tests (Wave 2) ──
+from api.health import staff_health_router  # noqa: E402
+api.add_router("", staff_health_router)  # rotas em /health e /health/run-tests
+
 
 class PhoneIn(Schema):
     phone: str

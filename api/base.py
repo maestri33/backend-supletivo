@@ -41,14 +41,16 @@ class HealthOut(Schema):
     status: str
 
 
-def build_group(name: str, description: str) -> NinjaAPI:
-    """Cria o `NinjaAPI` de um público: versionado, auth JWT default, com health + whoami."""
+def build_group(name: str, description: str, auth_override=None) -> NinjaAPI:
+    """Cria o `NinjaAPI` de um público: versionado, auth JWT default, com health + whoami.
+
+    `auth_override` = força auth=None (grupo público como health) ou outro auth customizado."""
     api = NinjaAPI(
         version=API_VERSION,
         urls_namespace=f"api-{name}",
         title=f"API {name}",
         description=description,
-        auth=JWTAuth(),
+        auth=auth_override if auth_override is not None else JWTAuth(),
     )
 
     @api.exception_handler(DomainError)
