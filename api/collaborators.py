@@ -16,11 +16,10 @@ from ninja import Field, File, Form, Router, Schema
 from ninja.files import UploadedFile
 
 from api.auth import require_roles
-from api.base import add_auth_refresh, build_group
-from api.schemas import TokenOut
+from api.base import add_auth_refresh, add_funnel_login, build_group
+from api.schemas import CheckIn, CheckOut, TokenOut
 from users.auth import interface as auth_iface
-from users.auth.models import User
-from users.exceptions import Forbidden, NotFound
+from users.exceptions import NotFound
 from users.roles import interface as roles
 from users.roles.candidate import interface as candidate_iface
 from users.roles.lead import interface as lead_iface
@@ -86,32 +85,6 @@ class CandidateOut(Schema):
         description="external_id do USER — é o que o /auth/login espera"
     )
     status: str
-
-
-class CheckIn(Schema):
-    cpf: str | None = None
-    phone: str | None = None
-    external_id: str | None = None  # re-dispara OTP de usuário já conhecido (do USER)
-    # O NORMAL é disparar OTP. `false` = modo sem OTP: espia found/roles e devolve `token` direto.
-    send_otp: bool = True
-
-
-class CheckOut(Schema):
-    found: bool
-    external_id: str | None = Field(
-        None, description="external_id do USER (é o que o /auth/login espera)"
-    )
-    otp_sent: bool
-    otp_wait: int | None = None
-    whatsapp: bool | None = None
-    roles: list[str] | None = None
-    # só no modo `send_otp=false`: JWT de acesso direto.
-    token: str | None = None
-
-
-class LoginIn(Schema):
-    external_id: str = Field(description="external_id do USER (veio do /auth/check)")
-    otp: str
 
 
 class ProfileIn(Schema):
@@ -452,24 +425,11 @@ def check(request, payload: CheckIn):
     )
 
 
-@auth_router.post("/login", response=TokenOut, auth=None)
-def login(request, payload: LoginIn):
-    """Login passwordless (OTP) — resolve o papel mais avançado do funil do colaborador
-    (coordinator→promoter→training→candidate) e emite JWT com TODAS as roles ativas."""
-    user = User.objects.filter(external_id=payload.external_id).first()
-    if user is None:
-        raise NotFound("Usuário não encontrado.", code="USER_NOT_FOUND")
-    active = roles.active_roles(user)
-    funnel_role = next((r for r in _FUNNEL_ROLES if r in active), None)
-    if funnel_role is None:
-        raise Forbidden(
-            "Usuário não faz parte do funil do colaborador.", code="NOT_IN_FUNNEL"
-        )
-    return auth_iface.login(
-        external_id=payload.external_id, role=funnel_role, otp=payload.otp
-    )
-
-
+add_funnel_login(
+    auth_router,
+    funnel_roles=_FUNNEL_ROLES,
+    not_in_funnel_msg="Usuário não faz parte do funil do colaborador.",
+)
 add_auth_refresh(auth_router)
 
 

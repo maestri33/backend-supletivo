@@ -618,27 +618,6 @@ def set_student_platform_credentials(
     return {"external_id": str(student.external_id), "status": student.status}
 
 
-# ── bot matriculador (MOCK — o gatilho real é o signal enrollment_ready_for_matricula) ──
-class BotMatriculadorIn(Schema):
-    enrollment_external_id: str
-
-
-@api.post("/bot-matriculador", tags=["todo"])
-def bot_matriculador(request, payload: BotMatriculadorIn):
-    """STUB do bot matriculador — ainda NÃO implementado (Victor 2026-06-23). Reserva de interface;
-    o gatilho de verdade é o Django signal `enrollment_ready_for_matricula` (core/todo). Responde 501."""
-    require_superuser(request.auth)
-    from django.http import JsonResponse
-
-    return JsonResponse(
-        {
-            "detail": "Bot matriculador ainda não implementado.",
-            "code": "NOT_IMPLEMENTED",
-        },
-        status=501,
-    )
-
-
 # ── usuários da plataforma (read-only; mutação de role = «PENDÊNCIA» Victor) ──
 @api.get("/users", tags=["staff"])
 def list_users(request, role: str | None = None, limit: int = 200):

@@ -113,15 +113,10 @@ def _set_status(enr: Enrollment, to_status: str) -> None:
 
 def _rg_started_at(rg):
     """Quando a análise do RG (re)começou — do JSON do reset (proposta #2). None = sem referência."""
-    from datetime import datetime
+    from users.roles import _analysis
 
     raw = (rg.validation_result or {}).get("analysis_started_at") if rg else None
-    if not raw:
-        return None
-    try:
-        return datetime.fromisoformat(raw)
-    except (ValueError, TypeError):
-        return None
+    return _analysis.started_at_from(raw, coerce_tz=False)
 
 
 def _reconcile_stale_analyses(enr: Enrollment) -> None:

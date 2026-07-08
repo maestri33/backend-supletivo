@@ -427,15 +427,6 @@ class ReviewsOut(Schema):
     locked_promoters: list[ReviewItemOut] = []
 
 
-class PaginatedOut(Schema):
-    """Envelope de paginação padronizado (A5): toda lista do leadership passa a devolver isto."""
-
-    items: list
-    total: int
-    limit: int
-    offset: int
-
-
 class PaginatedStudentsOut(Schema):
     """Envelope tipado da lista de alunos do polo."""
 
@@ -759,24 +750,6 @@ def list_reviews(request):
             for i in training_iface.list_locked_promoters_for_hub(hub=hub)
         ],
     }
-
-
-@api.get("/reviews/prioritized", tags=["review"])
-def list_reviews_prioritized(request):
-    """A MESMA fila do `/reviews`, mas achatada numa lista ÚNICA ordenada por urgência (triagem).
-
-    Quick win (Victor 2026-06-30): o `/reviews` entrega baldes separados sem ordem entre si — o
-    coordenador não sabe o que atacar primeiro. Aqui reusamos a fila já montada e aplicamos
-    `api.triage.prioritize` (score DETERMINÍSTICO: peso por tipo + tempo de espera). Read-only; não
-    altera o `/reviews` original. Devolve `{count, items:[...]}` com `priority_score`/`waiting_hours`
-    em cada item."""
-    from api import triage
-
-    reviews = list_reviews(
-        request
-    )  # reusa o endpoint (o decorator devolve a própria função)
-    items = triage.prioritize(reviews)
-    return {"count": len(items), "items": items}
 
 
 # ── funil do aluno: fase da TAXA (2 parcelas) → conclusão (plan/14) ─────────

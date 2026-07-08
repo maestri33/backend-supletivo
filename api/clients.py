@@ -14,11 +14,10 @@ from ninja import Field, File, Router, Schema
 from ninja.files import UploadedFile
 
 from api.auth import require_roles
-from api.base import add_auth_refresh, build_group, resolve_rg_slot
-from api.schemas import TokenOut
+from api.base import add_auth_refresh, add_funnel_login, build_group, resolve_rg_slot
+from api.schemas import CheckIn, CheckOut, TokenOut
 from users.auth import interface as auth_iface
-from users.auth.models import User
-from users.exceptions import Forbidden, NotFound
+from users.exceptions import NotFound
 from users.roles import interface as roles
 from users.roles.enrollment import interface as enrollment_iface
 from users.roles.lead import interface as lead_iface
@@ -86,47 +85,6 @@ class LeadOut(Schema):
     )
     status: str
     checkout: CheckoutOut | None = None
-
-
-class CheckIn(Schema):
-    cpf: str | None = None
-    phone: str | None = None
-    external_id: str | None = (
-        None  # re-dispara OTP de usuário já conhecido (o service já aceitava)
-    )
-    # O NORMAL é disparar OTP. `false` = modo sem OTP (ex-/auth/check-bot): só espia found/roles
-    # e devolve `token` direto (o canal do chamador é a prova de identidade — bot WhatsApp).
-    send_otp: bool = True
-
-
-class CheckOut(Schema):
-    found: bool
-    external_id: str | None = Field(
-        None,
-        description="external_id do USER (é o que o /auth/login espera — proposta #8)",
-    )
-    otp_sent: bool
-    otp_wait: int | None = None
-    whatsapp: bool | None = None
-    roles: list[str] | None = None
-    # só no modo `send_otp=false` (ex-check-bot): JWT de acesso direto.
-    token: str | None = None
-
-
-class LoginIn(Schema):
-    external_id: str = Field(description="external_id do USER (veio do /auth/check)")
-    otp: str
-
-
-class CheckBotIn(Schema):
-    phone: str
-
-
-class CheckBotOut(Schema):
-    found: bool
-    external_id: str | None = None
-    roles: list[str] | None = None
-    token: str | None = None
 
 
 class CardPriceOut(Schema):
@@ -303,31 +261,11 @@ def check(request, payload: CheckIn):
     )
 
 
-@auth_router.post("/check-bot", response=CheckBotOut, auth=None, tags=["bot"])
-def check_bot(request, payload: CheckBotIn):
-    """DEPRECATED: use `POST /auth/check` com `send_otp=false` (mesma função, integrada).
-    Mantido como alias fino pra compat do bot_v2 (FastAPI)."""
-    return auth_iface.check(phone=payload.phone, send_otp=False)
-
-
-@auth_router.post("/login", response=TokenOut, auth=None)
-def login(request, payload: LoginIn):
-    """Login passwordless (OTP) — resolve o papel mais avançado do funil do cliente (lead→enrollment→
-    student; veteran exige student) e emite JWT com TODAS as roles ativas."""
-    user = User.objects.filter(external_id=payload.external_id).first()
-    if user is None:
-        raise NotFound("Usuário não encontrado.", code="USER_NOT_FOUND")
-    active = roles.active_roles(user)
-    funnel_role = next((r for r in _FUNNEL_ROLES if r in active), None)
-    if funnel_role is None:
-        raise Forbidden(
-            "Usuário não faz parte do funil do aluno.", code="NOT_IN_FUNNEL"
-        )
-    return auth_iface.login(
-        external_id=payload.external_id, role=funnel_role, otp=payload.otp
-    )
-
-
+add_funnel_login(
+    auth_router,
+    funnel_roles=_FUNNEL_ROLES,
+    not_in_funnel_msg="Usuário não faz parte do funil do aluno.",
+)
 add_auth_refresh(auth_router)
 
 

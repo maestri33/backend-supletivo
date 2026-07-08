@@ -54,11 +54,6 @@ class ChatResult:
     cache_miss_tokens: int = 0
     finish_reason: str | None = None
 
-    @property
-    def cache_hit_rate(self) -> float:
-        total = self.cache_hit_tokens + self.cache_miss_tokens
-        return self.cache_hit_tokens / total if total else 0.0
-
 
 class LLMClient:
     """Cliente fino sobre um provider OpenAI-compatible. Cada método devolve ChatResult."""
@@ -291,38 +286,6 @@ class LLMClient:
             model=model,
             temperature=temperature if temperature is not None else 0.3,
             max_tokens=max_tokens,
-        )
-        return await self._request(payload)
-
-    async def extract(
-        self,
-        text: str,
-        *,
-        model: str,
-        json_schema: dict,
-        temperature: float | None = None,
-        max_tokens: int | None = None,
-    ) -> ChatResult:
-        """Extrai dados estruturados do texto conforme um JSON Schema. Conteúdo vem como string JSON."""
-        import json as _json
-
-        schema_str = _json.dumps(json_schema, ensure_ascii=False)
-        payload = self._build_payload(
-            [
-                {
-                    "role": "system",
-                    "content": (
-                        SYSTEM_PROMPT_PT
-                        + f" Extraia do texto os dados conforme este JSON Schema: {schema_str}. "
-                        + "Retorne APENAS um JSON valido que satisfaca o schema."
-                    ),
-                },
-                {"role": "user", "content": text},
-            ],
-            model=model,
-            temperature=temperature if temperature is not None else 0.1,
-            max_tokens=max_tokens,
-            json_mode=True,
         )
         return await self._request(payload)
 

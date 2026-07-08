@@ -33,6 +33,24 @@ STATUS_VALUES = (PENDING, APPROVED, REJECTED, REVIEW)
 _STALE_REASON = "Análise automática expirou — em revisão pela equipe."
 
 
+def started_at_from(raw, *, coerce_tz: bool = True) -> datetime | None:
+    """Parseia o `analysis_started_at` (gravado como string ISO em `validation_result`) de volta a
+    datetime — o que o `is_stale`/`ack` precisam pra somar com o TTL. Valor vazio/ilegível → None.
+    `coerce_tz` força UTC quando a string vier naive (o funil do RG do enrollment guarda naive)."""
+    if not raw:
+        return None
+    if isinstance(raw, datetime):
+        dt = raw
+    else:
+        try:
+            dt = datetime.fromisoformat(raw)
+        except (TypeError, ValueError):
+            return None
+    if coerce_tz and dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt
+
+
 def ttl_seconds() -> int:
     return int(getattr(settings, "ANALYSIS_TTL_SECONDS", 120))
 

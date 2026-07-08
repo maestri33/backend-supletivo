@@ -5,14 +5,11 @@ painel e ecoado em toda chamada. NÃO existe HMAC `asaas-signature` (era delíri
 token só pros dois endpoints: `ASAAS_WEBHOOK_SECRET` no `.env` (fonte de verdade).
 """
 
-import hmac
+from core.webhook_auth import header_token_matches
 
 ACCESS_TOKEN_HEADER = "asaas-access-token"
 
 
 def check_access_token(request, expected):
     """True se o header asaas-access-token bate com o token esperado (comparação tempo-constante)."""
-    if not expected:
-        return False
-    got = request.headers.get(ACCESS_TOKEN_HEADER, "")
-    return hmac.compare_digest(got, expected)
+    return header_token_matches(request, ACCESS_TOKEN_HEADER, expected)

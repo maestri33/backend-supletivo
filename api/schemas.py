@@ -7,7 +7,39 @@ não duplicar (plan/15 A7).
 
 from __future__ import annotations
 
-from ninja import Schema
+from ninja import Field, Schema
+
+
+class CheckIn(Schema):
+    """Body do `POST /auth/check` — compartilhado pelos grupos do funil (dedup)."""
+
+    cpf: str | None = None
+    phone: str | None = None
+    external_id: str | None = None  # re-dispara OTP de usuário já conhecido (do USER)
+    # O NORMAL é disparar OTP. `false` = modo sem OTP: espia found/roles e devolve `token` direto.
+    send_otp: bool = True
+
+
+class CheckOut(Schema):
+    """Resposta do `POST /auth/check` — compartilhada pelos grupos do funil (dedup)."""
+
+    found: bool
+    external_id: str | None = Field(
+        None, description="external_id do USER (é o que o /auth/login espera)"
+    )
+    otp_sent: bool
+    otp_wait: int | None = None
+    whatsapp: bool | None = None
+    roles: list[str] | None = None
+    # só no modo `send_otp=false`: JWT de acesso direto.
+    token: str | None = None
+
+
+class LoginIn(Schema):
+    """Body do `POST /auth/login` — compartilhado pelos grupos do funil (dedup)."""
+
+    external_id: str = Field(description="external_id do USER (veio do /auth/check)")
+    otp: str
 
 
 class MaterialIn(Schema):

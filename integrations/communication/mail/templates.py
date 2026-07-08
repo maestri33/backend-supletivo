@@ -27,22 +27,6 @@ class TemplateNotFound(Exception):
 MEDIA_TYPES = {"image", "video", "audio", "document"}
 
 
-def _md_bold_to_html(text: str) -> str:
-    """Converte bold markdown ('**x**' e '*x*') em <strong> DEPOIS do html.escape.
-
-    Ordem importa: '**x**' (específico) antes de '*x*' (geral). O '*x*' só casa quando abre/fecha em
-    caractere não-espaço, evitando falso-positivo em '5 * 5 = 25' ou listas '* item'.
-    """
-    text = re.sub(r"\*\*(.+?)\*\*", r"<strong>\1</strong>", text, flags=re.DOTALL)
-    text = re.sub(
-        r"(?<![*\w])\*([^*\s](?:.*?[^*\s])?)\*(?![*\w])",
-        r"<strong>\1</strong>",
-        text,
-        flags=re.DOTALL,
-    )
-    return text
-
-
 # schemes permitidos em links markdown (defesa-in-depth: o texto já é escaped; mesmo assim,
 # rejeita javascript:/data: etc.). O resto vira texto plano.
 _SAFE_URL_SCHEMES = {"http", "https", "mailto"}

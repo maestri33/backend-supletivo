@@ -7,7 +7,7 @@ no `.env`. Sem o segredo configurado, `check_access_token` retorna False (fail-c
 dá 401 e nada é processado).
 """
 
-import hmac
+from core.webhook_auth import header_token_matches
 
 # Header onde o segredo compartilhado viaja. A Evolution permite configurar headers customizados
 # no webhook (Webhook > Headers); o owner cola WHATSAPP_WEBHOOK_SECRET aqui.
@@ -18,9 +18,6 @@ def check_access_token(request, expected: str) -> bool:
     """True se o header `x-webhook-token` bate com o segredo esperado (comparação tempo-constante).
 
     `expected` vazio (segredo não configurado no .env) => False: fail-closed, o webhook 401a e nada
-    é processado. Espelha exatamente o `asaas.security.check_access_token`.
+    é processado.
     """
-    if not expected:
-        return False
-    got = request.headers.get(ACCESS_TOKEN_HEADER, "")
-    return hmac.compare_digest(got, expected)
+    return header_token_matches(request, ACCESS_TOKEN_HEADER, expected)

@@ -265,37 +265,6 @@ def summarize(
     return _strip_think(result.content)
 
 
-def extract(
-    text: str,
-    *,
-    json_schema: dict,
-    caller: str,
-    temperature: float | None = None,
-    max_tokens: int | None = None,
-    model: str | None = None,
-) -> dict:
-    """Extrai dados estruturados do texto conforme um JSON Schema. Devolve o dict parseado."""
-
-    async def attempt(client, m):
-        return await client.extract(
-            text,
-            model=m,
-            json_schema=json_schema,
-            temperature=temperature,
-            max_tokens=max_tokens,
-        )
-
-    result, _p, _m = _run(
-        AiCall.Operation.EXTRACT, caller, attempt, providers.fallback_chain(model)
-    )
-    try:
-        return json.loads(_strip_think(result.content))
-    except json.JSONDecodeError as exc:
-        raise LLMError(
-            f"resposta não é JSON válido na extração: {exc}", retryable=False
-        ) from exc
-
-
 # ---------------------------------------------------------------------------
 # Correção do training (grade() dentro da IA — decisão do Victor)
 # ---------------------------------------------------------------------------
