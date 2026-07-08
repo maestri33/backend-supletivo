@@ -31,6 +31,7 @@ AUDIENCE_STUDENT = "student"
 AUDIENCE_PROMOTER = "promoter"
 AUDIENCE_COORDINATOR = "coordinator"
 AUDIENCE_STAFF = "staff"
+AUDIENCE_BLOCKED = "blocked"  # usuário com role bloqueante ativa — NUNCA a política normal
 
 # Leituras SEGURAS do próprio usuário que o contexto pode incluir (resolvidas em `reads.py`).
 READ_LEAD = "lead_status"  # etapa/pagamento do próprio lead
@@ -75,10 +76,22 @@ def resolve(*, profile, roles: list[str], blocked: bool = False) -> AudiencePoli
     """Resolve a política do público. PURA: não faz I/O.
 
     `profile` = Profile do telefone (ou None = estranho). `roles` = roles ativas do User (ou []).
-    `blocked` = True se alguma role ativa é bloqueante (catálogo) — tratado como o público base mas
-    o worker pode decidir escalar; aqui só informa o prompt.
+    `blocked` = True se alguma role ativa é bloqueante (catálogo) — SEMPRE vira `AUDIENCE_BLOCKED`
+    (ignora role/audience normal): o worker escala pra humano em vez de conversar.
     """
     roles_set = set(roles or [])
+
+    # Bloqueado (role bloqueante ativa, ex.: banido/suspenso): NUNCA a política normal do público —
+    # sempre escala pra humano, sem leitura nem conversa livre da IA (worker checa este audience).
+    if blocked:
+        return AudiencePolicy(
+            audience=AUDIENCE_BLOCKED,
+            system_prompt=_prompt(
+                "QUEM FALA: um usuário BLOQUEADO. Não converse: encaminhe SEMPRE para um "
+                "atendente humano, sem exceção."
+            ),
+            allowed_reads=(),
+        )
 
     # Estranho: sem cadastro. FAQ pública + convite. ZERO leitura, ZERO dado.
     if profile is None:

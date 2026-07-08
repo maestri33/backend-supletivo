@@ -17,7 +17,7 @@ class Command(BaseCommand):
     def handle(self, *args, **options):
         from integrations.tools.biometric import face_match
         from integrations.tools.biometric.exceptions import BiometricError
-        from integrations.tools.biometric.liveness import check_liveness
+        from integrations.tools.biometric.liveness import liveness_source
 
         self.stdout.write(
             f"modelo={settings.BIOMETRIC_MODEL_NAME} root={settings.BIOMETRIC_MODEL_ROOT} "
@@ -37,7 +37,7 @@ class Command(BaseCommand):
             record_check("biometric", "health", False, mode="real", detail=repr(exc))
             return
 
-        liveness = check_liveness()
+        liveness = liveness_source()  # prova de vida vem da IA de visão (só reporta a fonte)
         self.stdout.write(
             self.style.SUCCESS(f"modelo carregado (CPU) ✓  liveness={liveness}")
         )

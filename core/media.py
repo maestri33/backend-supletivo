@@ -11,8 +11,16 @@ from __future__ import annotations
 
 import secrets
 
+from django.conf import settings
 from django.core.files.base import ContentFile
 from django.core.files.storage import default_storage
+
+
+def is_private_media(path: str) -> bool:
+    """True se o 1º segmento de `path` está em `settings.MEDIA_PRIVATE_PREFIXES` (Lane #4, gate de
+    /media/ em `core/media_views.py`). O resto (ex.: `training/`, `ai/`) é público."""
+    prefix = path.strip("/").split("/", 1)[0]
+    return prefix in settings.MEDIA_PRIVATE_PREFIXES
 
 
 def media_token() -> str:

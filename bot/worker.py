@@ -194,6 +194,12 @@ def handle_inbound(inbound_event_id: int) -> str:
         logger.info("bot.awaiting_human_silent", conv=conversation.id)
         return "awaiting_human"
 
+    # usuário BLOQUEADO (role bloqueante ativa) → nunca a política normal do público: escala pra
+    # humano direto, sem guardrail/rate-limit/engine/IA.
+    if policy.audience == router.AUDIENCE_BLOCKED:
+        _escalate(conversation, phone, reason="blocked_user")
+        return "blocked_user"
+
     # GUARDRAIL entrada (fail-closed): injeção → escala, não chama IA
     scan = guardrail.scan_inbound(text)
     if not scan.safe:

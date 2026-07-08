@@ -1059,7 +1059,12 @@ def get_selfie(*, user_external_id: str) -> dict:
 
 
 def set_selfie(
-    *, user_external_id, image_bytes: bytes, content_type="image/jpeg"
+    *,
+    user_external_id,
+    image_bytes: bytes,
+    content_type="image/jpeg",
+    consent_ip: str | None = None,
+    consent_user_agent: str | None = None,
 ) -> dict:
     """Selfie ("assinar") — ASSÍNCRONA (plan/15 C, espelha o enrollment):
 
@@ -1073,6 +1078,7 @@ def set_selfie(
     o veredito final decide promover / notificar o candidato / escalar pro coordenador."""
     from django.utils import timezone
 
+    from users.consent import PROMOTER_CONTRACT
     from users.roles import _selfie
 
     cand = _require(user_external_id, _S.PIX, _S.SELFIE)
@@ -1081,6 +1087,13 @@ def set_selfie(
     cand.selfie_status = _selfie.SelfieStatus.PENDING
     cand.selfie_verified = False
     cand.selfie_description = None
+    # consentimento LGPD (lane #6): a selfie enviada com sucesso É o aceite do contrato.
+    cand.consent_accepted = True
+    cand.contract_version = PROMOTER_CONTRACT.version
+    cand.contract_hash = PROMOTER_CONTRACT.hash
+    cand.consent_ip = consent_ip
+    cand.consent_user_agent = consent_user_agent
+    cand.consent_accepted_at = cand.selfie_taken_at
     # BUG-4 (M2c FE-painel, 2026-06-16): worker exige `status==SELFIE` (`run_selfie_validation`
     # linha 1120) — se não avançar, bail-out silencioso e o pending vira review via TTL reconcile.
     # Espelha o `enrollment.set_selfie` (gate em `_S.SELFIE`, advance feito no `set_education`).

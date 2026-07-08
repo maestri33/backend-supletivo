@@ -18,33 +18,57 @@ import structlog
 
 logger = structlog.get_logger()
 
-# Mapas status-técnico → frase pt-br segura. O que NÃO está no mapa cai num texto genérico
-# ("em andamento") — nunca expomos o código cru de status nem campo fora desta lista.
-_LEAD_STATUS_PT = {
-    "pending": "cadastro feito, pagamento da matrícula ainda pendente",
-    "paid": "pagamento da matrícula confirmado",
-    "failed": "houve um problema no pagamento da matrícula",
-    "expired": "o link de pagamento da matrícula expirou",
-    "cancelled": "a matrícula foi cancelada",
-}
+# Mapas status-técnico → frase pt-br segura. As CHAVES são derivadas dos enums REAIS dos models
+# (users.roles.*.models.*.Status), nunca strings soltas retypeadas à mão — isso já divergiu e
+# derrubou `student_status()` 100% no fallback genérico. O que NÃO está no mapa cai num texto
+# genérico ("em andamento") — nunca expomos o código cru de status nem campo fora desta lista.
 
-_ENROLLMENT_STATUS_PT = {
-    "documents": "enviando os documentos da matrícula",
-    "address": "preenchendo o endereço da matrícula",
-    "education": "informando a escolaridade",
-    "selfie": "na etapa da selfie (assinatura da matrícula)",
-    "review": "matrícula em análise pela equipe",
-    "fee": "matrícula em andamento",
-    "done": "matrícula concluída",
-}
 
-_STUDENT_STATUS_PT = {
-    "active": "aluno com matrícula ativa",
-    "documentation": "aluno enviando a documentação final",
-    "exam": "aluno na etapa de provas",
-    "diploma": "aluno na etapa de diploma",
-    "concluded": "curso concluído",
-}
+def _lead_status_pt() -> dict:
+    from users.roles.lead.models import Lead
+
+    S = Lead.Status
+    return {
+        S.PENDING: "cadastro feito, pagamento da matrícula ainda pendente",
+        S.PAID: "pagamento da matrícula confirmado",
+        S.FAILED: "houve um problema no pagamento da matrícula",
+    }
+
+
+def _enrollment_status_pt() -> dict:
+    from users.roles.enrollment.models import Enrollment
+
+    S = Enrollment.Status
+    # FEE_PAID/FEE_SCHEDULED = fase da TAXA, interna do polo (o aluno nunca vê — mesma máscara de
+    # `enrollment.service.public_status`), por isso caem na mesma frase de AWAITING_RELEASE.
+    return {
+        S.RG: "enviando o RG (documento) da matrícula",
+        S.ADDRESS: "preenchendo o endereço da matrícula",
+        S.EDUCATION: "informando a escolaridade",
+        S.SELFIE: "na etapa da selfie (assinatura da matrícula)",
+        S.AWAITING_RELEASE: "matrícula em análise pela equipe",
+        S.FEE_PAID: "matrícula em análise pela equipe",
+        S.FEE_SCHEDULED: "matrícula em análise pela equipe",
+        S.COMPLETED: "matrícula concluída",
+    }
+
+
+def _student_status_pt() -> dict:
+    from users.roles.student.models import Student
+
+    S = Student.Status
+    return {
+        S.AWAITING_DOCUMENTS: "aluno enviando a documentação final",
+        S.DOCUMENTS_UNDER_REVIEW: "aluno com documentação em análise",
+        S.EXAM_RELEASED: "aluno liberado para agendar a prova",
+        S.EXAM_SCHEDULED: "aluno com prova agendada",
+        S.EXAM_FAILED: "aluno reprovado na prova (vai refazer)",
+        S.AWAITING_DOCUMENTATION_DISPATCH: "aluno aguardando envio de documentação",
+        S.PENDING: "aluno com uma pendência",
+        S.AWAITING_DIPLOMA_ISSUANCE: "aluno aguardando emissão do diploma",
+        S.AWAITING_PICKUP: "aluno aguardando retirada do diploma",
+        S.VETERAN: "curso concluído",
+    }
 
 
 def _phrase(mapping: dict, status, fallback: str) -> str:
@@ -60,7 +84,7 @@ def lead_status(user_external_id: str) -> str | None:
     if lead is None:
         return None
     return _phrase(
-        _LEAD_STATUS_PT, getattr(lead, "status", None), "matrícula em andamento"
+        _lead_status_pt(), getattr(lead, "status", None), "matrícula em andamento"
     )
 
 
@@ -72,7 +96,7 @@ def enrollment_status(user_external_id: str) -> str | None:
     if enr is None:
         return None
     return _phrase(
-        _ENROLLMENT_STATUS_PT, getattr(enr, "status", None), "matrícula em andamento"
+        _enrollment_status_pt(), getattr(enr, "status", None), "matrícula em andamento"
     )
 
 
@@ -84,7 +108,7 @@ def student_status(user_external_id: str) -> str | None:
     if student is None:
         return None
     return _phrase(
-        _STUDENT_STATUS_PT,
+        _student_status_pt(),
         getattr(student, "status", None),
         "aluno com matrícula ativa",
     )

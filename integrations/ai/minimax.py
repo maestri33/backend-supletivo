@@ -13,6 +13,7 @@ negócio (§8): só fala com o provider e devolve o resultado cru. Consumido pel
 from __future__ import annotations
 
 import base64
+import os
 
 import httpx
 import structlog
@@ -38,6 +39,15 @@ class MiniMaxClient:
         self._tts_model = settings.MINIMAX_TTS_MODEL
         self._vision_model = settings.MINIMAX_VISION_MODEL
         self._timeout = timeout
+        # Lane #7 (2026-07-08): MINIMAX_GATEWAY_MODE=1 (lido direto do ambiente, sem tocar
+        # settings.py) liga o modo gateway — MINIMAX_BASE_URL aponta pro OmniRoute interno, que
+        # NÃO fala o t2a_v2 nativo (404), só o /v1/audio/speech OpenAI-compatible. Flag OFF por
+        # default => comportamento nativo intacto pra quem usa a API real do MiniMax.
+        self._gateway_mode = os.environ.get("MINIMAX_GATEWAY_MODE", "").strip().lower() in (
+            "1",
+            "true",
+            "yes",
+        )
 
     def _headers(self) -> dict[str, str]:
         return {
@@ -54,6 +64,8 @@ class MiniMaxClient:
         output_format: str = "mp3",
     ) -> bytes:
         """Converte texto em fala (t2a_v2). Devolve os bytes do áudio (mp3)."""
+        if self._gateway_mode:
+            return await self._tts_gateway(text, voice_id=voice_id, model=model)
         url = f"{self._base_url}/v1/t2a_v2"
         body = {
             "model": model or self._tts_model,
@@ -94,6 +106,45 @@ class MiniMaxClient:
             "minimax.tts_done",
             model=body["model"],
             voice=body["voice_setting"]["voice_id"],
+            text_len=len(text),
+            audio_kb=round(len(audio) / 1024, 1),
+        )
+        return audio
+
+    async def _tts_gateway(
+        self,
+        text: str,
+        *,
+        voice_id: str | None = None,
+        model: str | None = None,
+    ) -> bytes:
+        """TTS via OmniRoute (`/v1/audio/speech`, OpenAI-compatible). Modelo exige prefixo
+        `minimax/`; resposta é o áudio cru (sem hex, diferente do t2a_v2 nativo)."""
+        mdl = model or self._tts_model
+        if not mdl.startswith("minimax/"):
+            mdl = f"minimax/{mdl}"
+        body = {
+            "model": mdl,
+            "input": text,
+            "voice": voice_id or settings.MINIMAX_VOICE_FEMALE,
+        }
+        url = f"{self._base_url}/v1/audio/speech"
+        async with httpx.AsyncClient(
+            timeout=httpx.Timeout(self._timeout, connect=10.0)
+        ) as c:
+            resp = await c.post(url, json=body, headers=self._headers())
+        if resp.status_code >= 400:
+            raise MiniMaxError(
+                f"MiniMax TTS (gateway) HTTP {resp.status_code}: {resp.text[:300]}"
+            )
+        audio = resp.content
+        if not audio:
+            raise MiniMaxError("MiniMax TTS (gateway) não retornou áudio")
+        logger.info(
+            "minimax.tts_done",
+            model=mdl,
+            voice=body["voice"],
+            gateway=True,
             text_len=len(text),
             audio_kb=round(len(audio) / 1024, 1),
         )

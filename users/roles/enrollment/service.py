@@ -1151,13 +1151,22 @@ def get_selfie(*, user_external_id: str) -> dict:
 
 
 def set_selfie(
-    *, user_external_id: str, image_bytes: bytes, content_type: str = "image/jpeg"
+    *,
+    user_external_id: str,
+    image_bytes: bytes,
+    content_type: str = "image/jpeg",
+    consent_ip: str | None = None,
+    consent_user_agent: str | None = None,
 ) -> Enrollment:
     """Selfie = a ASSINATURA da matrícula (plan/13). Salva a foto e ENFILEIRA a análise: IA
     pré-analisa (vale ir pra biometria?) → face-match vs rosto do DOCUMENTO → reprovou? a IA
-    INSTRUI como ser aprovada. Responde na hora; o front acompanha pelo GET /selfie (status)."""
+    INSTRUI como ser aprovada. Responde na hora; o front acompanha pelo GET /selfie (status).
+
+    A selfie É a assinatura do contrato (lane #6): ao enviá-la, grava o aceite LGPD (versão + hash
+    do contrato atual + IP + user-agent + timestamp)."""
     from django.utils import timezone
 
+    from users.consent import STUDENT_CONTRACT
     from users.roles import _selfie
 
     enr = _require(user_external_id, _S.SELFIE)
@@ -1167,6 +1176,13 @@ def set_selfie(
     enr.selfie_status = _selfie.SelfieStatus.PENDING
     enr.selfie_verified = False
     enr.selfie_description = None
+    # consentimento LGPD: a selfie enviada com sucesso É o aceite do contrato.
+    enr.consent_accepted = True
+    enr.contract_version = STUDENT_CONTRACT.version
+    enr.contract_hash = STUDENT_CONTRACT.hash
+    enr.consent_ip = consent_ip
+    enr.consent_user_agent = consent_user_agent
+    enr.consent_accepted_at = enr.selfie_taken_at
     enr.save()
     from django_q.tasks import async_task
 

@@ -16,7 +16,9 @@ from ninja.files import UploadedFile
 from api.auth import require_roles
 from api.base import add_auth_refresh, add_funnel_login, build_group, resolve_rg_slot
 from api.schemas import CheckIn, CheckOut, TokenOut
+from core.net import source_ip
 from users.auth import interface as auth_iface
+from users.consent import STUDENT_CONTRACT
 from users.exceptions import NotFound
 from users.roles import interface as roles
 from users.roles.enrollment import interface as enrollment_iface
@@ -625,14 +627,35 @@ def enrollment_selfie(request, file: UploadedFile = File(...)):
     """Envia a selfie (assinatura). A análise roda em 2º plano (IA + biometria vs rosto do
     DOCUMENTO): acompanhe `analysis_status` no `GET /enrollment/selfie` (`pending` = analisando),
     voltando a perguntar a cada `poll_after_ms` (a resposta já traz o ack — proposta #2) e o
-    **EnrollmentMe canônico** (proposta #3)."""
+    **EnrollmentMe canônico** (proposta #3).
+
+    A selfie É a assinatura do contrato (lane #6): o aceite LGPD (versão/hash do contrato + IP +
+    user-agent + timestamp) é gravado no ato do envio."""
     ext = _enr_guard(request)
     enr = enrollment_iface.set_selfie(
         user_external_id=ext,
         image_bytes=file.read(),
         content_type=getattr(file, "content_type", "image/jpeg"),
+        consent_ip=source_ip(request),
+        consent_user_agent=request.headers.get("user-agent"),
     )
     return {**enrollment_iface.me_dict(enr), **enrollment_iface.selfie_ack(enr)}
+
+
+class ContractOut(Schema):
+    """Contrato de matrícula versionado (lane #6): o front exibe `text` e, ao enviar a selfie,
+    assina implicitamente a `version`/`hash` retornadas aqui."""
+
+    version: str
+    hash: str
+    text: str
+
+
+@api.get("/contract/current", response=ContractOut, tags=["enrollment"])
+def get_current_contract(request):
+    """Contrato de matrícula ATUAL (texto + versão + hash SHA-256). Fonte da verdade no backend
+    (`users/consent`); a selfie é a assinatura deste aceite."""
+    return STUDENT_CONTRACT.as_dict()
 
 
 # ── aluno: funil final student→veteran (autenticado, role student) — §4 item 9 ──

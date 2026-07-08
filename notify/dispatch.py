@@ -18,6 +18,7 @@ from __future__ import annotations
 import structlog
 from asgiref.sync import async_to_sync
 from django.conf import settings
+from django.db import transaction
 
 from integrations.communication.mail import client as mail_client
 from integrations.communication.mail import templates as mail_templates
@@ -36,61 +37,68 @@ logger = structlog.get_logger()
 
 
 def dispatch(notification_id: int) -> None:
-    """Envia a Notification pelos canais ainda pendentes e grava o status de cada um."""
-    notif = Notification.objects.filter(id=notification_id).first()
-    if notif is None:
-        logger.warning("notify.dispatch_missing", id=notification_id)
-        return
+    """Envia a Notification pelos canais ainda pendentes e grava o status de cada um.
 
-    notif.attempts += 1
+    Race de despacho: leitura+decisão+save inteiras rodam sob `select_for_update` numa única
+    transação — trava a linha da Notification até o commit, então duas execuções concorrentes
+    (ex.: retry do Django-Q sobrepondo o worker original) serializam em vez de despachar o mesmo
+    canal em duplicidade (crítico em is_tts, que dispara chamada de IA + WhatsApp).
+    """
+    with transaction.atomic():
+        notif = Notification.objects.select_for_update().filter(id=notification_id).first()
+        if notif is None:
+            logger.warning("notify.dispatch_missing", id=notification_id)
+            return
 
-    # A4 — TEST_MODE: dry-run — marca todos os canais pendentes como SENT e NÃO envia nada pela
-    # rede (sem WhatsApp/e-mail/TTS). O caller (ex.: OTP service) completa normalmente porque só
-    # lê o status; nada chega a um destinatário real.
-    if getattr(settings, "TEST_MODE", False):
+        notif.attempts += 1
+
+        # A4 — TEST_MODE: dry-run — marca todos os canais pendentes como SENT e NÃO envia nada pela
+        # rede (sem WhatsApp/e-mail/TTS). O caller (ex.: OTP service) completa normalmente porque só
+        # lê o status; nada chega a um destinatário real.
+        if getattr(settings, "TEST_MODE", False):
+            if notif.whatsapp_status == STATUS_PENDING:
+                notif.whatsapp_status = STATUS_SENT
+            if notif.email_status == STATUS_PENDING:
+                notif.email_status = STATUS_SENT
+            if notif.tts_status == STATUS_PENDING:
+                notif.tts_status = STATUS_SENT
+            notif.save()
+            logger.info(
+                "notify.dispatched_dry_run",
+                external_id=str(notif.external_id),
+                caller=notif.caller,
+            )
+            return
+
+        # ── WhatsApp: mídia > TTS(áudio, fallback texto) > texto ──
         if notif.whatsapp_status == STATUS_PENDING:
-            notif.whatsapp_status = STATUS_SENT
+            if notif.media_url:
+                if notif.want_tts and notif.tts_status == STATUS_PENDING:
+                    notif.tts_status = (
+                        STATUS_SKIPPED  # mídia tem precedência sobre voice-note
+                    )
+                _send_whatsapp_media(notif)
+            elif notif.want_tts:
+                _send_tts(notif)  # áudio; falha → texto (fallback interno)
+            else:
+                _send_whatsapp_text(notif)
+        elif notif.want_tts and notif.tts_status == STATUS_PENDING:
+            # whatsapp sem destino (SKIPPED) mas TTS pendente: áudio não tem pra onde ir → skipa.
+            notif.tts_status = STATUS_SKIPPED
+
         if notif.email_status == STATUS_PENDING:
-            notif.email_status = STATUS_SENT
-        if notif.tts_status == STATUS_PENDING:
-            notif.tts_status = STATUS_SENT
+            _send_email(notif)
+
         notif.save()
         logger.info(
-            "notify.dispatched_dry_run",
+            "notify.dispatched",
             external_id=str(notif.external_id),
             caller=notif.caller,
+            whatsapp=notif.whatsapp_status,
+            email=notif.email_status,
+            tts=notif.tts_status,
+            attempts=notif.attempts,
         )
-        return
-
-    # ── WhatsApp: mídia > TTS(áudio, fallback texto) > texto ──
-    if notif.whatsapp_status == STATUS_PENDING:
-        if notif.media_url:
-            if notif.want_tts and notif.tts_status == STATUS_PENDING:
-                notif.tts_status = (
-                    STATUS_SKIPPED  # mídia tem precedência sobre voice-note
-                )
-            _send_whatsapp_media(notif)
-        elif notif.want_tts:
-            _send_tts(notif)  # áudio; falha → texto (fallback interno)
-        else:
-            _send_whatsapp_text(notif)
-    elif notif.want_tts and notif.tts_status == STATUS_PENDING:
-        # whatsapp sem destino (SKIPPED) mas TTS pendente: áudio não tem pra onde ir → skipa.
-        notif.tts_status = STATUS_SKIPPED
-
-    if notif.email_status == STATUS_PENDING:
-        _send_email(notif)
-
-    notif.save()
-    logger.info(
-        "notify.dispatched",
-        external_id=str(notif.external_id),
-        caller=notif.caller,
-        whatsapp=notif.whatsapp_status,
-        email=notif.email_status,
-        tts=notif.tts_status,
-        attempts=notif.attempts,
-    )
 
 
 def _to_lan(url: str) -> str:

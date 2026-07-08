@@ -79,6 +79,16 @@ class Enrollment(ExternalIdModel):
     selfie_description = models.TextField(
         null=True, blank=True
     )  # justificativa da IA/coordenador
+    # consentimento LGPD (lane #6): a selfie É a assinatura — gravamos o aceite no ato dela.
+    # Registra QUAL versão/hash do contrato (users/consent) foi aceita + IP/UA/timestamp (prova).
+    consent_accepted = models.BooleanField(default=False)
+    contract_version = models.CharField(max_length=32, null=True, blank=True)
+    contract_hash = models.CharField(max_length=64, null=True, blank=True)
+    consent_ip = models.CharField(max_length=64, null=True, blank=True)
+    consent_user_agent = models.TextField(null=True, blank=True)
+    consent_accepted_at = models.DateTimeField(
+        "consentimento aceito em", null=True, blank=True
+    )
     created_at = models.DateTimeField("criado em", auto_now_add=True)
     updated_at = models.DateTimeField("atualizado em", auto_now=True)
 

@@ -18,7 +18,9 @@ from ninja.files import UploadedFile
 from api.auth import require_roles
 from api.base import add_auth_refresh, add_funnel_login, build_group
 from api.schemas import CheckIn, CheckOut, TokenOut
+from core.net import source_ip
 from users.auth import interface as auth_iface
+from users.consent import PROMOTER_CONTRACT
 from users.exceptions import NotFound
 from users.roles import interface as roles
 from users.roles.candidate import interface as candidate_iface
@@ -571,7 +573,25 @@ def candidate_selfie(request, file: UploadedFile = File(...)):
         user_external_id=ext,
         image_bytes=file.read(),
         content_type=getattr(file, "content_type", "image/jpeg"),
+        consent_ip=source_ip(request),
+        consent_user_agent=request.headers.get("user-agent"),
     )
+
+
+class ContractOut(Schema):
+    """Contrato de adesão do promotor versionado (lane #6): o front exibe `text` e, ao enviar a
+    selfie, assina implicitamente a `version`/`hash` retornadas aqui."""
+
+    version: str
+    hash: str
+    text: str
+
+
+@api.get("/contract/current", response=ContractOut, tags=["candidate"])
+def get_current_contract(request):
+    """Contrato de adesão do promotor ATUAL (texto + versão + hash SHA-256). Fonte da verdade no
+    backend (`users/consent`); a selfie é a assinatura deste aceite."""
+    return PROMOTER_CONTRACT.as_dict()
 
 
 @api.get("/candidate/selfie", response=CandidateSelfieOut, tags=["candidate"])

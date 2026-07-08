@@ -16,6 +16,7 @@ from datetime import datetime
 from ninja import Schema
 
 from api.base import build_group
+from core.net import require_internal_ip
 from users.exceptions import ValidationError
 from users.roles.lead import interface as lead_iface
 from users.roles.lead.models import Lead
@@ -55,6 +56,7 @@ class ToolLeadOut(Schema):
 
 
 @api.get("/leads", response=list[ToolLeadOut], auth=None, tags=["tools"])
+@require_internal_ip
 def tools_leads(
     request,
     status: str | None = None,
@@ -101,6 +103,7 @@ class ToolsNotifySentOut(Schema):
 
 
 @api.post("/notifications/send", response=ToolsNotifySentOut, auth=None, tags=["tools"])
+@require_internal_ip
 def tools_notifications_send(request, payload: ToolsNotifyIn):
     """Gatilho de disparo: envia WhatsApp e/ou e-mail a um USUÁRIO (`user_external_id`, herda
     phone/email do Profile) OU a um destino LIVRE (`phone`/`email`). `channels` opcional (default:

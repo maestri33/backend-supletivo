@@ -435,6 +435,17 @@ WHATSAPP_WEBHOOK_SECRET = env("WHATSAPP_WEBHOOK_SECRET", default="")
 # Fail-closed: vazio no .env => a rota sem-OTP recusa (o segredo é a prova de identidade, não a rede).
 BOT_SERVICE_SECRET = env("BOT_SERVICE_SECRET", default="")
 BOT_SERVICE_HEADER = env("BOT_SERVICE_HEADER", default="x-bot-service-token")
+
+# Wave1 hardening — consumido por api/tools (allowlist DMZ) e pelo serve de mídia privada.
+# TOOLS_ALLOWED_IPS aceita IPs e CIDRs (o gate usa o módulo ipaddress). Default = loopback + rede interna.
+TOOLS_ALLOWED_IPS = env.list(
+    "TOOLS_ALLOWED_IPS", default=["127.0.0.1", "::1", "10.0.0.0/8"]
+)
+# Prefixos de mídia que exigem autorização (dono do recurso). O resto (training/IA) é público.
+MEDIA_PRIVATE_PREFIXES = env.list(
+    "MEDIA_PRIVATE_PREFIXES",
+    default=["documents", "selfie", "diploma", "receipt", "student"],
+)
 # Rate-limit por TELEFONE em DB (sem Redis), espelha o OTP: janela curta (1 a cada WINDOW_S) +
 # janela horária (máx HOURLY_MAX/h). Anti-abuso de custo de IA/WhatsApp; alto p/ não trancar
 # usuário legítimo. Estouro da janela curta = silêncio; da horária = FAQ estática (modo degradado).

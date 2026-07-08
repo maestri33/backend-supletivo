@@ -152,10 +152,14 @@ def _record(
 
 def verify_identity(*, user, selfie_image_path: str, caller: str) -> FaceMatchResult:
     """Compara a SELFIE com o template do DOCUMENTO do user. Salva a selfie (expandir a biometria) +
-    grava `FaceVerification`. Modelo fora / sem rosto / sem documento → `review` (= bloqueio)."""
-    from .liveness import check_liveness
+    grava `FaceVerification`. Modelo fora / sem rosto / sem documento → `review` (= bloqueio).
 
-    liveness = check_liveness(image_path=selfie_image_path)
+    Aqui NÃO se decide prova de vida: o veredito de liveness é da IA de visão (`users.roles._selfie`),
+    combinado no funil (`add_face_match`). Este método só faz o face-match; `liveness` abaixo é apenas
+    o marcador de auditoria de ONDE a prova de vida foi decidida (nunca finge um `passed=True`)."""
+    from .liveness import liveness_source
+
+    liveness = liveness_source()
 
     # 1. enroll da selfie (rosto + embedding). Modelo fora ou sem rosto → review (bloqueio seguro).
     try:

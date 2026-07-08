@@ -39,6 +39,22 @@ ASAAS_TO_PAYOUT_STATUS = {
 
 _PAYOUT_KINDS = (Payment.Kind.PIXKEY, Payment.Kind.QRCODE)
 
+# Trechos do `failReason` do Asaas que indicam SALDO insuficiente na conta — não é recusa
+# definitiva: o Payment (e a PaymentRequest que reconcilia por cima) fica AWAITING_BALANCE e a
+# fila re-tenta sozinha (CONVENTION §8: não perde dinheiro), em vez de FAILED terminal.
+_INSUFFICIENT_BALANCE_HINTS = (
+    "saldo insuficiente",
+    "insufficient balance",
+    "insufficient_balance",
+    "insufficient funds",
+)
+
+
+def is_insufficient_balance_reason(reason: str | None) -> bool:
+    """True se o motivo de falha do Asaas indica falta de saldo (retryable, não terminal)."""
+    reason = (reason or "").lower()
+    return any(hint in reason for hint in _INSUFFICIENT_BALANCE_HINTS)
+
 
 def handle_event(payload, source_ip=None, user_agent=None):
     """Persiste o evento bruto e roteia. Retorna o WebhookEvent.
@@ -136,6 +152,12 @@ def _apply_payout(payload, event):
     data = payload.get("transfer") or {}
     asaas_id = data.get("id")
     ext_ref = data.get("externalReference")
+    fail_reason = data.get("failReason") or ""
+
+    # saldo insuficiente NÃO é recusa definitiva: vira AWAITING_BALANCE (não-terminal, a fila
+    # do finance re-tenta sozinha) em vez de FAILED.
+    if new_status == "FAILED" and is_insufficient_balance_reason(fail_reason):
+        new_status = "AWAITING_BALANCE"
 
     row = _find_payment(ext_ref, asaas_id, kinds=_PAYOUT_KINDS)
     if row is None:
@@ -147,7 +169,7 @@ def _apply_payout(payload, event):
         return None, "status_unchanged"
     row.status = new_status
     if new_status == "FAILED":
-        row.last_error = data.get("failReason") or f"event={event}"
+        row.last_error = fail_reason or f"event={event}"
     row.save()
     logger.info(
         "payout_status_changed",
