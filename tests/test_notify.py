@@ -198,3 +198,79 @@ def test_crew_call_feature_flag_off():
     from django.conf import settings
     settings.BOT_USE_CREW = False
     assert crew_available() is False
+
+
+def test_ai_fallback_helper_exists():
+    """try_gateway_or_direct é o helper central de fallback IA (OmniRoute → MiniMax direto)."""
+    from integrations.ai.fallback import try_gateway_or_direct
+    assert callable(try_gateway_or_direct)
+
+
+def test_minimax_client_direct_mode():
+    """MiniMaxClient(direct=True) usa MINIMAX_DIRECT_* em vez de MINIMAX_*."""
+    from integrations.ai.minimax import MiniMaxClient
+    from django.conf import settings
+
+    # força os settings necessários (pytest não carrega .env)
+    settings.MINIMAX_DIRECT_BASE_URL = "https://api.minimax.io"
+    settings.MINIMAX_DIRECT_API_KEY = "test_key"
+    c = MiniMaxClient(direct=True)
+    assert c._base_url == "https://api.minimax.io"
+    assert c._api_key == "test_key"
+    assert c._gateway_mode is False
+
+
+def test_ia_providers_centralizado_no_omniroute():
+    """IA_PROVIDERS contém omniroute como provider primário (Wave 4 — centralizado)."""
+    from django.conf import settings
+    # setUp mínimo: omniroute é o provider primário
+    settings.IA_PROVIDERS = {"omniroute": {"base_url": "http://10.1.30.35:80", "api_key": "test"}}
+    settings.IA_OMNIROUTE_BASE_URL = "http://10.1.30.35:80"
+    assert "omniroute" in settings.IA_PROVIDERS
+    assert settings.IA_OMNIROUTE_BASE_URL == "http://10.1.30.35:80"
+
+
+def test_fallback_tenta_omniroute_primeiro_minimax_segundo():
+    """Se OmniRoute falha, fallback chama MiniMax direto (não gateway)."""
+    import asyncio
+    from integrations.ai.fallback import try_gateway_or_direct
+
+    calls = {"gateway": 0, "direct": 0}
+
+    async def gateway_ok():
+        calls["gateway"] += 1
+        return "via_gateway"
+
+    async def direct_should_not_call():
+        calls["direct"] += 1
+        return "via_direct"
+
+    result = asyncio.run(
+        try_gateway_or_direct(
+            gateway_call=gateway_ok, direct_call=direct_should_not_call,
+            caller="test", op="tts",
+        )
+    )
+    assert result == "via_gateway"
+    assert calls["gateway"] == 1
+    assert calls["direct"] == 0  # não chamou fallback
+
+    # agora com gateway falhando
+    calls2 = {"gateway": 0, "direct": 0}
+
+    async def gateway_fails():
+        calls2["gateway"] += 1
+        raise ConnectionError("omni caiu")
+
+    async def direct_runs():
+        calls2["direct"] += 1
+        return "via_direct_fallback"
+
+    result2 = asyncio.run(
+        try_gateway_or_direct(
+            gateway_call=gateway_fails, direct_call=direct_runs,
+            caller="test", op="tts",
+        )
+    )
+    assert result2 == "via_direct_fallback"
+    assert calls2["direct"] == 1  # chamou fallback

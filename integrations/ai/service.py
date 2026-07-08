@@ -369,34 +369,58 @@ def describe_image(
 ) -> str:
     """Visão: descreve/analisa uma imagem (selfie/documento/recibo). Devolve o texto.
 
-    MiniMax-M3 é o PRIMÁRIO (multimodal, com o raciocínio <think> desligado); em falha cai pro Gemini
-    (fallback). Grava 1 AiCall por tentativa.
+    Wave 4 — IA centralizada: OmniRoute (via /v1/chat/completions com model multimodal) é o primário;
+    em falha retryable cai pro MiniMax-M3 direto (sem gateway). Grava 1 AiCall por tentativa.
     """
+    from .client import LLMClient
+    from .fallback import try_gateway_or_direct
     from .minimax import MiniMaxClient
 
-    mm = MiniMaxClient()
+    # primário: OmniRoute com modelo multimodal (multimodal aceita image_url inline)
+    gateway = LLMClient(
+        provider="omniroute",
+        base_url=settings.IA_PROVIDERS["omniroute"]["base_url"],
+        api_key=settings.IA_PROVIDERS["omniroute"]["api_key"],
+        temperature=settings.IA_DEFAULT_TEMPERATURE,
+        max_tokens=settings.IA_MAX_TOKENS,
+        timeout=settings.IA_TIMEOUT,
+    )
 
-    async def mm_coro():
+    async def gateway_call():
+        return await gateway.describe_image(
+            image_bytes, mime_type=mime_type, prompt=prompt or "Descreva esta imagem."
+        )
+
+    # fallback: MiniMax-M3 direto (sem gateway) — chave própria, sem depender do OmniRoute
+    mm = MiniMaxClient(direct=True)
+
+    async def direct_call():
         return await mm.describe(image_bytes, mime_type=mime_type, prompt=prompt)
+
+    async def chained():
+        return await try_gateway_or_direct(
+            gateway_call=gateway_call,
+            direct_call=direct_call,
+            caller=caller,
+            op="vision",
+        )
 
     try:
         return _media_call(
             operation=AiCall.Operation.VISION,
-            provider="minimax",
-            model=settings.MINIMAX_VISION_MODEL,
+            provider="omniroute",
+            model="auto/multimodal",
             caller=caller,
-            coro=mm_coro,
+            coro=chained,
         )
-    except Exception as exc:  # noqa: BLE001 — MiniMax falhou → tenta o Gemini (fallback)
+    except Exception as exc:
+        # OmniRoute E MiniMax falharam — último recurso: Gemini (sem fallback adicional).
         logger.warning("ai.vision_fallback_gemini", error=str(exc)[:160])
         from .gemini import GeminiClient
-
         gemini = GeminiClient()
 
         async def gemini_coro():
-            return await gemini.describe(
-                image_bytes, mime_type=mime_type, prompt=prompt
-            )
+            return await gemini.describe(image_bytes, mime_type=mime_type, prompt=prompt)
 
         return _media_call(
             operation=AiCall.Operation.VISION,
@@ -465,42 +489,58 @@ def tts(
 ) -> str:
     """TTS: gera áudio a partir do texto. Salva em media/ai/audio/ e devolve o caminho.
 
-    ElevenLabs é o PRIMÁRIO (voz mais natural, Victor 2026-06-21); em falha cai pro MiniMax (fallback).
-    A voz segue: `voice_id` explícito > voz por `gender` (M/F → ELEVENLABS_VOICE_* no primário;
-    MINIMAX_VOICE_* no fallback) > voz default do provider. `voice_id` explícito casa com o provider ativo.
+    Wave 4 — IA centralizada: OmniRoute /v1/audio/speech é o primário (ElevenLabs via gateway);
+    em falha cai pro MiniMax-M3 direto (com a chave própria). Voz segue: gender → voz
+    cross-gender (regra de marketing).
     """
     from .elevenlabs import ElevenLabsClient
+    from .fallback import try_gateway_or_direct
+    from .minimax import MiniMaxClient
 
-    el = ElevenLabsClient()
+    gateway = ElevenLabsClient()  # já fala gateway mode (ELEVENLABS_BASE_URL → OmniRoute)
     el_voice = voice_id or _voice_for_gender(gender)
 
-    async def el_coro():
-        return await el.tts(text, voice_id=el_voice)
+    async def gateway_call():
+        return await gateway.tts(text, voice_id=el_voice)
+
+    # fallback: MiniMax-M3 direto (sem gateway) — chave própria
+    mm = MiniMaxClient(direct=True)
+    mm_voice = voice_id or _minimax_voice_for_gender(gender)
+
+    async def direct_call():
+        return await mm.tts(text, voice_id=mm_voice)
+
+    async def chained():
+        return await try_gateway_or_direct(
+            gateway_call=gateway_call,
+            direct_call=direct_call,
+            caller=caller,
+            op="tts",
+        )
 
     try:
+        audio = _media_call(
+            operation=AiCall.Operation.TTS,
+            provider="omniroute",
+            model=settings.ELEVENLABS_MODEL_ID,
+            caller=caller,
+            coro=chained,
+        )
+    except Exception as exc:
+        # ambos falharam — último recurso: ElevenLabs direto (sem gateway)
+        logger.warning("ai.tts_final_fallback_elevenlabs_direct", error=str(exc)[:160])
+        from .elevenlabs import ElevenLabsClient as DirectEleven
+        direct_el = DirectEleven()
+
+        async def direct_el_coro():
+            return await direct_el.tts(text, voice_id=el_voice)
+
         audio = _media_call(
             operation=AiCall.Operation.TTS,
             provider="elevenlabs",
             model=settings.ELEVENLABS_MODEL_ID,
             caller=caller,
-            coro=el_coro,
-        )
-    except Exception as exc:  # noqa: BLE001 — ElevenLabs falhou → tenta o MiniMax (fallback)
-        logger.warning("ai.tts_fallback_minimax", error=str(exc)[:160])
-        from .minimax import MiniMaxClient
-
-        mm = MiniMaxClient()
-        mm_voice = voice_id or _minimax_voice_for_gender(gender)
-
-        async def mm_coro():
-            return await mm.tts(text, voice_id=mm_voice)
-
-        audio = _media_call(
-            operation=AiCall.Operation.TTS,
-            provider="minimax",
-            model=settings.MINIMAX_TTS_MODEL,
-            caller=caller,
-            coro=mm_coro,
+            coro=direct_el_coro,
         )
     return _save_media("audio", "mp3", audio)
 

@@ -33,21 +33,29 @@ class MiniMaxClient:
         api_key: str | None = None,
         base_url: str | None = None,
         timeout: float = 90.0,
+        direct: bool = False,
     ):
-        self._api_key = api_key if api_key is not None else settings.MINIMAX_API_KEY
-        self._base_url = (base_url or settings.MINIMAX_BASE_URL).rstrip("/")
+        # ponytail: se direct=True, fala DIRETO com MiniMax (sem gateway).
+        # Usado pelo fallback quando OmniRoute cai.
+        if direct and getattr(settings, "MINIMAX_DIRECT_API_KEY", ""):
+            self._api_key = api_key or settings.MINIMAX_DIRECT_API_KEY
+            self._base_url = (
+                base_url or getattr(settings, "MINIMAX_DIRECT_BASE_URL", "https://api.minimax.io")
+            ).rstrip("/")
+            self._gateway_mode = False  # direto, sem gateway
+        else:
+            self._api_key = api_key if api_key is not None else settings.MINIMAX_API_KEY
+            self._base_url = (base_url or settings.MINIMAX_BASE_URL).rstrip("/")
+            # Lane #7 (2026-07-08): MINIMAX_GATEWAY_MODE=1 liga o modo gateway — fala o
+            # /v1/audio/speech OpenAI-compatible via OmniRoute. Default OFF = API nativa.
+            self._gateway_mode = os.environ.get("MINIMAX_GATEWAY_MODE", "").strip().lower() in (
+                "1",
+                "true",
+                "yes",
+            )
         self._tts_model = settings.MINIMAX_TTS_MODEL
         self._vision_model = settings.MINIMAX_VISION_MODEL
         self._timeout = timeout
-        # Lane #7 (2026-07-08): MINIMAX_GATEWAY_MODE=1 (lido direto do ambiente, sem tocar
-        # settings.py) liga o modo gateway — MINIMAX_BASE_URL aponta pro OmniRoute interno, que
-        # NÃO fala o t2a_v2 nativo (404), só o /v1/audio/speech OpenAI-compatible. Flag OFF por
-        # default => comportamento nativo intacto pra quem usa a API real do MiniMax.
-        self._gateway_mode = os.environ.get("MINIMAX_GATEWAY_MODE", "").strip().lower() in (
-            "1",
-            "true",
-            "yes",
-        )
 
     def _headers(self) -> dict[str, str]:
         return {
