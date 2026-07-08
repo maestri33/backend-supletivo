@@ -234,6 +234,23 @@ def handle_inbound(inbound_event_id: int) -> str:
     # canônica da etapa; a IA só conversa. Cadastrado → Actor (token emitido+validado pelo gate da
     # API); estranho → sem actor (engine vira no-op, segue na FAQ pública).
     actor = Actor.for_user(user) if user is not None else None
+
+    # Bot com IA generativa: opt-in (BOT_USE_CREW=1) — caminho alternativo ao motor determinístico.
+    from bot.crew_call import crew_available, send_to_crew  # noqa: E402
+    if crew_available():
+        crew_reply = send_to_crew(
+            actor,
+            reads=__import__("bot.reads", fromlist=["reads"]),
+            message=text,
+            profile={"publico": policy.get("publico"), "status": policy.get("status")},
+        )
+        logger.info(
+            "bot.crew_reply",
+            external_id=str(actor.external_id) if actor else None,
+            text_len=len(crew_reply),
+        )
+        return crew_reply
+
     decision = engine.run(actor, policy, text)
 
     # Escrita falhou na API → humano assume (NUNCA finge que fez).

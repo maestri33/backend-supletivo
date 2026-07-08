@@ -437,6 +437,9 @@ WHATSAPP_WEBHOOK_SECRET = env("WHATSAPP_WEBHOOK_SECRET", default="")
 # Fail-closed: vazio no .env => a rota sem-OTP recusa (o segredo é a prova de identidade, não a rede).
 BOT_SERVICE_SECRET = env("BOT_SERVICE_SECRET", default="")
 BOT_SERVICE_HEADER = env("BOT_SERVICE_HEADER", default="x-bot-service-token")
+# ponytail: kill switch do CrewAI no bot. 0 = motor determinístico (default).
+# Para ligar: mude p/ 1 e garanta OMNIROUTE_API_KEY no .env.
+BOT_USE_CREW = env.bool("BOT_USE_CREW", default=False)
 
 # Wave1 hardening — consumido por api/tools (allowlist DMZ) e pelo serve de mídia privada.
 # TOOLS_ALLOWED_IPS aceita IPs e CIDRs (o gate usa o módulo ipaddress). Default = loopback + rede interna.
