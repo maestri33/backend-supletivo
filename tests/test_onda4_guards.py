@@ -1,6 +1,5 @@
 """Onda 4 da auditoria: G17 (teto de IA conta só sucesso) e G13 (re-upload não deixa PII órfã)."""
 
-import os
 import tempfile
 
 import pytest
