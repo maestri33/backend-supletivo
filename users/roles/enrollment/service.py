@@ -662,6 +662,11 @@ def run_rg_validation(enrollment_id: int, slot: str) -> None:
         rg.refresh_from_db()
         if rg.validation_status != doc_ai.PENDING:
             return  # outro worker (ou re-upload) já mudou o estado — não sobrescrever
+        # G11: a foto deste slot trocou no meio tempo (re-upload) → o veredito é da foto velha,
+        # descarta. `path` foi capturado no início; comparar com o atual identifica a troca (o
+        # check de status sozinho não pega um re-upload que re-arma PENDING).
+        if getattr(rg, field, None) != path:
+            return
         result = rg.validation_result or {}
         photos = dict(result.get("photos") or {})
         photos[slot] = {"status": status, "reason": reason}
@@ -1362,6 +1367,10 @@ def run_selfie_validation(enrollment_id: int) -> None:
         return
     if enr.selfie_status != _selfie.SelfieStatus.PENDING:
         return
+    # G11: o discriminador da FOTO desta task. `selfie_status` não serve pra detectar re-upload —
+    # o novo upload re-arma PENDING, então status seguiria PENDING e o veredito da foto velha
+    # gravaria sobre a nova. `selfie_taken_at` muda a cada upload; é o que identifica a foto.
+    started_taken_at = enr.selfie_taken_at
     fp = Path(settings.MEDIA_ROOT) / enr.selfie_image
     if not fp.exists():
         return
@@ -1382,9 +1391,17 @@ def run_selfie_validation(enrollment_id: int) -> None:
         )
         if tips:
             desc = f"{desc}\n\nComo resolver: {tips}"
-    enr.refresh_from_db(fields=["selfie_status", "selfie_reject_count"])
-    if enr.selfie_status != _selfie.SelfieStatus.PENDING:
-        return  # re-upload no meio tempo — este veredito é de foto velha, descarta
+    enr.refresh_from_db(
+        fields=["selfie_status", "selfie_reject_count", "selfie_taken_at"]
+    )
+    # G11: descarta se o status saiu de PENDING OU se a foto trocou (taken_at != o do início) —
+    # este veredito é da foto velha. Sem o check de taken_at, um re-upload que re-armou PENDING
+    # passava e o veredito da foto A gravava sobre a foto B (podia liberar B nunca validada).
+    if (
+        enr.selfie_status != _selfie.SelfieStatus.PENDING
+        or enr.selfie_taken_at != started_taken_at
+    ):
+        return
     enr.selfie_status = status
     enr.selfie_verified = status == _selfie.APPROVED
     update_fields = [
