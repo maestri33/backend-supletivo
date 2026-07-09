@@ -344,7 +344,13 @@ def upload_address_proof(*, user_external_id, upload) -> dict:
     """Comprovante de residência (foto/PDF) — OBRIGATÓRIO + validado por IA (F1). Salva a foto,
     marca `pending` e enfileira a validação (endereço + titular). Aceito já na etapa `address`."""
     cand = _require(
-        user_external_id, _S.PROFILE, _S.ADDRESS, _S.DOCUMENTS, _S.PIX, _S.SELFIE, _S.COMPLETED
+        user_external_id,
+        _S.PROFILE,
+        _S.ADDRESS,
+        _S.DOCUMENTS,
+        _S.PIX,
+        _S.SELFIE,
+        _S.COMPLETED,
     )
     documents_iface.upload_photo(user_external_id, "address_proof_photo", upload)
     ap = documents_iface.get_address_proof(user_external_id)
@@ -362,7 +368,13 @@ def submit_address_proof_kinship(*, user_external_id, relation: str) -> dict:
     from users.roles import _address_proof
 
     cand = _require(
-        user_external_id, _S.PROFILE, _S.ADDRESS, _S.DOCUMENTS, _S.PIX, _S.SELFIE, _S.COMPLETED
+        user_external_id,
+        _S.PROFILE,
+        _S.ADDRESS,
+        _S.DOCUMENTS,
+        _S.PIX,
+        _S.SELFIE,
+        _S.COMPLETED,
     )
     _address_proof.submit_kinship(user_external_id, relation)
     _advance_address(cand, user_external_id)
@@ -538,7 +550,11 @@ def _doc_section_dict(cand: Candidate) -> dict:
     section["analysis_status"] = sub.get("validation_status") or _analysis.PENDING
     section["analysis_reason"] = sub.get("validation_reason")
     # extraídos pela IA (se houver) — fica no validation_result
-    result = sub.get("validation_result") if isinstance(sub.get("validation_result"), dict) else {}
+    result = (
+        sub.get("validation_result")
+        if isinstance(sub.get("validation_result"), dict)
+        else {}
+    )
     extracted = (result.get("extracted") or {}) if isinstance(result, dict) else {}
     section["extracted"] = extracted
     # photos por slot individual (front precisa saber qual slot enviar)
@@ -830,6 +846,11 @@ def _apply_doc_extracted(cand: Candidate, sub, data: dict) -> None:
         birthplace=_clean(data["birthplace"], 128) if data.get("birthplace") else None,
         birth_date=_date(data.get("birth_date")),
     )
+    # G8/#19: o OCR pode ter acabado de preencher o `number` que faltava — re-avalia o avanço
+    # DOCUMENTS→PIX. Guarded (só avança com doc aprovado + number), idempotente nos callsites de
+    # validação que já chamam _advance_documents depois. Sem isso, o candidato ficava preso em
+    # DOCUMENTS após a aprovação manual quando o número só veio pelo OCR.
+    _advance_documents(cand, str(cand.user.external_id))
 
 
 def _finish_doc(
@@ -1326,7 +1347,12 @@ def run_selfie_validation(candidate_id: int) -> None:
         return  # re-upload — veredito é de foto velha, descarta
     cand.selfie_status = status
     cand.selfie_verified = status == _selfie.APPROVED
-    update_fields = ["selfie_status", "selfie_verified", "selfie_description", "updated_at"]
+    update_fields = [
+        "selfie_status",
+        "selfie_verified",
+        "selfie_description",
+        "updated_at",
+    ]
     if status == _selfie.REJECTED:
         # F2: acumula os comentários da IA (não sobrescreve) e conta a reprovação — 5× sobe a flag.
         cand.selfie_reject_count += 1

@@ -190,6 +190,19 @@ def get_for_user_external_id(external_id: str) -> Student | None:
     )
 
 
+def reevaluate_exam_release(user) -> None:
+    """G8/#5: re-avalia a liberação da prova de um student BOLSISTA quando uma indicação paga entra.
+
+    O gate do bolsista exige >=10 indicações pagas ALÉM de docs+sangue. Se ele completa os docs com
+    <10 indicações, `_maybe_release_exam` retorna cedo; e quando a 8ª/9ª/10ª indicação paga, nada
+    re-avaliava → ficava preso em DOCUMENTS_UNDER_REVIEW. Chamado por `lead._apply_effects` a cada
+    lead pago do promotor. No-op se o user não é student ou não é bolsista."""
+    student = Student.objects.filter(user=user).select_related("user").first()
+    if student is None or not student.bolsista:
+        return
+    _maybe_release_exam(student)
+
+
 def to_dict(student: Student) -> dict:
     diploma = getattr(student, "diploma", None)
     return {

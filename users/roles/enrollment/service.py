@@ -2020,6 +2020,10 @@ def coordinator_correct_identity(
             "Nenhum campo de identidade corrigível foi informado.", code="NO_FIELDS"
         )
     profiles.update_identity(enr.user, **clean)
+    # G8/#17: os campos corrigidos podem ser exatamente o que faltava no gate #10 (selfie já
+    # aprovada pelo coordenador, mas faltava nacionalidade/estado civil). Re-dispara o avanço —
+    # idempotente (só sai de SELFIE, e só se não faltar mais nada). Sem isso, ficava preso em SELFIE.
+    _advance_to_release(enr)
     logger.info(
         "leadership.acted_for",
         action="correct_identity",

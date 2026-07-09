@@ -562,6 +562,11 @@ def _apply_effects(lead: Lead):
         logger.exception(
             "lead.bolsista_auto_enroll_failed", promoter=str(lead.promoter.external_id)
         )
+    # G8/#5: esta indicação paga incrementa o paid_referrals do promotor; se ele é um student
+    # bolsista que já completou docs, re-avalia a liberação da prova (senão fica preso). No-op senão.
+    from users.roles.student import service as student_iface
+
+    student_iface.reevaluate_exam_release(lead.promoter)
     return hub
 
 
