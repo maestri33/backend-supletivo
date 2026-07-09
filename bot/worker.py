@@ -143,7 +143,7 @@ def handle_inbound(inbound_event_id: int) -> str:
     event.save(update_fields=["processed", "processed_at"])
 
     if not phone or not text:
-        logger.info("bot.skip_non_text", event=inbound_event_id)
+        logger.info("bot.skip_non_text", inbound_event_id=inbound_event_id)
         return "not_text_inbound"
 
     # resolve quem fala (cadastrado ou estranho) + roles
@@ -273,7 +273,6 @@ def handle_inbound(inbound_event_id: int) -> str:
 
     # IA chat — caída (cadeia esgotada) → canned + awaiting_human (fallback, nunca erro cru)
     from integrations.ai import service as ia
-    from integrations.ai.client import LLMError
 
     before = timezone.now()
     try:

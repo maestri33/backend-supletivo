@@ -64,23 +64,34 @@ class TemplateData:
         )
 
 
-# cache: event -> TemplateData | None. None = "não existe no DB" (negative cache).
-_CACHE: dict[str, TemplateData | None] = {}
+# cache: event -> (TemplateData | None, monotonic_ts). None = "não existe no DB" (negative cache).
+# G15/#24: TTL curto porque o cache é module-level e a invalidação por signal é IN-PROCESS — o
+# worker do Django-Q é outro processo e NÃO recebe o post_save do web, então sem TTL um Template
+# editado no painel ficava stale no worker até reiniciar. 30s limita a janela de staleness.
+_CACHE: dict[str, tuple[TemplateData | None, float]] = {}
+_CACHE_TTL_S = 30
 
 
 def _load(event: str) -> TemplateData | None:
-    """Lê do DB (1 SELECT) e cacheia. Devolve None se a row não existir. Nunca levanta: DB fora do
-    ar → loga e devolve None (o caller cai pro fallback in-memory)."""
-    if event in _CACHE:
-        return _CACHE[event]
+    """Lê do DB (1 SELECT) e cacheia com TTL. Devolve None se a row não existir. Nunca levanta: DB
+    fora do ar → loga e devolve o último valor bom (ou None), sem envenenar o cache."""
+    import time
+
+    cached = _CACHE.get(event)
+    if cached is not None and (time.monotonic() - cached[1]) < _CACHE_TTL_S:
+        return cached[0]
     try:
         row = Template.objects.filter(event=event).first()
     except Exception as exc:  # noqa: BLE001 — DB é enfeite aqui; fallback in-memory garante a mensagem
-        logger.warning("notify.template_db_error", event=event, error=str(exc)[:160])
-        _CACHE[event] = None
-        return None
+        logger.warning(
+            "notify.template_db_error", template_event=event, error=str(exc)[:160]
+        )
+        # G15/#26: NÃO cacheia em erro transitório — antes gravava None PERMANENTE (negative-cache
+        # poison), e o evento passava a ignorar o Template do DB pra sempre. Mantém o último valor
+        # bom se houver; senão None (o caller usa o fallback in-memory).
+        return cached[0] if cached is not None else None
     data = TemplateData.from_model(row) if row is not None else None
-    _CACHE[event] = data
+    _CACHE[event] = (data, time.monotonic())
     return data
 
 

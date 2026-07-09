@@ -70,7 +70,7 @@ def _enqueue(event_id: int) -> None:
 
         async_task("bot.worker.handle_inbound", event_id)
     except Exception as exc:  # noqa: BLE001
-        logger.error("bot.webhook.enqueue_failed", event=event_id, error=str(exc))
+        logger.error("bot.webhook.enqueue_failed", wa_event_id=event_id, error=str(exc))
 
 
 def _wa_message_id(payload):

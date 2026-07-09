@@ -1065,7 +1065,7 @@ def _notify_doc_event(
             channels_override=channels,
         )
     except Exception as exc:  # noqa: BLE001
-        logger.warning("candidate.notify_doc_event_failed", event=event, error=str(exc))
+        logger.warning("candidate.notify_doc_event_failed", doc_event=event, error=str(exc))
 
 
 def _sweep_stale_reviews(hub) -> None:
