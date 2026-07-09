@@ -550,10 +550,18 @@ def _apply_effects(lead: Lead):
         raise LeadError("no_hub_for_promoter")
     enrollment_iface.create_from_lead(user=lead.user, promoter=lead.promoter, hub=hub)
     # F4: este lead pago conta como indicação — se o promotor é pré-matriculado e bateu 3, entra
-    # sozinho como bolsista (na mesma transação, SEM pagamento).
+    # sozinho como bolsista (SEM pagamento). G4/#21: em SAVEPOINT — a auto-matrícula do PROMOTOR é
+    # efeito secundário; se ela falha, reverte só a si mesma e o pagamento do CLIENTE (comissão +
+    # matrícula, já commitados acima nesta transação) sobrevive. A falha fica visível no log.
     from users.roles.promoter import service as promoter_iface
 
-    promoter_iface.maybe_auto_enroll_bolsista(lead.promoter)
+    try:
+        with transaction.atomic():
+            promoter_iface.maybe_auto_enroll_bolsista(lead.promoter)
+    except Exception:
+        logger.exception(
+            "lead.bolsista_auto_enroll_failed", promoter=str(lead.promoter.external_id)
+        )
     return hub
 
 

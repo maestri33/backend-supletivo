@@ -43,14 +43,15 @@ def handle_event(order_nsu, payload, *, source_ip=None, user_agent=None):
         checkout, result, reason = None, {"ok": True}, f"apply_failed: {exc}"
 
     if checkout is not None:
-        row.forwarded_ok = True
-        row.forwarded_at = timezone.now()
-        row.save(update_fields=["forwarded_ok", "forwarded_at"])
         # CHECKOUT PAGO -> dispara o hook do app destino (lead) §7.3.
+        # G4: reraise=True — efeito de negócio que falha propaga (view não-2xx → InfinitePay
+        # re-tenta), em vez de mascarar como sucesso. `_apply` já retorna o row em `duplicate`
+        # (checkout PAID), então o retry re-dispatcha. forwarded_ok só após o dispatch não levantar.
         consumed = False
         if checkout.status == Checkout.Status.PAID:
             consumed = core_hooks.dispatch(
                 "payment.paid",
+                reraise=True,
                 provider="infinitepay",
                 provider_payment_id=str(checkout.external_id),
                 amount_cents=checkout.paid_amount_cents,
@@ -59,6 +60,9 @@ def handle_event(order_nsu, payload, *, source_ip=None, user_agent=None):
                 if isinstance(payload, dict)
                 else None,
             )
+        row.forwarded_ok = True
+        row.forwarded_at = timezone.now()
+        row.save(update_fields=["forwarded_ok", "forwarded_at"])
         # ninguém consumiu -> fallback rastreável (§7.4), não perde o evento.
         if not consumed:
             log_unrouted_event(
@@ -140,7 +144,9 @@ def _apply(order_nsu, payload):
     # quando o check omite — senão grava NULL à toa (fallback restaurado; wave1 tinha zerado).
     row.installments = check.get("installments") or payload.get("installments")
     row.capture_method = check.get("capture_method") or payload.get("capture_method")
-    row.receipt_url = payload.get("receipt_url")  # cosmético (link do recibo), não decide dinheiro
+    row.receipt_url = payload.get(
+        "receipt_url"
+    )  # cosmético (link do recibo), não decide dinheiro
     row.save()
     logger.info(
         "checkout_paid",
