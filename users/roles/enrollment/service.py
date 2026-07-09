@@ -40,7 +40,9 @@ class EnrollmentError(DomainError):
 # ── 6a: nascimento (chamado pelo hook do lead) ──────────────────────────────
 
 
-def create_from_lead(*, user, promoter, hub, self_study=False, bolsista=False) -> Enrollment:
+def create_from_lead(
+    *, user, promoter, hub, self_study=False, bolsista=False
+) -> Enrollment:
     """Cria o Enrollment(RG — documento primeiro, plan/13) ligado ao HUB herdado + promove a role
     `lead→enrollment`. Idempotente.
 
@@ -1377,7 +1379,12 @@ def run_selfie_validation(enrollment_id: int) -> None:
         return  # re-upload no meio tempo — este veredito é de foto velha, descarta
     enr.selfie_status = status
     enr.selfie_verified = status == _selfie.APPROVED
-    update_fields = ["selfie_status", "selfie_verified", "selfie_description", "updated_at"]
+    update_fields = [
+        "selfie_status",
+        "selfie_verified",
+        "selfie_description",
+        "updated_at",
+    ]
     if status == _selfie.REJECTED:
         # F2: acumula os comentários da IA (não sobrescreve) e conta a reprovação — 5× sobe a flag.
         enr.selfie_reject_count += 1
@@ -1563,10 +1570,13 @@ def _save_selfie_audit(enr: Enrollment, status: str, desc: str | None) -> None:
 
 
 def _save_selfie(enr: Enrollment, image_bytes: bytes, content_type: str) -> str:
-    from core.media import save_media
+    from core.media import replace_media
 
     ext = _SELFIE_EXT.get(content_type, "jpg")
-    return save_media(prefix="selfie", data=image_bytes, ext=ext)
+    # G13: re-upload deleta a selfie anterior (PII não fica órfã no storage).
+    return replace_media(
+        old=enr.selfie_image, prefix="selfie", data=image_bytes, ext=ext
+    )
 
 
 def _notify_coordinator_awaiting(enr: Enrollment) -> None:

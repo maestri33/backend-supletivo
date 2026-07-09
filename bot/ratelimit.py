@@ -86,8 +86,13 @@ def budget_exceeded() -> bool:
         from integrations.ai.models import AiCall
 
         start_of_day = timezone.now().replace(hour=0, minute=0, second=0, microsecond=0)
+        # G17: só conta tentativas que DERAM CERTO. Cada AiCall é uma tentativa — a cadeia de
+        # fallback grava 1 por provider, incluindo os que FALHARAM (status=ERROR). Contá-las
+        # derrubava o bot em modo degradado com ~metade do orçamento real gasto.
         used = AiCall.objects.filter(
-            caller=AI_CALLER, created_at__gte=start_of_day
+            caller=AI_CALLER,
+            created_at__gte=start_of_day,
+            status=AiCall.Status.SUCCESS,
         ).count()
         if used >= cap:
             logger.warning("bot.budget.exceeded", used=used, cap=cap)

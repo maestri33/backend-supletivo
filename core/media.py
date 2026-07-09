@@ -38,6 +38,15 @@ def save_media(*, prefix: str, data: bytes, ext: str, token: str | None = None) 
     return path
 
 
+def replace_media(*, old: str | None, prefix: str, data: bytes, ext: str) -> str:
+    """G13: salva a nova mídia e DELETA a anterior — re-upload não pode deixar PII órfã no storage.
+    `old` é o path relativo antigo (ou None/'', no 1º upload). Devolve o path novo."""
+    path = save_media(prefix=prefix, data=data, ext=ext)
+    if old and old != path and default_storage.exists(old):
+        default_storage.delete(old)
+    return path
+
+
 def save_media_at(*, path: str, data: bytes) -> str:
     """Salva em um caminho relativo EXPLÍCITO (ex.: os arquivos de uma pasta de auditoria por token)."""
     if default_storage.exists(path):
