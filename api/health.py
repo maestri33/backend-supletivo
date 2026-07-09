@@ -1,4 +1,5 @@
 """Health check endpoints — público /healthz + rotas de staff health (adicionadas ao grupo staff)."""
+
 from __future__ import annotations
 
 import os
@@ -9,12 +10,14 @@ from django.conf import settings
 from django.db import connections
 from ninja import Router
 
-from api.auth import JWTAuth, require_roles
+from api.auth import JWTAuth, require_superuser
 from api.base import build_group
 
 # ── público: grupo health (auth=None) ──
 
-health_api = build_group("health", "Health check público — sem autenticação.", auth_override=None)
+health_api = build_group(
+    "health", "Health check público — sem autenticação.", auth_override=None
+)
 
 
 @health_api.get("/healthz")
@@ -52,20 +55,38 @@ staff_health_router = Router(tags=["staff-health"])
 def _ping(url: str, timeout: float = 5.0) -> dict:
     try:
         r = httpx.get(url, timeout=timeout)
-        return {"ok": r.status_code < 500, "status": r.status_code, "ms": round(r.elapsed.total_seconds() * 1000)}
+        return {
+            "ok": r.status_code < 500,
+            "status": r.status_code,
+            "ms": round(r.elapsed.total_seconds() * 1000),
+        }
     except Exception as e:
         return {"ok": False, "error": str(e)[:120]}
 
 
 @staff_health_router.get("/health", auth=JWTAuth())
 def staff_health(request):
-    require_roles(request.auth, "staff")
+    require_superuser(request.auth)
     return {
         "db": _ping_db(),
-        "asaas": _ping(settings.ASAAS_BASE_URL + "/status") if settings.ASAAS_BASE_URL else {"ok": None, "note": "não configurado"},
-        "infinitepay": _ping("https://api.checkout.infinitepay.io/") if settings.INFINITEPAY_HANDLE else {"ok": None, "note": "não configurado"},
-        "omniroute": _ping(getattr(settings, "IA_OMNIROUTE_BASE_URL", "") + "/v1/models") if getattr(settings, "IA_OMNIROUTE_BASE_URL", "") else {"ok": None, "note": "não configurado"},
-        "whatsapp": _ping(settings.WHATSAPP_API_BASE_URL + "/instance/connectionState/" + getattr(settings, "WHATSAPP_INSTANCE", "default")) if settings.WHATSAPP_API_BASE_URL else {"ok": None, "note": "não configurado"},
+        "asaas": _ping(settings.ASAAS_BASE_URL + "/status")
+        if settings.ASAAS_BASE_URL
+        else {"ok": None, "note": "não configurado"},
+        "infinitepay": _ping("https://api.checkout.infinitepay.io/")
+        if settings.INFINITEPAY_HANDLE
+        else {"ok": None, "note": "não configurado"},
+        "omniroute": _ping(
+            getattr(settings, "IA_OMNIROUTE_BASE_URL", "") + "/v1/models"
+        )
+        if getattr(settings, "IA_OMNIROUTE_BASE_URL", "")
+        else {"ok": None, "note": "não configurado"},
+        "whatsapp": _ping(
+            settings.WHATSAPP_API_BASE_URL
+            + "/instance/connectionState/"
+            + getattr(settings, "WHATSAPP_INSTANCE", "default")
+        )
+        if settings.WHATSAPP_API_BASE_URL
+        else {"ok": None, "note": "não configurado"},
         "migrations_pending": _pending_migrations(),
         "deploy": _deploy_info(),
     }
@@ -73,7 +94,7 @@ def staff_health(request):
 
 @staff_health_router.post("/health/run-tests", auth=JWTAuth())
 def run_tests(request):
-    require_roles(request.auth, "staff")
+    require_superuser(request.auth)
     token = os.environ.get("GH_PAT") or os.environ.get("GITHUB_TOKEN")
     if not token:
         return {"ok": False, "error": "GITHUB_TOKEN não configurado no .env"}
@@ -82,7 +103,10 @@ def run_tests(request):
         r = httpx.post(
             f"https://api.github.com/repos/{repo}/actions/workflows/ci.yml/dispatches",
             json={"ref": "main"},
-            headers={"Authorization": f"Bearer {token}", "Accept": "application/vnd.github+json"},
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Accept": "application/vnd.github+json",
+            },
             timeout=10,
         )
         return {"ok": r.status_code == 204, "status": r.status_code}

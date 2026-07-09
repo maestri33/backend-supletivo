@@ -30,11 +30,18 @@ logger = structlog.get_logger()
 # Modelos de raciocínio (MiniMax-M3 etc.) prefixam um bloco <think>...</think> no texto; o conteúdo
 # útil vem depois. Removemos o bloco antes de usar/parsear — robusto p/ qualquer modelo da cadeia.
 _THINK_RE = re.compile(r"<think>.*?</think>", re.DOTALL | re.IGNORECASE)
+# G18: <think> ABERTO sem fechamento — a resposta foi truncada por max_tokens no meio do raciocínio.
+# Sem isso, `_strip_think` não casava o par e o CoT cru vazava pro WhatsApp/aluno. Corta do <think>
+# em diante (não há conteúdo útil depois de um think que nem fechou).
+_THINK_OPEN_RE = re.compile(r"<think>.*\Z", re.DOTALL | re.IGNORECASE)
 
 
 def _strip_think(text: str) -> str:
-    """Remove blocos <think>...</think> (raciocínio) do texto e apara espaços nas pontas."""
-    return _THINK_RE.sub("", text or "").strip()
+    """Remove blocos <think>...</think> (raciocínio) do texto e apara espaços nas pontas. G18: um
+    <think> sem </think> (resposta truncada) também é removido — o raciocínio nunca vaza."""
+    out = _THINK_RE.sub("", text or "")
+    out = _THINK_OPEN_RE.sub("", out)
+    return out.strip()
 
 
 # ---------------------------------------------------------------------------
@@ -314,7 +321,8 @@ def grade(
         justification = str(raw_just).strip()
     except (json.JSONDecodeError, KeyError, TypeError, ValueError) as exc:
         raise LLMError(
-            f"resposta fora do contrato de correção (esperado JSON com nota/grade + justificativa/justification): {exc}", retryable=False
+            f"resposta fora do contrato de correção (esperado JSON com nota/grade + justificativa/justification): {exc}",
+            retryable=False,
         ) from exc
     if not justification:
         raise LLMError("IA devolveu nota sem justificativa", retryable=False)
