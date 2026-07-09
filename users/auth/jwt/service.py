@@ -25,15 +25,20 @@ __all__ = ["issue", "refresh", "decode", "TokenError", "version_matches"]
 
 
 def current_version(external_id: str) -> int:
-    """Versão de token atual do User (DB). Inexistente → 0."""
+    """Versão de token atual do User (DB). G2: usuário inexistente OU inativo → -1, que nunca bate
+    com uma versão de claims real (>=0). Assim desativar (`is_active=False`, o único ban) derruba
+    access E refresh de uma vez, sem precisar bumpar `token_version` no callsite — a divergência é
+    automática. Reativar restaura (revogar sessão comprometida é bump de versão, não ban)."""
     from users.auth.models import User
 
-    return (
+    row = (
         User.objects.filter(external_id=external_id)
-        .values_list("token_version", flat=True)
+        .values_list("is_active", "token_version")
         .first()
-        or 0
     )
+    if row is None or not row[0]:  # inexistente ou desativado
+        return -1
+    return row[1] or 0
 
 
 def version_matches(external_id: str, claims_version) -> bool:

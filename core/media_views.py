@@ -30,8 +30,15 @@ devolver uma URL assinada/com expiração por recurso.
 
 from __future__ import annotations
 
+import posixpath
+
 from django.conf import settings
-from django.http import HttpRequest, HttpResponse, JsonResponse
+from django.http import (
+    HttpRequest,
+    HttpResponse,
+    HttpResponseNotFound,
+    JsonResponse,
+)
 from django.views.static import serve as _static_serve
 
 from core.media import is_private_media
@@ -42,7 +49,7 @@ def _bearer_token(request: HttpRequest) -> str | None:
     header = request.META.get("HTTP_AUTHORIZATION", "")
     if not header.lower().startswith("bearer "):
         return None
-    token = header[len("bearer "):].strip()
+    token = header[len("bearer ") :].strip()
     return token or None
 
 
@@ -60,7 +67,15 @@ def _has_valid_access_token(request: HttpRequest) -> bool:
 
 
 def media_serve(request: HttpRequest, path: str) -> HttpResponse:
-    """Serve `MEDIA_ROOT/<path>`. Prefixo privado sem JWT válido → 401 (ver docstring do módulo)."""
-    if is_private_media(path) and not _has_valid_access_token(request):
+    """Serve `MEDIA_ROOT/<path>`. Prefixo privado sem JWT válido → 401 (ver docstring do módulo).
+
+    G1: normaliza o path ANTES de classificar/servir. Sem isso, `training/../documents/<tok>.jpg`
+    era classificado pelo 1º segmento (`training`, público) e servido sem token — apesar de o
+    arquivo final ser privado (`documents`). `normpath` resolve o `..`; se o resultado ainda escapa
+    do root (`../` sobrando), 404 (não deixa `_static_serve` levantar SuspiciousFileOperation=500)."""
+    norm = posixpath.normpath("/" + path).lstrip("/")
+    if not norm or norm.startswith("../"):
+        return HttpResponseNotFound()
+    if is_private_media(norm) and not _has_valid_access_token(request):
         return JsonResponse({"detail": "Não autenticado."}, status=401)
-    return _static_serve(request, path, document_root=settings.MEDIA_ROOT)
+    return _static_serve(request, norm, document_root=settings.MEDIA_ROOT)
