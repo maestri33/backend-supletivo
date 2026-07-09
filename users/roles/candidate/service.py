@@ -1751,6 +1751,8 @@ def list_awaiting_approval_for_hub(*, hub) -> list[dict]:
     # vazio — o coordenador nunca via os candidatos que precisavam da decisão dele.
     from django.db.models import Q
 
+    from users.roles._selfie import SelfieStatus
+
     qs = (
         Candidate.objects.filter(hub=hub)
         .filter(

@@ -57,7 +57,8 @@ def test_g10_reject_barra_quem_ainda_coleta():
 
 
 def test_g10_fila_inclui_selfie_review():
-    """list_awaiting_approval_for_hub deve incluir SELFIE-em-review (o inbox estava vazio)."""
+    """list_awaiting_approval_for_hub deve incluir SELFIE-em-review, e EXECUTAR sem NameError
+    (o source-check sozinho não pegava que faltava importar SelfieStatus no escopo)."""
     import inspect
 
     from users.roles.candidate import service as cs
@@ -66,3 +67,9 @@ def test_g10_fila_inclui_selfie_review():
     assert "SelfieStatus.REVIEW" in src, (
         "a fila não inclui os candidatos em selfie-review"
     )
+
+    # executa a função (constrói a query, itera vazio) — pega NameError de import faltando
+    with patch.object(cs.Candidate, "objects") as cobj:
+        chain = cobj.filter.return_value.filter.return_value
+        chain.select_related.return_value.order_by.return_value = []
+        assert cs.list_awaiting_approval_for_hub(hub=object()) == []
