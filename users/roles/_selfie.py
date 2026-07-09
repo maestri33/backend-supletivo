@@ -32,6 +32,18 @@ APPROVED = SelfieStatus.APPROVED
 REJECTED = SelfieStatus.REJECTED
 REVIEW = SelfieStatus.REVIEW
 
+# F2 (Victor 2026-07-08): reprovou a selfie N vezes → NÃO bloqueia; salva a foto como está, acumula
+# os comentários da IA e sobe `Profile.selfie_needs_meeting` (encontro presencial no fim do curso).
+MAX_REJECTS_BEFORE_MEETING = 5
+
+
+def append_reason(previous: str | None, attempt: int, desc: str | None) -> str:
+    """Acumula os motivos das reprovações da selfie (F2), um bloco por tentativa — a IA "comenta
+    todas que viu". Trunca defensivamente pra não estourar o TextField em loop de re-upload."""
+    block = f"[tentativa {attempt}] {desc or ''}".strip()
+    joined = f"{previous}\n\n{block}" if previous else block
+    return joined[-8000:]
+
 _PROMPT = (
     "Você é o verificador de selfie de um cadastro escolar. A imagem é uma selfie de uma PESSOA "
     "REAL, fotografada ao vivo agora? Só reprove se for CLARAMENTE foto de outra foto, de tela, de "

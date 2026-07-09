@@ -57,6 +57,25 @@ class Profile(models.Model):
         "nacionalidade", max_length=64, null=True, blank=True
     )
     birthplace = models.CharField("naturalidade", max_length=128, null=True, blank=True)
+    # escolaridade — nível-PESSOA (Victor 2026-07-08): capturada no fim do wizard do candidato,
+    # reusada pelo enrollment sem re-perguntar. Decide `Promoter.pre_matriculado` (sem médio completo).
+    # choices espelham EducationalData.Level (users/roles/enrollment/models.py); string crua p/ evitar
+    # import cruzado profiles↔roles.
+    education_level = models.CharField(
+        "escolaridade",
+        max_length=16,
+        choices=(("fundamental", "Ensino Fundamental"), ("medio", "Ensino Médio")),
+        null=True,
+        blank=True,
+    )
+    education_completed = models.BooleanField(
+        "concluiu o nível?", null=True, blank=True
+    )
+    # flag nível-PESSOA (Victor 2026-07-08): selfie reprovou 5× → não bloqueia, mas obriga encontro
+    # presencial no fim do curso (coordenador tira a foto e posta como assinatura → flag cai).
+    selfie_needs_meeting = models.BooleanField(
+        "selfie exige encontro presencial", default=False
+    )
     address = models.OneToOneField(
         "users.Address",
         on_delete=models.SET_NULL,

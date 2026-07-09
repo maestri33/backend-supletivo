@@ -44,7 +44,7 @@ def _strip_think(text: str) -> str:
 _GRADE_SCHEMA = (
     "Objeto JSON com exatamente dois campos: `nota` (numero inteiro de 0 a 10) e "
     "`justificativa` (string em portugues explicando a nota com base no que o trainee "
-    "escreveu vs o gabarito)."
+    "escreveu vs o gabarito). Aceito em ingles tambem: `grade` + `justification`."
 )
 _GRADE_INSTRUCTION = (
     "Voce e corretor de uma plataforma de treinamento. Compare a resposta do trainee com o "
@@ -302,11 +302,19 @@ def grade(
     )
     try:
         data = json.loads(_strip_think(result.content))
-        grade_value = max(0.0, min(10.0, float(data["nota"])))
-        justification = str(data["justificativa"]).strip()
+        # ponytail: aceita chaves PT e EN — modelo pode responder em qualquer idioma.
+        # NÃO usar `or` (0 é falsy → nota 0 cairia no fallback EN).
+        raw_grade = data.get("nota")
+        if raw_grade is None:
+            raw_grade = data.get("grade", 0)
+        grade_value = max(0.0, min(10.0, float(raw_grade)))
+        raw_just = data.get("justificativa")
+        if raw_just is None:
+            raw_just = data.get("justification", "")
+        justification = str(raw_just).strip()
     except (json.JSONDecodeError, KeyError, TypeError, ValueError) as exc:
         raise LLMError(
-            f"resposta fora do contrato de correção: {exc}", retryable=False
+            f"resposta fora do contrato de correção (esperado JSON com nota/grade + justificativa/justification): {exc}", retryable=False
         ) from exc
     if not justification:
         raise LLMError("IA devolveu nota sem justificativa", retryable=False)
@@ -360,6 +368,31 @@ def _media_call(*, operation: str, provider: str, model: str, caller: str, coro)
     return result
 
 
+def _media_chain(operation: str, caller: str, attempts):
+    """Tenta cada `(provider, model, coro)` em ordem; grava 1 AiCall POR TENTATIVA (via `_media_call`,
+    pelo provider REAL). Devolve o 1º sucesso; se todos caírem, propaga a última exceção. É o
+    equivalente-mídia do `_run` (que não serve aqui porque mídia não usa ChatResult/LLMError)."""
+    last_exc: Exception | None = None
+    for provider, model, coro in attempts:
+        try:
+            return _media_call(
+                operation=operation,
+                provider=provider,
+                model=model,
+                caller=caller,
+                coro=coro,
+            )
+        except Exception as exc:  # noqa: BLE001 — provider caiu → tenta o próximo da cadeia
+            last_exc = exc
+            logger.warning(
+                "ai.media_fallback_next",
+                op=operation,
+                provider=provider,
+                error=str(exc)[:160],
+            )
+    raise last_exc or RuntimeError(f"cadeia de mídia {operation} vazia")
+
+
 def describe_image(
     image_bytes: bytes,
     *,
@@ -369,49 +402,59 @@ def describe_image(
 ) -> str:
     """Visão: descreve/analisa uma imagem (selfie/documento/recibo). Devolve o texto.
 
-    Wave 4 — IA centralizada: OmniRoute (via /v1/chat/completions com model multimodal) é o primário;
-    em falha retryable cai pro MiniMax-M3 direto (sem gateway). Grava 1 AiCall por tentativa.
+    Wave 4 — IA centralizada: OmniRoute (gateway OpenAI-compatible, /v1/chat/completions com model
+    multimodal) é o primário QUANDO configurado; em falha cai pro MiniMax-M3 direto. Grava 1 AiCall
+    por tentativa, pelo provider REAL que serviu.
     """
-    from .client import LLMClient
-    from .fallback import try_gateway_or_direct
+    import base64
+
     from .minimax import MiniMaxClient
 
-    # primário: OmniRoute com modelo multimodal (multimodal aceita image_url inline)
-    gateway = LLMClient(
-        provider="omniroute",
-        base_url=settings.IA_PROVIDERS["omniroute"]["base_url"],
-        api_key=settings.IA_PROVIDERS["omniroute"]["api_key"],
-        temperature=settings.IA_DEFAULT_TEMPERATURE,
-        max_tokens=settings.IA_MAX_TOKENS,
-        timeout=settings.IA_TIMEOUT,
-    )
+    instruction = prompt or "Descreva esta imagem."
+    attempts: list[tuple[str, str, object]] = []
 
-    async def gateway_call():
-        return await gateway.describe_image(
-            image_bytes, mime_type=mime_type, prompt=prompt or "Descreva esta imagem."
+    # primário (só se OmniRoute estiver configurado + tiver modelo de visão): gateway via chat()
+    # multimodal — o LLMClient NÃO tem describe_image, a visão OpenAI-compatible vai como content
+    # blocks (text + image_url inline) no chat.
+    omni = settings.IA_PROVIDERS.get("omniroute")
+    vision_model = getattr(settings, "IA_OMNIROUTE_VISION_MODEL", "")
+    if omni and vision_model:
+        from .client import LLMClient
+
+        gateway = LLMClient(
+            provider="omniroute",
+            base_url=omni["base_url"],
+            api_key=omni["api_key"],
+            temperature=settings.IA_DEFAULT_TEMPERATURE,
+            max_tokens=settings.IA_MAX_TOKENS,
+            timeout=settings.IA_TIMEOUT,
         )
+        data_url = f"data:{mime_type};base64,{base64.b64encode(image_bytes).decode()}"
+        messages = [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": instruction},
+                    {"type": "image_url", "image_url": {"url": data_url}},
+                ],
+            }
+        ]
 
-    # fallback: MiniMax-M3 direto (sem gateway) — chave própria, sem depender do OmniRoute
+        async def gateway_call():
+            res = await gateway.chat(messages, model=vision_model)
+            return _strip_think(res.content)
+
+        attempts.append(("omniroute", vision_model, gateway_call))
+
+    # fallback (SEMPRE presente): MiniMax-M3 direto — chave própria, sem depender do OmniRoute.
     mm = MiniMaxClient(direct=True)
 
     async def direct_call():
         return await mm.describe(image_bytes, mime_type=mime_type, prompt=prompt)
 
-    async def chained():
-        return await try_gateway_or_direct(
-            gateway_call=gateway_call,
-            direct_call=direct_call,
-            caller=caller,
-            op="vision",
-        )
+    attempts.append(("minimax", settings.MINIMAX_VISION_MODEL, direct_call))
 
-    return _media_call(
-        operation=AiCall.Operation.VISION,
-        provider="omniroute",
-        model="auto/multimodal",
-        caller=caller,
-        coro=chained,
-    )
+    return _media_chain(AiCall.Operation.VISION, caller, attempts)
 
 
 def generate_image(prompt: str, *, caller: str) -> str:
@@ -472,15 +515,14 @@ def tts(
 ) -> str:
     """TTS: gera áudio a partir do texto. Salva em media/ai/audio/ e devolve o caminho.
 
-    Wave 4 — IA centralizada: OmniRoute /v1/audio/speech é o primário (ElevenLabs via gateway);
-    em falha cai pro MiniMax-M3 direto (com a chave própria). Sem 3º nível — se ambos caírem,
-    exceção propaga. Voz segue: gender → voz cross-gender (regra de marketing).
+    Wave 4 — IA centralizada: ElevenLabs (gateway mode: ELEVENLABS_BASE_URL → OmniRoute /v1/audio/
+    speech) é o primário; em falha cai pro MiniMax-M3 direto (chave própria). Grava 1 AiCall por
+    tentativa, pelo provider REAL que serviu. Voz segue: gender → voz cross-gender (regra de marketing).
     """
     from .elevenlabs import ElevenLabsClient
-    from .fallback import try_gateway_or_direct
     from .minimax import MiniMaxClient
 
-    gateway = ElevenLabsClient()  # já fala gateway mode (ELEVENLABS_BASE_URL → OmniRoute)
+    gateway = ElevenLabsClient()  # honra ELEVENLABS_GATEWAY_MODE (→ OmniRoute) via env
     el_voice = voice_id or _voice_for_gender(gender)
 
     async def gateway_call():
@@ -493,20 +535,13 @@ def tts(
     async def direct_call():
         return await mm.tts(text, voice_id=mm_voice)
 
-    async def chained():
-        return await try_gateway_or_direct(
-            gateway_call=gateway_call,
-            direct_call=direct_call,
-            caller=caller,
-            op="tts",
-        )
-
-    audio = _media_call(
-        operation=AiCall.Operation.TTS,
-        provider="omniroute",
-        model=settings.ELEVENLABS_MODEL_ID,
-        caller=caller,
-        coro=chained,
+    audio = _media_chain(
+        AiCall.Operation.TTS,
+        caller,
+        [
+            ("elevenlabs", settings.ELEVENLABS_MODEL_ID, gateway_call),
+            ("minimax", settings.MINIMAX_TTS_MODEL, direct_call),
+        ],
     )
     return _save_media("audio", "mp3", audio)
 

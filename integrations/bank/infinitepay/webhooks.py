@@ -136,8 +136,10 @@ def _apply(order_nsu, payload):
     row.transaction_nsu = transaction_nsu
     row.slug = slug
     row.paid_amount_cents = int(paid_raw) if paid_raw is not None else row.amount_cents
-    row.installments = check.get("installments")
-    row.capture_method = check.get("capture_method")
+    # Informativos (NÃO decidem dinheiro): prefere o payment_check verificado, mas cai pro payload
+    # quando o check omite — senão grava NULL à toa (fallback restaurado; wave1 tinha zerado).
+    row.installments = check.get("installments") or payload.get("installments")
+    row.capture_method = check.get("capture_method") or payload.get("capture_method")
     row.receipt_url = payload.get("receipt_url")  # cosmético (link do recibo), não decide dinheiro
     row.save()
     logger.info(

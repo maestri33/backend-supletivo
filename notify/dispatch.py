@@ -28,6 +28,7 @@ from notify import sanitize
 from notify.models import (
     STATUS_FAILED,
     STATUS_PENDING,
+    STATUS_SENDING,
     STATUS_SENT,
     STATUS_SKIPPED,
     Notification,

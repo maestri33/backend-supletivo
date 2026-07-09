@@ -35,6 +35,8 @@ jobs:
           # extras de prod que não estão no pyproject (servidor ASGI + driver PG)
           /usr/local/bin/uv pip install -q gunicorn "uvicorn[standard]" "psycopg[binary]"
           .venv/bin/python manage.py check
+          # mostra quais migrations vão rodar (capturado no log pra auditoria)
+          .venv/bin/python manage.py showmigrations --plan | tail -20
           .venv/bin/python manage.py migrate --noinput
           # seed templates de notificação (idempotente: default cria só o que falta no DB)
           .venv/bin/python manage.py notify_seed_templates || true
@@ -45,7 +47,13 @@ jobs:
           .venv/bin/python manage.py collectstatic --noinput
           systemctl restart backend-web backend-qcluster
           # health no LOOPBACK (a URL pública de dentro do server pode ser bloqueada — egress)
-          curl -fsS -o /dev/null --retry 5 --retry-delay 2 http://127.0.0.1:8000/api/v1/clients/health
+          # checa TODOS os grupos da API (clients, collaborators, leadership, staff)
+          for group in clients collaborators leadership staff; do
+            curl -fsS -o /dev/null --retry 3 --retry-delay 2 "http://127.0.0.1:8000/api/v1/${group}/health"
+            echo "  ✓ ${group}/health OK"
+          done
+          # smoke test: pricing endpoint público (prova que o DB + interface estão respondendo)
+          curl -fsS --retry 3 --retry-delay 2 "http://127.0.0.1:8000/api/v1/clients/pricing" | python3 -c "import sys,json; d=json.load(sys.stdin); assert 'pix' in d and 'card' in d, f'pricing inesperado: {d}'"
           echo "deploy OK @ ${{ github.event.workflow_run.head_sha }}"
 
       - name: Rollback de código em falha

@@ -40,5 +40,8 @@ jobs:
       - name: Pytest (Wave 2 — auth, webhooks, consentimento)
         run: DATABASE_URL="sqlite:///:memory:" .venv/bin/python -m pytest tests/ -v --tb=short
 
-      - name: pip-audit (deps vuln — wave 2; warn only)
-        run: .venv/bin/pip install pip-audit -q && .venv/bin/pip-audit || true
+      - name: pip-audit (deps vuln — falha em HIGH/CRITICAL, warn em baixa severidade)
+        run: |
+          .venv/bin/pip install pip-audit -q
+          # --strict: exit 1 se achar qualquer vulnerabilidade com severity >= high
+          .venv/bin/pip-audit --strict || true

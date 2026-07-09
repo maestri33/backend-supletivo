@@ -2,9 +2,14 @@
 
 CONTEXTO ARQUITETURAL (honestidade, Victor revisar): o plano pedia `aidefence` via MCP do ruflo.
 As ferramentas MCP rodam no runtime do AGENTE (sessão de IA), NÃO no processo Django de produção —
-o backend não pode depender de uma chamada MCP que só existe na sessão. Então o guardrail é um
-DETECTOR LOCAL heurístico (sempre ligado) — injeção + PII por regex/padrões pt-br/en. É o PISO de
-segurança que nunca depende de rede externa.
+o backend não pode depender de uma chamada MCP que só existe na sessão. Então o guardrail é:
+
+  1. um DETECTOR LOCAL heurístico (sempre ligado) — injeção + PII por regex/padrões pt-br/en. É o
+     PISO de segurança que nunca depende de rede externa.
+  2. um GANCHO EXTERNO opcional (`settings.BOT_GUARDRAIL_URL`) — se o Victor subir um serviço HTTP
+     de aidefence real, plugamos aqui. Contrato FAIL-CLOSED: serviço configurado mas inalcançável
+     ou resposta inválida => BLOQUEIA (não passa cru). Sem serviço configurado => decide o detector
+     local.
 
 `scan_inbound` roda ANTES de qualquer chamada de IA (defesa contra injeção). `has_pii` roda na
 SAÍDA antes de mandar pro usuário (não vaza dado sensível que o LLM possa ter regurgitado).
@@ -15,7 +20,9 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
+import httpx
 import structlog
+from django.conf import settings
 
 logger = structlog.get_logger()
 
@@ -67,15 +74,58 @@ _PII_PATTERNS = {
 _PII_RE = {name: re.compile(pat, re.IGNORECASE) for name, pat in _PII_PATTERNS.items()}
 
 
-def scan_inbound(text: str) -> ScanResult:
-    """Escaneia a ENTRADA do usuário por injeção de prompt (detector local). FAIL-CLOSED.
+def _external_scan(text: str, *, mode: str) -> ScanResult | None:
+    """Chama o serviço externo de guardrail (se configurado). FAIL-CLOSED.
 
-    Entrada vazia é tratada como insegura (não há o que processar; força escalonamento em vez de
-    chamar a IA com nada).
+    Retorna:
+      - ScanResult(safe=...) com a decisão do serviço, OU
+      - ScanResult(safe=False, ...) se o serviço está configurado mas falhou (fail-closed), OU
+      - None se NÃO há serviço configurado (cabe ao detector local decidir).
+
+    Contrato esperado do serviço: POST {text, mode} -> {"safe": bool, "reason": str}.
+    """
+    url = getattr(settings, "BOT_GUARDRAIL_URL", "")
+    if not url:
+        return None
+    try:
+        resp = httpx.post(
+            url,
+            json={"text": text, "mode": mode},
+            timeout=getattr(settings, "BOT_GUARDRAIL_TIMEOUT", 5.0),
+        )
+        if resp.status_code >= 400:
+            logger.warning(
+                "bot.guardrail.external_http_error", status=resp.status_code, mode=mode
+            )
+            return ScanResult(False, f"guardrail_http_{resp.status_code}")
+        data = resp.json()
+        if not isinstance(data, dict) or "safe" not in data:
+            logger.warning("bot.guardrail.external_bad_contract", mode=mode)
+            return ScanResult(False, "guardrail_bad_contract")
+        return ScanResult(bool(data["safe"]), str(data.get("reason", "")))
+    except Exception as exc:  # noqa: BLE001 — serviço configurado mas caiu => fail-closed
+        logger.warning("bot.guardrail.external_failed", mode=mode, error=str(exc)[:160])
+        return ScanResult(False, "guardrail_unreachable")
+
+
+def scan_inbound(text: str) -> ScanResult:
+    """Escaneia a ENTRADA do usuário por injeção de prompt. FAIL-CLOSED.
+
+    Ordem: serviço externo (se houver) tem a palavra final; senão o detector local. Entrada vazia
+    é tratada como insegura (não há o que processar; força escalonamento em vez de chamar a IA com
+    nada).
     """
     text = (text or "").strip()
     if not text:
         return ScanResult(False, "empty_input")
+
+    external = _external_scan(text, mode="inbound")
+    if external is not None:
+        if not external.safe:
+            logger.info(
+                "bot.guardrail.blocked", layer="external", reason=external.reason
+            )
+        return external
 
     if _INJECTION_RE.search(text):
         logger.info("bot.guardrail.blocked", layer="local", reason="prompt_injection")
@@ -86,11 +136,19 @@ def scan_inbound(text: str) -> ScanResult:
 def has_pii(text: str) -> bool:
     """True se a SAÍDA contém PII que o bot NUNCA deve emitir (CPF/CNPJ/cartão/e-mail/segredo).
 
-    Roda no texto que o bot vai mandar, via detector local por regex.
+    Roda no texto que o bot vai mandar. Se houver serviço externo, ele decide (fail-closed: caiu =>
+    trata como TENDO pii, pra não vazar). Senão, o detector local por regex.
     """
     text = (text or "").strip()
     if not text:
         return False
+
+    url = getattr(settings, "BOT_GUARDRAIL_URL", "")
+    if url:
+        # mode=outbound: o serviço externo devolve safe=False quando há PII a vazar.
+        external = _external_scan(text, mode="outbound")
+        if external is not None:
+            return not external.safe
 
     for name, rx in _PII_RE.items():
         if rx.search(text):

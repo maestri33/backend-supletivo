@@ -55,6 +55,9 @@ class Enrollment(ExternalIdModel):
     )
     # auto-matrícula de promotor (herdado do lead): NÃO gera comissão (nem a veteran na formatura).
     self_study = models.BooleanField(default=False)
+    # bolsista (Victor 2026-07-08): promotor pré-matriculado que atingiu 3 leads pagos. Carrega até o
+    # Student — o teste final exige ≥10 leads pagos (soma com docs+sangue).
+    bolsista = models.BooleanField(default=False)
     status = models.CharField(
         max_length=20,
         choices=Status.choices,
@@ -79,6 +82,8 @@ class Enrollment(ExternalIdModel):
     selfie_description = models.TextField(
         null=True, blank=True
     )  # justificativa da IA/coordenador
+    # contador de reprovações da selfie (F2): 5× → sobe `Profile.selfie_needs_meeting` (não bloqueia).
+    selfie_reject_count = models.PositiveSmallIntegerField(default=0)
     # consentimento LGPD (lane #6): a selfie É a assinatura — gravamos o aceite no ato dela.
     # Registra QUAL versão/hash do contrato (users/consent) foi aceita + IP/UA/timestamp (prova).
     consent_accepted = models.BooleanField(default=False)

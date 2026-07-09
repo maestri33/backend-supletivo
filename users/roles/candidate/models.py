@@ -23,6 +23,7 @@ class Candidate(ExternalIdModel):
         ADDRESS = "address", "endereço"
         DOCUMENTS = "documents", "documentos"
         PIX = "pix", "chave pix"
+        EDUCATION = "education", "escolaridade"
         SELFIE = "selfie", "selfie"
         COMPLETED = "completed", "concluído (aguardando aprovação do coordenador)"
         APPROVED = "approved", "aprovado (virou promotor)"
@@ -83,6 +84,8 @@ class Candidate(ExternalIdModel):
     selfie_description = models.TextField(
         null=True, blank=True
     )  # justificativa da IA/coordenador
+    # contador de reprovações da selfie (F2): 5× → sobe `Profile.selfie_needs_meeting` (não bloqueia).
+    selfie_reject_count = models.PositiveSmallIntegerField(default=0)
     # consentimento LGPD (lane #6): a selfie É a assinatura — gravamos o aceite no ato dela.
     # Registra QUAL versão/hash do contrato (users/consent) foi aceita + IP/UA/timestamp (prova).
     consent_accepted = models.BooleanField(default=False)

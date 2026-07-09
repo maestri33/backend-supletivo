@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import os
-import subprocess
 import time
 
 import httpx
@@ -29,15 +28,7 @@ def healthz(request):
     except Exception:
         pass
 
-    pending = 0
-    try:
-        r = subprocess.run(
-            [".venv/bin/python", "manage.py", "showmigrations", "--plan"],
-            capture_output=True, text=True, timeout=10, cwd=settings.BASE_DIR,
-        )
-        pending = r.stdout.count("[ ]")
-    except Exception:
-        pending = -1
+    pending = _pending_migrations()
 
     sha = None
     build_file = settings.BASE_DIR / "build.txt"
@@ -110,12 +101,14 @@ def _ping_db() -> dict:
 
 
 def _pending_migrations() -> int:
+    """Nº de migrations não aplicadas, IN-PROCESS via MigrationExecutor (sem subprocess/fork — o
+    fork rodava o boot inteiro do Django a cada GET público de /healthz → vetor de DoS). -1 em erro."""
     try:
-        r = subprocess.run(
-            [".venv/bin/python", "manage.py", "showmigrations", "--plan"],
-            capture_output=True, text=True, timeout=10, cwd=settings.BASE_DIR,
-        )
-        return r.stdout.count("[ ]")
+        from django.db.migrations.executor import MigrationExecutor
+
+        executor = MigrationExecutor(connections["default"])
+        targets = executor.loader.graph.leaf_nodes()
+        return len(executor.migration_plan(targets))
     except Exception:
         return -1
 

@@ -171,6 +171,13 @@ def get_cnh(external_id: str) -> CNH | None:
     return CNH.objects.filter(document__user__external_id=external_id).first()
 
 
+def get_address_proof(external_id: str) -> AddressProof | None:
+    """A instância AddressProof do usuário (pro orquestrador da validação IA do comprovante, F1)."""
+    return AddressProof.objects.filter(
+        document__user__external_id=external_id
+    ).first()
+
+
 def get_doc_sub(external_id: str, doc_type: str):
     """Devolve a instância do sub-doc pelo tipo (`rg` ou `cnh`). Helper do orquestrador de IA
     do funil (plan/15 B3) — espelha `get_rg` mas sem acoplar num tipo só."""

@@ -30,3 +30,9 @@ def validate_selfie(enrollment_id: int) -> None:
     """Valida a selfie/assinatura (liveness → face-match vs documento → instruções se reprovar)."""
     service.run_selfie_validation(enrollment_id)
     logger.info("enrollment.task_selfie_validated", enrollment_id=enrollment_id)
+
+
+def validate_address_proof(enrollment_id: int) -> None:
+    """Valida o comprovante de endereço (visão → endereço bate? → titular bate?) — F1."""
+    service.run_address_proof_validation(enrollment_id)
+    logger.info("enrollment.task_address_proof_validated", enrollment_id=enrollment_id)
