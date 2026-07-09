@@ -131,6 +131,13 @@ def _apply_charge(payload, event):
     if new_status is None:  # PAYMENT_UPDATED -> só refresh, sem mudar status
         row.save()
         return None, "payment_updated_noop"
+    # G5: não rebaixa estado terminal por evento tardio/fora de ordem. REFUNDED é final; PAID só
+    # aceita ir pra PAID/REFUNDED. Pagamento tardio legítimo (PENDING/EXPIRED -> PAID) continua. Sem
+    # isso, um PAYMENT_OVERDUE reentregue sobre um PAID gravava EXPIRED e travava o reembolso depois.
+    if row.status == "REFUNDED" or (
+        row.status == "PAID" and new_status not in ("PAID", "REFUNDED")
+    ):
+        return None, f"terminal_{row.status}_ignora_{new_status}"
     if row.status == new_status:
         return None, "status_unchanged"
     row.status = new_status

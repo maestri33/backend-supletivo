@@ -525,12 +525,26 @@ def _apply_effects(lead: Lead):
         )
         return hub
 
-    commissions.credit_commission(
-        payee=lead.promoter,
-        payee_role=Commission.Role.PROMOTER,
-        source_type=Commission.Source.LEAD,
-        source_external_id=lead.external_id,
-    )
+    # G7: promotor SUSPENSO não recebe comissão de lead que paga após a suspensão (Promoter.suspend
+    # documenta "não capta nem recebe"). O cliente ainda vira matrícula — só a comissão é pulada.
+    from users.roles.promoter.models import Promoter
+
+    suspenso = Promoter.objects.filter(
+        user=lead.promoter, status=Promoter.Status.SUSPENDED
+    ).exists()
+    if suspenso:
+        logger.info(
+            "lead.commission_skipped_promoter_suspended",
+            promoter=str(lead.promoter.external_id),
+            lead=str(lead.external_id),
+        )
+    else:
+        commissions.credit_commission(
+            payee=lead.promoter,
+            payee_role=Commission.Role.PROMOTER,
+            source_type=Commission.Source.LEAD,
+            source_external_id=lead.external_id,
+        )
     hub = hub_iface.hub_of(lead.promoter)
     if hub is None:
         raise LeadError("no_hub_for_promoter")

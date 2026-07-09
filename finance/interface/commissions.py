@@ -128,12 +128,17 @@ def run_weekly_closing(*, reference_date=None) -> dict:
     now = reference_date or timezone.now()
     if timezone.is_naive(now):
         now = timezone.make_aware(now, SP_TZ)
-    week_start, week_end, monday, friday = _week_bounds(now)
+    _week_start, week_end, monday, friday = _week_bounds(now)
 
+    # G6: SEM lower-bound. Antes filtrava `created_at >= week_start`, então uma comissão criada
+    # depois do fechamento de sexta (ex.: fim de semana) caía numa janela cujo run já passou; na
+    # semana seguinte o week_start avançava e o created_at ficava abaixo dele → PENDING eterna, bônus
+    # subcontado. Pegando toda PENDING com `created_at < week_end`, qualquer atrasada entra no
+    # próximo run. Idempotência preservada: quem já foi pago virou PROCESSED (não é mais PENDING) e o
+    # skip por external_reference evita duplicar o PaymentRequest do beneficiário na semana.
     pending = list(
         Commission.objects.filter(
             status=Commission.Status.PENDING,
-            created_at__gte=week_start,
             created_at__lt=week_end,
         ).select_related("payee")
     )
