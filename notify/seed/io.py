@@ -152,33 +152,3 @@ def _spec_from_header(event: str, header: dict[str, str], body: str) -> Template
         delay_minutes=_int("delay_minutes", 0),
         active=_bool("active", True),
     )
-
-
-def serialize(specs: list[TemplateSpec]) -> str:
-    """Lista de TemplateSpec → texto .md (estável: ordem preservada, campos na ordem canônica)."""
-    out: list[str] = [
-        "# Catálogo-base das notificações (seed do DB). Editável pelo Victor.",
-        "# Formato: [event:<slug>] + cabeçalho 'chave: valor' + body Markdown cercado por '~~~'.",
-        "# Placeholders: {nome} (1º nome), {nome-completo} (nome todo), {valor}, {link}, ...",
-        "",
-    ]
-    for s in specs:
-        out.append(f"[event:{s.event}]")
-        out.append(f"is_tts: {'true' if s.is_tts else 'false'}")
-        out.append(f"storytelling: {'true' if s.storytelling else 'false'}")
-        out.append(f"channels: {s.channels}")
-        out.append(f"title: {s.title or ''}")
-        out.append(f"subject: {s.subject or ''}")
-        out.append(f"media_url: {s.media_url or ''}")
-        out.append(f"media_type: {s.media_type or ''}")
-        out.append(f"mail_template: {s.mail_template or 'default'}")
-        out.append(f"story_prompt: {s.story_prompt or ''}")
-        out.append(f"fires_on: {s.fires_on or ''}")
-        out.append(f"source: {s.source or ''}")
-        out.append(f"delay_minutes: {s.delay_minutes}")
-        out.append(f"active: {'true' if s.active else 'false'}")
-        out.append(_FENCE)
-        out.append(s.body_md.strip("\n"))
-        out.append(_FENCE)
-        out.append("")
-    return "\n".join(out) + "\n"

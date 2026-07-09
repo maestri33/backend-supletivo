@@ -17,13 +17,13 @@ from api.auth import require_roles
 from api.base import add_auth_refresh, add_funnel_login, build_group, resolve_rg_slot
 from api.schemas import CheckIn, CheckOut, TokenOut
 from core.net import source_ip
-from users.auth import interface as auth_iface
+from users.auth import service as auth_iface
 from users.consent import STUDENT_CONTRACT
 from users.exceptions import NotFound
 from users.roles import interface as roles
-from users.roles.enrollment import interface as enrollment_iface
-from users.roles.lead import interface as lead_iface
-from users.roles.student import interface as student_iface
+from users.roles.enrollment import service as enrollment_iface
+from users.roles.lead import service as lead_iface
+from users.roles.student import service as student_iface
 
 # Registry de `code` de erro (proposta API #5): TODO 4xx sai `{detail, code, …extra}` — o front
 # roteia por `switch(code)`, nunca parseando `detail`. Vai na descrição do grupo → OpenAPI.
@@ -160,6 +160,17 @@ class AddressOut(Schema):
         description='O que ainda falta preencher (plan/13): ["number"] = ViaCEP achou tudo, '
         "só falta o número; rua/bairro na lista = cidade de CEP único (digitar no PATCH)",
     )
+
+
+class AddressProofSectionOut(Schema):
+    """Bloco do comprovante de endereço no /me (F1): status da validação IA + parentesco."""
+
+    exists: bool = False
+    photo: str | None = None
+    status: str | None = None  # pending|approved|rejected|review|needs_kinship
+    reason: str | None = None
+    needs_kinship: bool = False
+    kinship_relation: str | None = None
 
 
 class StudentPlatformOut(Schema):
@@ -323,6 +334,10 @@ class AddressDataIn(Schema):
     state: str | None = None
 
 
+class KinshipIn(Schema):
+    relation: str  # quem é o titular do comprovante + grau de parentesco
+
+
 class EducationIn(Schema):
     level: str  # 'fundamental' | 'medio'
     grade: int  # 1–9 (fundamental) / 1–3 (médio) — validado no service por nível
@@ -369,7 +384,9 @@ class EnrollmentOut(Schema):
 
 
 class RgSectionOut(Schema):
-    """Seção DOCUMENTO completa (GET/PATCH /enrollment/documents/rg) — plan/13."""
+    """Seção DOCUMENTO completa (GET/PATCH /enrollment/documents/rg) — plan/13.
+    `next_slot` = qual slot o front deve pedir AGORA (None = completo ou aguardando análise).
+    `photos` = status por slot individual ({slot: {status, reason}})."""
 
     # editáveis no PATCH (completa/corrige o que a extração não trouxe)
     number: str | None = None
@@ -399,6 +416,8 @@ class RgSectionOut(Schema):
     )
     validation_reason: str | None = None  # [DEPRECATED — use analysis_reason]
     missing_fields: list[str] = []  # o aluno completa SÓ esses (no PATCH)
+    next_slot: str | None = None  # qual slot enviar AGORA (rg_front/rg_back/null)
+    photos: dict = {}  # status por slot individual: {slot: {status, reason}}
 
 
 class RgPatchIn(Schema):
@@ -483,6 +502,7 @@ class EnrollmentMeOut(EnrollmentOut):
         description="[DEPRECATED — use address.missing_fields]"
     )
     address: AddressOut | None = None
+    address_proof: AddressProofSectionOut | None = None
     rg: RgOut | None = None
     education: EducationOut | None = None
     selfie: SelfieOut | None = None
@@ -584,6 +604,26 @@ def enrollment_address_patch(request, payload: AddressDataIn):
     ext = _enr_guard(request)
     return enrollment_iface.set_address_data(
         user_external_id=ext, **payload.dict(exclude_none=True)
+    )
+
+
+@api.post("/enrollment/address/proof", response=EnrollmentMeOut, tags=["enrollment"])
+def enrollment_address_proof(request, file: UploadedFile = File(...)):
+    """Comprovante de residência (JPEG/PNG/WEBP/PDF) — OBRIGATÓRIO, validado por IA (endereço +
+    titular, F1). Assíncrono: acompanhe `address_proof.status` no `me` até `approved`/`rejected`/
+    `review`/`needs_kinship`. `needs_kinship` → POST /enrollment/address/proof/kinship."""
+    ext = _enr_guard(request)
+    return enrollment_iface.upload_address_proof(user_external_id=ext, upload=file)
+
+
+@api.post(
+    "/enrollment/address/proof/kinship", response=EnrollmentMeOut, tags=["enrollment"]
+)
+def enrollment_address_proof_kinship(request, payload: KinshipIn):
+    """Titular do comprovante é outra pessoa: informe quem é e o grau de parentesco → libera e avança."""
+    ext = _enr_guard(request)
+    return enrollment_iface.submit_address_proof_kinship(
+        user_external_id=ext, relation=payload.relation
     )
 
 
@@ -708,8 +748,22 @@ def _veteran_guard(request) -> str:
 def veteran_me(request):
     """Visão consolidada do VETERANO: TODOS os dados dele — pessoais, matrícula (perfil/endereço/
     escolaridade/RG/selfie), os documentos que ELE postou e o que o COORDENADOR postou (diploma +
-    histórico + foto da retirada). Read-only. Paths de mídia relativos; o front prefixa /media/."""
-    return student_iface.veteran_detail(user_external_id=_veteran_guard(request))
+    histórico + foto da retirada). Read-only. Paths de mídia relativos; o front prefixa /media/.
+
+    A composição student × enrollment mora aqui (e não no `student.service`) porque `enrollment`
+    já importa `student` no `conclude` — cruzar de volta lá dentro fecharia ciclo de import."""
+    external_id = _veteran_guard(request)
+    data = student_iface.veteran_detail(user_external_id=external_id)
+
+    # bloco da MATRÍCULA — o enrollment persiste após o aluno virar student (nada o deleta).
+    enr = enrollment_iface.get_for_user_external_id(external_id)
+    me = enrollment_iface.me_dict(enr) if enr is not None else None
+    data["enrollment"] = (
+        None
+        if me is None
+        else {k: me.get(k) for k in ("profile", "address", "education", "rg", "selfie")}
+    )
+    return data
 
 
 @api.post("/student/blood-type", response=StudentMeOut, tags=["student"])

@@ -14,24 +14,76 @@ from django.conf import settings
 
 from users.exceptions import Forbidden, NotFound
 from users.roles.promoter.models import Promoter
+from users.roles.promoter.rules import BOLSA_ENROLL_THRESHOLD, paid_referrals
 
 logger = structlog.get_logger()
 
 
 def create_promoter(*, user, hub) -> Promoter:
-    """Cria o Promoter(ACTIVE) ligado ao hub herdado do candidato. Idempotente."""
+    """Cria o Promoter(ACTIVE) ligado ao hub herdado do candidato. Idempotente.
+
+    `pre_matriculado` (F4): promotor SEM ensino médio completo (lê `Profile.education_*`, F3) nasce
+    com a flag — abordagem diferenciada; aos 3 leads pagos vira bolsista sozinho (`_maybe_auto_enroll`)."""
+    from users.profiles import interface as profiles
+
     existing = Promoter.objects.filter(user=user).first()
     if existing is not None:
         return existing
+    pre_matriculado = not profiles.has_medio_completo(user)
     promoter = Promoter.objects.create(
-        user=user, hub=hub, status=Promoter.Status.ACTIVE
+        user=user,
+        hub=hub,
+        status=Promoter.Status.ACTIVE,
+        pre_matriculado=pre_matriculado,
     )
     logger.info(
         "promoter.created",
         external_id=str(promoter.external_id),
         hub=str(hub.external_id),
+        pre_matriculado=pre_matriculado,
     )
     return promoter
+
+
+def maybe_auto_enroll_bolsista(promoter_user) -> bool:
+    """F4: promotor `pre_matriculado` que atingiu 3 leads pagos → auto-enroll como BOLSISTA, SEM
+    pagamento (não cria Lead/Checkout). Chamado DENTRO da transação de `lead.mark_paid._apply_effects`,
+    logo após creditar a comissão. Devolve True se converteu.
+
+    Guard de corrida: o `.update(...)` condicional baixa a flag ATOMICAMENTE — se dois pagamentos do
+    mesmo promotor caem juntos, só um toca a linha (1 row) e converte; o outro vê 0 e sai. Se ainda
+    não bateu 3, restaura a flag e sai.
+    """
+    from users.roles import interface as roles
+    from users.roles.enrollment import service as enrollment_iface
+    from hub import interface as hub_iface
+
+    flipped = Promoter.objects.filter(user=promoter_user, pre_matriculado=True).update(
+        pre_matriculado=False
+    )
+    if not flipped:
+        return False  # não era pré-matriculado (ou outra transação já pegou) → nada a fazer
+    if paid_referrals(promoter_user) < BOLSA_ENROLL_THRESHOLD:
+        # ainda não chegou aos 3 → desfaz o flip e espera o próximo lead pago
+        Promoter.objects.filter(user=promoter_user).update(pre_matriculado=True)
+        return False
+    hub = hub_iface.hub_of(promoter_user)
+    if hub is None:
+        Promoter.objects.filter(user=promoter_user).update(pre_matriculado=True)
+        return False
+    if "lead" not in roles.active_roles(promoter_user):
+        roles.assign(promoter_user, "lead")
+    enrollment_iface.create_from_lead(
+        user=promoter_user,
+        promoter=promoter_user,
+        hub=hub,
+        self_study=True,
+        bolsista=True,
+    )
+    logger.info(
+        "promoter.auto_enrolled_bolsista", external_id=str(promoter_user.external_id)
+    )
+    return True
 
 
 def get_for_user(user) -> Promoter | None:
@@ -66,7 +118,7 @@ def validate_ref(ref: str):
     if promoter is None:
         return None
     # promotor TRAVADO no treino obrigatório ainda NÃO capta (Victor 2026-06-16) — cai no padrão.
-    from users.roles.training import interface as training_iface
+    from users.roles.training import service as training_iface
 
     if training_iface.is_locked(promoter.user):
         return None
@@ -83,7 +135,7 @@ def ref_url(user) -> str:
 def to_dict(promoter: Promoter) -> dict:
     """Painel do promotor. `locked` + `pending_materials` = a trava do treino (lida do banco, não do
     JWT): se travado, o front mostra só o treino. Liberado → painel cheio + captação ativa."""
-    from users.roles.training import interface as training_iface
+    from users.roles.training import service as training_iface
 
     return {
         "external_id": str(promoter.external_id),
@@ -226,7 +278,7 @@ def reactivate(*, user_external_id: str, coordinator) -> Promoter:
 def list_for_hub(hub) -> list[dict]:
     """Promotores do polo (pro painel do coordenador): status + se estão travados no treino."""
     from users.profiles import interface as profiles
-    from users.roles.training import interface as training_iface
+    from users.roles.training import service as training_iface
 
     promoters = list(
         Promoter.objects.filter(hub=hub).select_related("user").order_by("created_at")

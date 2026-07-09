@@ -22,13 +22,13 @@ from finance.interface import manual as finance_manual
 from hub import interface as hub_iface
 from integrations import status as integ_status
 from integrations.bank.asaas import onboarding as asaas_onboarding
-from users.auth import interface as auth_iface
+from users.auth import service as auth_iface
 from users.profiles import interface as profiles
 from users.roles import interface as roles
-from users.roles.enrollment import interface as enrollment_iface
-from users.roles.lead import interface as lead_iface
-from users.roles.student import interface as student_iface
-from users.roles.training import interface as training_iface
+from users.roles.enrollment import service as enrollment_iface
+from users.roles.lead import service as lead_iface
+from users.roles.student import service as student_iface
+from users.roles.training import service as training_iface
 
 api = build_group(
     "staff", "Administração da plataforma: hub, coordenador, saúde dos serviços."

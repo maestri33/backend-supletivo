@@ -17,7 +17,7 @@ from django.conf import settings
 from django.db import transaction
 
 from users.address import interface as address_iface
-from users.documents import interface as documents_iface
+from users.documents import service as documents_iface
 from users.exceptions import Conflict, DomainError, NotFound
 from users.profiles import interface as profiles
 from users.roles import interface as roles
@@ -40,12 +40,13 @@ class EnrollmentError(DomainError):
 # ── 6a: nascimento (chamado pelo hook do lead) ──────────────────────────────
 
 
-def create_from_lead(*, user, promoter, hub, self_study=False) -> Enrollment:
+def create_from_lead(*, user, promoter, hub, self_study=False, bolsista=False) -> Enrollment:
     """Cria o Enrollment(RG — documento primeiro, plan/13) ligado ao HUB herdado + promove a role
     `lead→enrollment`. Idempotente.
 
     Chamado DENTRO da transação do hook de pagamento (lead pago). Se o enrollment já existe (webhook
-    re-tentou), devolve o existente sem duplicar nem re-promover.
+    re-tentou), devolve o existente sem duplicar nem re-promover. `bolsista` (F4): promotor
+    pré-matriculado que bateu 3 leads pagos — auto-enroll SEM pagamento (não há Lead/Checkout).
     """
     existing = Enrollment.objects.filter(user=user).first()
     if existing is not None:
@@ -56,6 +57,7 @@ def create_from_lead(*, user, promoter, hub, self_study=False) -> Enrollment:
         promoter=promoter,
         hub=hub,
         self_study=self_study,
+        bolsista=bolsista,
         status=Enrollment.Status.RG,
     )
     if "enrollment" not in roles.active_roles(user):
@@ -168,6 +170,8 @@ def to_dict(enr: Enrollment) -> dict:
 def me_dict(enr: Enrollment) -> dict:
     """GET /me RICO (auditoria do front 2026-06-10): o resume do wizard pré-preenche TODAS as seções
     numa chamada só. Bloco `None` = seção ainda não preenchida; `address_complete` = endereço pronto."""
+    from users.roles import _address_proof
+
     _reconcile_stale_analyses(
         enr
     )  # TTL guard (proposta #2): pending estourado → review, aqui também
@@ -242,6 +246,7 @@ def me_dict(enr: Enrollment) -> dict:
         # blocos COMPLETOS de address e selfie (proposta #3): o /me vira a resposta canônica única —
         # toda mutação devolve este shape e o front nunca re-fetcha pra rotear.
         "address": _address_dict(user_ext),
+        "address_proof": _address_proof.section_dict(user_ext),
         "selfie": _selfie_dict(enr),
         "rg": rg,
         "education": education,
@@ -333,11 +338,57 @@ def set_address_data(*, user_external_id: str, **fields) -> dict:
 
 
 def _advance_address(enr: Enrollment, user_external_id: str) -> None:
-    """Endereço completo → EDUCATION (ordem plan/13), com chain-skip."""
-    if enr.status == _S.ADDRESS and address_iface.is_complete(
-        address_iface.get_by_external_id(user_external_id)
+    """Endereço completo E comprovante aprovado por IA (F1) → EDUCATION (ordem plan/13), com chain-skip."""
+    from users.roles import _address_proof
+
+    if (
+        enr.status == _S.ADDRESS
+        and address_iface.is_complete(
+            address_iface.get_by_external_id(user_external_id)
+        )
+        and _address_proof.is_approved(user_external_id)
     ):
         _advance_to(enr, _S.EDUCATION)
+
+
+def upload_address_proof(*, user_external_id: str, upload) -> dict:
+    """Comprovante de residência (foto/PDF) — OBRIGATÓRIO + validado por IA (F1). Salva, marca
+    `pending` e enfileira a validação (endereço + titular). Aceito na etapa `address`."""
+    from users.documents import service as documents_iface
+
+    enr = _require(user_external_id, _S.ADDRESS)
+    documents_iface.upload_photo(user_external_id, "address_proof_photo", upload)
+    ap = documents_iface.get_address_proof(user_external_id)
+    if ap is not None:
+        ap.validation_status = "pending"
+        ap.save(update_fields=["validation_status"])
+    from django_q.tasks import async_task
+
+    async_task("users.roles.enrollment.tasks.validate_address_proof", enr.id)
+    return me_dict(enr)
+
+
+def submit_address_proof_kinship(*, user_external_id: str, relation: str) -> dict:
+    """Titular do comprovante é outra pessoa (`needs_kinship`): explica o parentesco → libera."""
+    from users.roles import _address_proof
+
+    enr = _require(user_external_id, _S.ADDRESS)
+    _address_proof.submit_kinship(user_external_id, relation)
+    _advance_address(enr, user_external_id)
+    return me_dict(enr)
+
+
+def run_address_proof_validation(enrollment_id: int) -> None:
+    """Task async: valida o comprovante (visão → endereço → titular) e, se aprovar, avança o wizard."""
+    from users.roles import _address_proof
+
+    enr = Enrollment.objects.filter(id=enrollment_id).select_related("user").first()
+    if enr is None:
+        return
+    user_ext = str(enr.user.external_id)
+    _address_proof.validate_and_store(user_ext, caller="enrollment.address_proof")
+    enr.refresh_from_db(fields=["status"])
+    _advance_address(enr, user_ext)
 
 
 # ── seção DOCUMENTO (plan/13): GET rico · PATCH completa/corrige ─────────────
@@ -352,6 +403,49 @@ _RG_PROFILE_FIELDS = (
     "marital_status",
     "nationality",
 )
+
+
+def _next_slot_rg(rg) -> str | None:
+    """Qual slot o front deve enviar a seguir? (enrollment = RG only).
+
+    Retorna o nome do slot (ex: "rg_back") ou None se completo/aguardando.
+    O front mostra APENAS este slot — nunca frente+verso ao mesmo tempo."""
+    from users.roles import _document_ai as doc_ai
+
+    if rg is None:
+        return "rg_front"  # nenhum doc ainda → pedir frente
+
+    result = (rg.validation_result or {}) if hasattr(rg, "validation_result") else {}
+    photos = result.get("photos") or {}
+
+    def _status(slot: str) -> str | None:
+        return (photos.get(slot) or {}).get("status")
+
+    # full aprovada → completo
+    if _status("rg_full") == doc_ai.APPROVED:
+        return None
+    # frente+verso aprovadas → completo
+    if _status("rg_front") == doc_ai.APPROVED and _status("rg_back") == doc_ai.APPROVED:
+        return None
+    # qualquer slot pendente → aguardando
+    for slot in ("rg_full", "rg_front", "rg_back"):
+        if _status(slot) == doc_ai.PENDING:
+            return None
+    # qualquer slot em review → aguardando coordenador
+    for slot in ("rg_full", "rg_front", "rg_back"):
+        if _status(slot) == doc_ai.REVIEW:
+            return None
+    # full reprovada → reenviar full
+    if _status("rg_full") == doc_ai.REJECTED:
+        return "rg_full"
+    # frente aprovada → pedir verso
+    if _status("rg_front") == doc_ai.APPROVED:
+        return "rg_back"
+    # verso aprovada → pedir frente
+    if _status("rg_back") == doc_ai.APPROVED:
+        return "rg_front"
+    # nenhuma ou todas reprovadas → frente primeiro
+    return "rg_front"
 
 
 def _rg_section_dict(enr: Enrollment) -> dict:
@@ -374,6 +468,7 @@ def _rg_section_dict(enr: Enrollment) -> dict:
     # "extraindo…"). O RG nasce com validation_status="pending" por default — surfá-lo cru travava
     # o passo RG num spinner eterno mesmo sem nenhuma foto enviada.
     has_photo = bool(rg and (rg.front_photo or rg.back_photo or rg.full_photo))
+    photos = (result.get("photos") or {}) if isinstance(result, dict) else {}
     return {
         **fields,
         "name": p.name if p else None,
@@ -389,6 +484,10 @@ def _rg_section_dict(enr: Enrollment) -> dict:
         "missing_fields": [
             k for k in (*_RG_DOC_FIELDS, *_RG_PROFILE_FIELDS) if not fields[k]
         ],
+        # next_slot: qual foto o front deve pedir AGORA (sequencial: frente→verso)
+        "next_slot": _next_slot_rg(rg),
+        # photos por slot individual (front precisa saber o status de cada foto)
+        "photos": photos,
     }
 
 
@@ -1050,16 +1149,29 @@ def _notify_rg_approved(enr: Enrollment) -> None:
 
 
 def get_education(*, user_external_id: str) -> dict:
-    """GET dos dados educacionais (plan/13). Tudo None = ainda não preenchido."""
+    """GET dos dados educacionais (plan/13). Tudo None = ainda não preenchido.
+
+    `level`/`completed` fazem PREFILL do Profile (F3, Victor 2026-07-08): se a pessoa já respondeu
+    escolaridade como candidato, o front pré-marca e não re-pergunta. `grade`/escola são riqueza da
+    matrícula (não moram no Profile) → só do EducationalData."""
+    from users.profiles import interface as profiles
+
     enr = _require(user_external_id)
     try:
         edu = enr.educational_data
     except EducationalData.DoesNotExist:
         edu = None
+    p = profiles.get(enr.user)
+    level = (edu.level if edu and edu.level else None) or (
+        p.education_level if p else None
+    )
+    completed = edu.completed if (edu and edu.completed is not None) else None
+    if completed is None and p is not None:
+        completed = p.education_completed
     return {
-        "level": edu.level if edu else None,
+        "level": level,
         "grade": edu.grade if edu else None,
-        "completed": edu.completed if edu else None,
+        "completed": completed,
         "last_school": edu.last_school if edu else None,
         "city": edu.city if edu else None,
         "state": edu.state if edu else None,
@@ -1260,20 +1372,22 @@ def run_selfie_validation(enrollment_id: int) -> None:
         )
         if tips:
             desc = f"{desc}\n\nComo resolver: {tips}"
-    enr.refresh_from_db(fields=["selfie_status"])
+    enr.refresh_from_db(fields=["selfie_status", "selfie_reject_count"])
     if enr.selfie_status != _selfie.SelfieStatus.PENDING:
         return  # re-upload no meio tempo — este veredito é de foto velha, descarta
     enr.selfie_status = status
     enr.selfie_verified = status == _selfie.APPROVED
-    enr.selfie_description = desc
-    enr.save(
-        update_fields=[
-            "selfie_status",
-            "selfie_verified",
-            "selfie_description",
-            "updated_at",
-        ]
-    )
+    update_fields = ["selfie_status", "selfie_verified", "selfie_description", "updated_at"]
+    if status == _selfie.REJECTED:
+        # F2: acumula os comentários da IA (não sobrescreve) e conta a reprovação — 5× sobe a flag.
+        enr.selfie_reject_count += 1
+        enr.selfie_description = _selfie.append_reason(
+            enr.selfie_description, enr.selfie_reject_count, desc
+        )
+        update_fields.append("selfie_reject_count")
+    else:
+        enr.selfie_description = desc
+    enr.save(update_fields=update_fields)
     logger.info(
         "enrollment.selfie_validated", enrollment=str(enr.external_id), status=status
     )
@@ -1291,6 +1405,13 @@ def _resolve_selfie(enr: Enrollment) -> None:
         _advance_to_release(enr)
     elif enr.selfie_status == _selfie.REJECTED:
         _notify_selfie_rejected(enr)
+        # F2: 5ª reprovação → sobe a flag nível-pessoa (não bloqueia) e SEGUE liberando — o encontro
+        # presencial fica pro fim do curso (gate em `student._maybe_release_exam`).
+        if enr.selfie_reject_count >= _selfie.MAX_REJECTS_BEFORE_MEETING:
+            from users.profiles import interface as profiles
+
+            profiles.set_selfie_needs_meeting(enr.user)
+            _advance_to_release(enr)
     elif enr.selfie_status == _selfie.REVIEW:
         _notify_selfie_review(enr)
 
@@ -1663,7 +1784,7 @@ def conclude(
     """CONCLUSÃO (substitui o `release` antigo): com a 1ª parcela PAGA e a 2ª AGENDADA, o coordenador
     cadastra as credenciais da plataforma (fornecidas pela instituição — que só as libera com a 1ª paga)
     e o aluno vira student. Promoção ATÔMICA (role + COMPLETED + Student) — o miolo provado do release."""
-    from users.roles.student import interface as student_iface
+    from users.roles.student import service as student_iface
 
     enr = _enrollment_for_coordinator(
         enrollment_external_id,
@@ -1700,6 +1821,7 @@ def conclude(
             user=enr.user,
             hub=enr.hub,
             self_study=enr.self_study,
+            bolsista=enr.bolsista,
             platform_url=platform_url,
             platform_login=platform_login,
             platform_password=platform_password,

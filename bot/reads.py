@@ -73,12 +73,14 @@ def _student_status_pt() -> dict:
 
 def _phrase(mapping: dict, status, fallback: str) -> str:
     """Frase segura pro status (ou um fallback genérico). NUNCA devolve o código cru desconhecido."""
-    return mapping.get(str(status or "").lower(), fallback)
+    s = status or ""
+    # Tenta como-veio (str raw do banco) e como str lowercase (enum member).
+    return mapping.get(s, mapping.get(str(s).lower(), fallback))
 
 
 def lead_status(user_external_id: str) -> str | None:
     """Etapa COARSE do lead do próprio usuário (sem CPF, sem URL, sem e-mail)."""
-    from users.roles.lead import interface as lead_iface
+    from users.roles.lead import service as lead_iface
 
     lead = lead_iface.get_for_user_external_id(user_external_id)
     if lead is None:
@@ -90,7 +92,7 @@ def lead_status(user_external_id: str) -> str | None:
 
 def enrollment_status(user_external_id: str) -> str | None:
     """Etapa COARSE da matrícula do próprio usuário (sem filiação, sem RG, sem dado pessoal)."""
-    from users.roles.enrollment import interface as enr_iface
+    from users.roles.enrollment import service as enr_iface
 
     enr = enr_iface.get_for_user_external_id(user_external_id)
     if enr is None:
@@ -102,7 +104,7 @@ def enrollment_status(user_external_id: str) -> str | None:
 
 def student_status(user_external_id: str) -> str | None:
     """Situação COARSE do aluno (sem credenciais da plataforma, sem documentos, sem tipo sanguíneo)."""
-    from users.roles.student import interface as student_iface
+    from users.roles.student import service as student_iface
 
     student = student_iface.get_for_user_external_id(user_external_id)
     if student is None:

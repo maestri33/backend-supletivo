@@ -31,7 +31,7 @@ from api.staff import api as staff_api
 # Grupo extra `tools` (2026-07-04): ferramentas internas de integração — SEM auth (proteção externa).
 from api.tools import api as tools_api
 from api.health import health_api, staff_health_router
-from users.roles.lead.checkout_links import checkout_redirect
+from users.roles.lead.views import checkout_redirect
 
 urlpatterns = [
     path("admin/", admin.site.urls),

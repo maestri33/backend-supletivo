@@ -340,6 +340,9 @@ for _ia_item in env.list("IA_FALLBACK_CHAIN", default=[]):
 IA_DEFAULT_TEMPERATURE = env.float("IA_DEFAULT_TEMPERATURE", default=0.3)
 IA_MAX_TOKENS = env.int("IA_MAX_TOKENS", default=0)
 IA_TIMEOUT = env.float("IA_TIMEOUT", default=60.0)
+# Modelo multimodal do gateway OmniRoute para VISÃO (describe_image via /v1/chat/completions). Vazio
+# => o primário OmniRoute é pulado e a visão vai direto pro MiniMax-M3 (fallback sempre presente).
+IA_OMNIROUTE_VISION_MODEL = env("IA_OMNIROUTE_VISION_MODEL", default="")
 
 # IA — tabela de preços OPCIONAL (integrations.ai.pricing). Formato: "provider:model:in:out, ..."
 # (in/out = preço por 1 MILHÃO de tokens, moeda à escolha do Victor). VAZIO por padrão → AiCall.cost
@@ -437,15 +440,15 @@ WHATSAPP_WEBHOOK_SECRET = env("WHATSAPP_WEBHOOK_SECRET", default="")
 # Fail-closed: vazio no .env => a rota sem-OTP recusa (o segredo é a prova de identidade, não a rede).
 BOT_SERVICE_SECRET = env("BOT_SERVICE_SECRET", default="")
 BOT_SERVICE_HEADER = env("BOT_SERVICE_HEADER", default="x-bot-service-token")
-# ponytail: kill switch do CrewAI no bot. 0 = motor determinístico (default).
-# Para ligar: mude p/ 1 e garanta OMNIROUTE_API_KEY no .env.
-BOT_USE_CREW = env.bool("BOT_USE_CREW", default=False)
-
 # Wave1 hardening — consumido por api/tools (allowlist DMZ) e pelo serve de mídia privada.
 # TOOLS_ALLOWED_IPS aceita IPs e CIDRs (o gate usa o módulo ipaddress). Default = loopback + rede interna.
 TOOLS_ALLOWED_IPS = env.list(
     "TOOLS_ALLOWED_IPS", default=["127.0.0.1", "::1", "10.0.0.0/8"]
 )
+# Nº de proxies CONFIÁVEIS na frente do app (nginx/Caddy). O gate por IP (core.net.client_ip) conta
+# esse tanto de hops a partir da DIREITA do X-Forwarded-For — o XFF esquerdo é forjável pelo cliente
+# e NUNCA decide acesso. Default 1 (um reverse-proxy). Ajuste se houver cadeia de proxies confiáveis.
+TRUSTED_PROXY_COUNT = env.int("TRUSTED_PROXY_COUNT", default=1)
 # Prefixos de mídia que exigem autorização (dono do recurso). O resto (training/IA) é público.
 MEDIA_PRIVATE_PREFIXES = env.list(
     "MEDIA_PRIVATE_PREFIXES",

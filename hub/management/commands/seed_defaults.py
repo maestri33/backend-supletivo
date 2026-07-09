@@ -28,7 +28,7 @@ from users.auth.models import User
 from users.profiles import interface as profiles
 from users.profiles.models import Profile
 from users.roles.models import UserRole
-from users.roles.promoter import interface as promoter_iface
+from users.roles.promoter import service as promoter_iface
 
 logger = structlog.get_logger()
 

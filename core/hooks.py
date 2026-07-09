@@ -47,8 +47,3 @@ def dispatch(event: str, **kwargs) -> bool:
                 error=str(exc),
             )
     return consumed
-
-
-def registered_events() -> tuple[str, ...]:
-    """Eventos com pelo menos um handler (introspecção/testes)."""
-    return tuple(_HOOKS.keys())

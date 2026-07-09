@@ -19,14 +19,14 @@ from api.auth import require_roles
 from api.base import add_auth_refresh, add_funnel_login, build_group
 from api.schemas import CheckIn, CheckOut, TokenOut
 from core.net import source_ip
-from users.auth import interface as auth_iface
+from users.auth import service as auth_iface
 from users.consent import PROMOTER_CONTRACT
 from users.exceptions import NotFound
 from users.roles import interface as roles
-from users.roles.candidate import interface as candidate_iface
-from users.roles.lead import interface as lead_iface
-from users.roles.promoter import interface as promoter_iface
-from users.roles.training import interface as training_iface
+from users.roles.candidate import service as candidate_iface
+from users.roles.lead import service as lead_iface
+from users.roles.promoter import service as promoter_iface
+from users.roles.training import service as training_iface
 
 # Registry de `code` de erro (plan/15 A1, espelha o clients): TODO 4xx sai `{detail, code, …extra}` — o
 # front roteia por `switch(code)`, nunca parseando `detail`. Vai na descrição do grupo → OpenAPI.
@@ -128,6 +128,15 @@ class PixIn(Schema):
     key_type: str
 
 
+class EducationIn(Schema):
+    level: str  # fundamental | medio
+    completed: bool  # concluiu o nível?
+
+
+class KinshipIn(Schema):
+    relation: str  # quem é o titular do comprovante + grau de parentesco
+
+
 class SubmissionIn(Schema):
     material_external_id: str
     answer: str
@@ -146,6 +155,8 @@ class CandidateProfileOut(Schema):
     nationality: str | None = None
     name: str | None = None
     birth_date: str | None = None
+    education_level: str | None = None
+    education_completed: bool | None = None
     locked_fields: list[str] = []
 
 
@@ -212,6 +223,17 @@ class CandidateSelfieOut(Schema):
     description: str | None = None
 
 
+class AddressProofSectionOut(Schema):
+    """Bloco do comprovante de endereço no /me (F1): status da validação IA + parentesco."""
+
+    exists: bool = False
+    photo: str | None = None
+    status: str | None = None  # pending|approved|rejected|review|needs_kinship
+    reason: str | None = None
+    needs_kinship: bool = False
+    kinship_relation: str | None = None
+
+
 class CandidateMeOut(Schema):
     """/me RICO do candidato — devolvido por TODA mutação do wizard."""
 
@@ -223,12 +245,15 @@ class CandidateMeOut(Schema):
     selfie_status: str | None = None
     profile: CandidateProfileOut | None = None
     address: CandidateAddressOut | None = None
+    address_proof: AddressProofSectionOut | None = None
     documents: CandidateDocumentsOut | None = None
     selfie: CandidateSelfieOut | None = None
 
 
 class CandidateDocumentSectionOut(Schema):
-    """Seção rica do documento (GET /candidate/document): tipo + fotos + validação IA + extraídos + missing_fields."""
+    """Seção rica do documento (GET /candidate/document): tipo + fotos + validação IA + extraídos + missing_fields.
+    `next_slot` = qual slot o front deve pedir AGORA (None = completo ou aguardando análise).
+    `photos` = status por slot individual ({slot: {status, reason}})."""
 
     doc_type: str | None = None
     number: str | None = None
@@ -247,6 +272,8 @@ class CandidateDocumentSectionOut(Schema):
     analysis_reason: str | None = None
     extracted: dict = {}
     missing_fields: list[str] = []
+    next_slot: str | None = None
+    photos: dict = {}
 
 
 class AnalysisAckOut(Schema):
@@ -543,11 +570,25 @@ def candidate_document_photo(request, slot: str, file: UploadedFile = File(...))
     "/candidate/documents/address-proof", response=CandidateMeOut, tags=["candidate"]
 )
 def candidate_address_proof(request, file: UploadedFile = File(...)):
-    """Comprovante de residência (JPEG/PNG/WEBP/PDF, multipart) — documento OPCIONAL: não define
-    `doc_type`, não passa pela IA e não gateia o wizard. Devolve o `me_dict` canônico (a foto
-    aparece em `documents.address_proof.photo`)."""
+    """Comprovante de residência (JPEG/PNG/WEBP/PDF, multipart) — OBRIGATÓRIO, validado por IA
+    (endereço + titular, F1). Assíncrono: acompanhe `address_proof.status` no `me_dict` até
+    `approved`/`rejected`/`review`/`needs_kinship`. `needs_kinship` → POST .../address-proof/kinship."""
     ext = _guard(request, "candidate")
     return candidate_iface.upload_address_proof(user_external_id=ext, upload=file)
+
+
+@api.post(
+    "/candidate/documents/address-proof/kinship",
+    response=CandidateMeOut,
+    tags=["candidate"],
+)
+def candidate_address_proof_kinship(request, payload: KinshipIn):
+    """Titular do comprovante é outra pessoa (`needs_kinship`): informe quem é e o grau de parentesco
+    (cônjuge/pai/mãe...) → libera o comprovante e avança o wizard."""
+    ext = _guard(request, "candidate")
+    return candidate_iface.submit_address_proof_kinship(
+        user_external_id=ext, relation=payload.relation
+    )
 
 
 @api.post("/candidate/pix", response=CandidateMeOut, tags=["candidate"])
@@ -557,6 +598,16 @@ def candidate_pix(request, payload: PixIn):
     ext = _guard(request, "candidate")
     return candidate_iface.set_pix(
         user_external_id=ext, key=payload.key, key_type=payload.key_type
+    )
+
+
+@api.post("/candidate/education", response=CandidateMeOut, tags=["candidate"])
+def candidate_education(request, payload: EducationIn):
+    """Escolaridade — ÚLTIMA pergunta antes da selfie. Grava no Profile (nível-pessoa); sem médio
+    completo o promotor nasce `pre_matriculado`. Devolve o `me_dict` canônico."""
+    ext = _guard(request, "candidate")
+    return candidate_iface.set_education(
+        user_external_id=ext, level=payload.level, completed=payload.completed
     )
 
 

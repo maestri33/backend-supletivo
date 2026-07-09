@@ -35,7 +35,7 @@ from users.exceptions import (
     ValidationError,
 )
 from users.address import interface as address_iface
-from users.documents import interface as documents_iface
+from users.documents import service as documents_iface
 from users.profiles import interface as profiles
 from users.roles import interface as roles
 
