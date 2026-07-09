@@ -1650,11 +1650,14 @@ def reject_candidate(
         raise Forbidden(
             "Você não coordena o polo deste candidato.", code="NOT_HUB_COORDINATOR"
         )
-    if cand.status != _S.COMPLETED:
+    # G10: mesmo conjunto de status que `approve_candidate` aceita. Antes exigia COMPLETED — estado
+    # que o fluxo atual NUNCA atinge (a selfie aprovada auto-promove; a em review deixa em SELFIE),
+    # então rejeitar dava 409 sempre. O candidato aguardando decisão está em SELFIE (selfie review).
+    if cand.status not in (_S.COMPLETED, _S.REJECTED, _S.SELFIE):
         raise Conflict(
-            "O candidato não está aguardando aprovação.",
+            "O candidato ainda não concluiu a coleta.",
             code="WRONG_STATUS",
-            extra={"expected_status": _S.COMPLETED},
+            extra={"expected_status": _S.SELFIE},
         )
     _set_status(cand, _S.REJECTED)
     _notify_candidate_rejected(cand)
@@ -1743,8 +1746,17 @@ def list_awaiting_approval_for_hub(*, hub) -> list[dict]:
     o rejeitado não some, fica na fila e pode ser aprovado depois). `rejected: true` marca quem o
     coordenador já tinha rejeitado, pro front mostrar diferente."""
     out = []
+    # G10: inclui SELFIE-em-review (o estado real de "aguardando decisão do coordenador"), além de
+    # COMPLETED/REJECTED. Antes só COMPLETED/REJECTED, e como COMPLETED é inatingível, o inbox ficava
+    # vazio — o coordenador nunca via os candidatos que precisavam da decisão dele.
+    from django.db.models import Q
+
     qs = (
-        Candidate.objects.filter(hub=hub, status__in=[_S.COMPLETED, _S.REJECTED])
+        Candidate.objects.filter(hub=hub)
+        .filter(
+            Q(status__in=[_S.COMPLETED, _S.REJECTED])
+            | Q(status=_S.SELFIE, selfie_status=SelfieStatus.REVIEW)
+        )
         .select_related("user")
         .order_by("updated_at")
     )

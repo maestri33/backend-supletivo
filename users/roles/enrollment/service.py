@@ -273,11 +273,19 @@ def _has_education(enr: Enrollment) -> bool:
 
 def _advance_to(enr: Enrollment, target: str) -> None:
     """Avança pra `target` PULANDO seções já completas (chain-skip, plan/13)."""
+    from users.roles import _address_proof
+
     user_ext = str(enr.user.external_id)
     status = target
     while True:
-        if status == _S.ADDRESS and address_iface.is_complete(
-            address_iface.get_by_external_id(user_ext)
+        # G9: pula ADDRESS só com a MESMA condição da transição normal (_advance_address): endereço
+        # completo E comprovante de residência APROVADO. Antes checava só is_complete — e como o
+        # Address é compartilhado por external_id entre funis (candidate/promotor), um endereço já
+        # preenchido em OUTRO funil fazia o chain-skip pular o gate KYC do comprovante (bypass).
+        if (
+            status == _S.ADDRESS
+            and address_iface.is_complete(address_iface.get_by_external_id(user_ext))
+            and _address_proof.is_approved(user_ext)
         ):
             status = _S.EDUCATION
             continue
