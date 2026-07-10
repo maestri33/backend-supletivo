@@ -15,6 +15,8 @@ LAN (IP interno, sem egress — `_to_lan`); e-mail embute pela URL pública.
 
 from __future__ import annotations
 
+import re
+
 import structlog
 from asgiref.sync import async_to_sync
 from django.conf import settings
@@ -226,9 +228,40 @@ def _send_whatsapp_media(notif: Notification) -> None:
         )
 
 
+def _subject_from_body(text: str) -> str:
+    """Assunto derivado do corpo quando o template não define subject/title.
+
+    Quase todos os 48 templates do seed nascem com subject/title vazios, e sem isto o e-mail saía
+    com o literal "(sem assunto)". Pega a 1ª frase, tira markdown e a saudação inicial ("{nome}, "
+    — já renderizada como o nome real no `text`), capitaliza e corta em ~78 chars.
+    """
+    if not text:
+        return ""
+    line = next((ln.strip() for ln in text.splitlines() if ln.strip()), "")
+    line = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", line)  # [txt](url) -> txt
+    line = re.sub(r"[*_`~]", "", line)  # tira markdown de ênfase
+    line = re.sub(
+        r"^[\wÀ-ÿ'.\- ]{1,30}?,\s+", "", line, count=1
+    )  # remove "Nome, " inicial
+    m = re.match(r"(.+?[.!?])(?:\s|$)", line)  # 1ª frase, se longa o bastante
+    sent = m.group(1) if m and len(m.group(1)) >= 12 else line
+    sent = sent.strip().rstrip(".!?")
+    if not sent:
+        return ""
+    sent = sent[0].upper() + sent[1:]
+    if len(sent) > 78:
+        sent = sent[:77].rsplit(" ", 1)[0] + "…"
+    return sent
+
+
 def _send_email(notif: Notification) -> None:
     try:
-        subject = notif.subject or notif.title or "(sem assunto)"
+        subject = (
+            notif.subject
+            or notif.title
+            or _subject_from_body(notif.text)
+            or "Supletivo Brasil"
+        )
         if notif.media_url:
             # e-mail embute a mídia pela URL PÚBLICA (destinatário busca pela internet).
             content_html = mail_templates.md_to_html(
