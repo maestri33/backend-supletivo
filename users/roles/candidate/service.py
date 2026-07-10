@@ -1065,7 +1065,9 @@ def _notify_doc_event(
             channels_override=channels,
         )
     except Exception as exc:  # noqa: BLE001
-        logger.warning("candidate.notify_doc_event_failed", doc_event=event, error=str(exc))
+        logger.warning(
+            "candidate.notify_doc_event_failed", doc_event=event, error=str(exc)
+        )
 
 
 def _sweep_stale_reviews(hub) -> None:
@@ -1322,11 +1324,15 @@ def run_selfie_validation(candidate_id: int) -> None:
         return
     if cand.selfie_status != _selfie.SelfieStatus.PENDING:
         return
+    # G11: discriminador da foto desta task (status não detecta re-upload — ele re-arma PENDING).
+    started_taken_at = cand.selfie_taken_at
     fp = Path(settings.MEDIA_ROOT) / cand.selfie_image
     if not fp.exists():
         return
     image_bytes = fp.read_bytes()
-    content_type = "image/jpeg"
+    # G21/#13: mime derivado da extensão (como o enrollment) — antes era "image/jpeg" hardcoded, e
+    # uma selfie PNG/WebP ia pra visão/biometria rotulada como JPEG.
+    content_type = _MIME_BY_EXT.get(fp.suffix.lstrip(".").lower(), "image/jpeg")
     status, desc = _selfie.verify(image_bytes, content_type, caller="candidate.selfie")
     # SOMAR (Victor 2026-06-05): face-match biométrico selfie × documento.
     status, desc = _selfie.add_face_match(
@@ -1342,9 +1348,17 @@ def run_selfie_validation(candidate_id: int) -> None:
         )
         if tips:
             desc = f"{desc}\n\nComo resolver: {tips}"
-    cand.refresh_from_db(fields=["selfie_status", "selfie_reject_count"])
-    if cand.selfie_status != _selfie.SelfieStatus.PENDING:
-        return  # re-upload — veredito é de foto velha, descarta
+    cand.refresh_from_db(
+        fields=["selfie_status", "selfie_reject_count", "selfie_taken_at"]
+    )
+    # G11: descarta se saiu de PENDING OU se a foto trocou (taken_at != o do início). Sem o check de
+    # taken_at, um re-upload que re-armou PENDING passava e o veredito da foto velha gravava sobre a
+    # nova (mesma classe do enrollment; o candidate estava com o mesmo bug).
+    if (
+        cand.selfie_status != _selfie.SelfieStatus.PENDING
+        or cand.selfie_taken_at != started_taken_at
+    ):
+        return
     cand.selfie_status = status
     cand.selfie_verified = status == _selfie.APPROVED
     update_fields = [
