@@ -274,13 +274,17 @@ def handle_inbound(inbound_event_id: int) -> str:
     # IA chat — caída (cadeia esgotada) → canned + awaiting_human (fallback, nunca erro cru)
     from integrations.ai import service as ia
 
-    before = timezone.now()
+    ai_call = None
     try:
-        answer = ia.chat(
+        # return_call=True: liga DETERMINISTICAMENTE a resposta ao AiCall desta chamada. Antes o
+        # worker adivinhava pelo timestamp (`caller`+created_at), e sob 2 workers do bot
+        # simultâneos podia pegar o AiCall de OUTRO atendimento — auditoria de custo trocada.
+        answer, ai_call = ia.chat(
             messages,
             caller=ratelimit.AI_CALLER,
             temperature=getattr(settings, "BOT_AI_TEMPERATURE", 0.3),
             max_tokens=getattr(settings, "BOT_AI_MAX_TOKENS", 500) or None,
+            return_call=True,
         )
     except Exception as exc:  # noqa: BLE001 — IA fora → escala, nunca quebra pro usuário
         logger.warning("bot.ai_failed", conv=conversation.id, error=str(exc)[:160])
@@ -296,19 +300,6 @@ def handle_inbound(inbound_event_id: int) -> str:
     if guardrail.has_pii(answer):
         _escalate(conversation, phone, reason="outbound_pii")
         return "blocked_pii"
-
-    # liga (best-effort) a resposta ao AiCall que a gerou — auditoria/custo
-    ai_call = None
-    try:
-        from integrations.ai.models import AiCall
-
-        ai_call = (
-            AiCall.objects.filter(caller=ratelimit.AI_CALLER, created_at__gte=before)
-            .order_by("-id")
-            .first()
-        )
-    except Exception:  # noqa: BLE001 — link de auditoria nunca trava o envio
-        ai_call = None
 
     conversation.state = STATE_OPEN
     conversation.save(update_fields=["last_activity"])

@@ -78,9 +78,10 @@ def _record(
     result: ChatResult | None,
     error: Exception | None,
     started_at: float,
-) -> None:
-    """Grava uma linha AiCall com as métricas de UMA tentativa. `cost` fica null até a tabela de
-    preços (IA_PRICES no .env) estar configurada — aí `pricing.cost_for` calcula pelos tokens (§8)."""
+) -> AiCall:
+    """Grava uma linha AiCall com as métricas de UMA tentativa. Devolve o AiCall criado (o caller
+    pode ligá-lo determinísticamente ao seu contexto — ex.: o bot liga à Message da conversa, em vez
+    de adivinhar pelo timestamp). `cost` fica null até a tabela de preços (IA_PRICES no .env)."""
     from . import pricing
 
     prompt_tokens = getattr(result, "prompt_tokens", 0) or 0
@@ -91,7 +92,7 @@ def _record(
         prompt_tokens=prompt_tokens,
         completion_tokens=completion_tokens,
     )
-    AiCall.objects.create(
+    return AiCall.objects.create(
         provider=provider,
         operation=operation,
         model=model,
@@ -108,10 +109,14 @@ def _record(
     )
 
 
-def _run(operation: str, caller: str, attempt, chain) -> tuple[ChatResult, str, str]:
+def _run(
+    operation: str, caller: str, attempt, chain
+) -> tuple[ChatResult, str, str, AiCall]:
     """Caminha a cadeia: tenta cada (provider, model), grava AiCall por tentativa, para na 1ª que dá
-    certo. `attempt` é uma corrotina `attempt(client, model) -> ChatResult`. Falha retryável => próximo;
-    não-retryável (4xx/inesperada) => levanta na hora. Cadeia esgotada => levanta a última falha."""
+    certo. Devolve `(result, provider, model, ai_call)` — o `ai_call` é o da tentativa BEM-SUCEDIDA
+    (auditoria determinística). `attempt` é uma corrotina `attempt(client, model) -> ChatResult`.
+    Falha retryável => próximo; não-retryável (4xx/inesperada) => levanta na hora. Cadeia esgotada =>
+    levanta a última falha."""
     last_err: Exception | None = None
     for provider, model in chain:
         client = providers.get_client(provider)
@@ -149,7 +154,7 @@ def _run(operation: str, caller: str, attempt, chain) -> tuple[ChatResult, str, 
                 started_at=started,
             )
             raise
-        _record(
+        ai_call = _record(
             operation=operation,
             provider=provider,
             model=model,
@@ -158,7 +163,7 @@ def _run(operation: str, caller: str, attempt, chain) -> tuple[ChatResult, str, 
             error=None,
             started_at=started,
         )
-        return result, provider, model
+        return result, provider, model, ai_call
     raise last_err or LLMError("IA_FALLBACK_CHAIN vazia", retryable=False)
 
 
@@ -187,7 +192,7 @@ def generate_text(
             max_tokens=max_tokens,
         )
 
-    result, _p, _m = _run(
+    result, _p, _m, _c = _run(
         AiCall.Operation.TEXT, caller, attempt, providers.fallback_chain(model)
     )
     return _strip_think(result.content).strip('"')
@@ -215,7 +220,7 @@ def generate_json(
             max_tokens=max_tokens,
         )
 
-    result, _p, _m = _run(
+    result, _p, _m, _c = _run(
         AiCall.Operation.JSON, caller, attempt, providers.fallback_chain(model)
     )
     try:
@@ -232,8 +237,11 @@ def chat(
     max_tokens: int | None = None,
     json_mode: bool = False,
     model: str | None = None,
-) -> str:
-    """Chat multi-turn. Devolve o conteúdo da resposta do assistente."""
+    return_call: bool = False,
+):
+    """Chat multi-turn. Devolve o conteúdo da resposta do assistente (str). Com `return_call=True`
+    devolve `(str, AiCall)` — o AiCall exato desta chamada, pro caller ligá-lo ao seu contexto sem
+    adivinhar por timestamp (o bot liga à Message da conversa, evitando trocar sob 2 workers)."""
 
     async def attempt(client, m):
         return await client.chat(
@@ -244,10 +252,11 @@ def chat(
             json_mode=json_mode,
         )
 
-    result, _p, _m = _run(
+    result, _p, _m, ai_call = _run(
         AiCall.Operation.CHAT, caller, attempt, providers.fallback_chain(model)
     )
-    return _strip_think(result.content)
+    text = _strip_think(result.content)
+    return (text, ai_call) if return_call else text
 
 
 def summarize(
@@ -266,7 +275,7 @@ def summarize(
             text, model=m, format=format, temperature=temperature, max_tokens=max_tokens
         )
 
-    result, _p, _m = _run(
+    result, _p, _m, _c = _run(
         AiCall.Operation.SUMMARIZE, caller, attempt, providers.fallback_chain(model)
     )
     return _strip_think(result.content)
@@ -304,7 +313,7 @@ def grade(
             temperature=0.2,
         )
 
-    result, _p, _m = _run(
+    result, _p, _m, _c = _run(
         AiCall.Operation.GRADE, caller, attempt, providers.fallback_chain(model)
     )
     try:
