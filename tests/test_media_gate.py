@@ -125,3 +125,31 @@ def test_privado_sem_dono_no_db_nega_nao_revisor_403(media_root):
     """Path privado que não resolve dono (órfão/receipt): não-revisor autenticado → 403 (fail-closed)."""
     _u, _ext, token = _mk_user()  # ninguém amarrou _RG_PATH
     assert _serve_as(_RG_PATH, token).status_code == 403
+
+
+def _write_audit_selfie(media_root):
+    """Recorte de rosto da auditoria da IA (audit/selfie/<tok>/rosto_documento.jpg)."""
+    os.makedirs(f"{media_root}/audit/selfie/tok123")
+    path = "audit/selfie/tok123/rosto_documento.jpg"
+    with open(f"{media_root}/{path}", "wb") as fh:
+        fh.write(b"RECORTE DE ROSTO DO RG")
+    return path
+
+
+def test_audit_selfie_sem_token_401(media_root):
+    """`audit/` virou privado: recorte de rosto não é mais servido sem auth."""
+    assert _status(_write_audit_selfie(media_root)) == 401
+
+
+@pytest.mark.django_db
+def test_audit_selfie_nao_revisor_403(media_root):
+    path = _write_audit_selfie(media_root)
+    _u, _ext, token = _mk_user()  # sem dono resolvível → só revisor
+    assert _serve_as(path, token).status_code == 403
+
+
+@pytest.mark.django_db
+def test_audit_selfie_coordenador_200(media_root):
+    path = _write_audit_selfie(media_root)
+    _c, _ext, coord_token = _mk_user(roles=["coordinator"])
+    assert _serve_as(path, coord_token).status_code == 200

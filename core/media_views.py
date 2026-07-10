@@ -28,9 +28,10 @@ LIMITAÇÕES CONHECIDAS (documentadas, fora do que dá pra fechar sem migration)
   fica fechado). Escopar por hub exigiria cruzar dono→hub e coordenador→hub.
 - Arquivos privados órfãos (crop biométrico `documents/` de `enrollment/service.py`, que não é
   gravado em campo nenhum) não resolvem dono → só REVISOR acessa. Não são servidos a nenhum front.
-- Selfies de auditoria ficam sob `audit/` — NÃO está em `MEDIA_PRIVATE_PREFIXES`, então continuam
-  servidas SEM auth (contêm recorte de rosto do RG/selfie). Fora do escopo deste fix; recomendação
-  no PR: adicionar `audit` a `MEDIA_PRIVATE_PREFIXES`.
+- Selfies de auditoria (`audit/`, recorte de rosto do RG/selfie): `audit` ENTROU em
+  `MEDIA_PRIVATE_PREFIXES` (2026-07-10). Como não têm dono resolvível (não são gravadas em campo de
+  model — só existem no disco pra o time conferir), caem no caminho revisor-only: coordenador/
+  superuser acessam, qualquer outro autenticado → 403. Nenhum front consome esses arquivos.
 
 Fim de verdade (fora do escopo): índice `token → owner` no `save_media`, ou URL assinada por recurso.
 """
