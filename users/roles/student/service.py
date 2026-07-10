@@ -216,17 +216,7 @@ def to_dict(student: Student) -> dict:
             "password": student.platform_password,
             "notes": student.platform_notes,
         },
-        "documents": [
-            {
-                "doc_type": d.doc_type,
-                "validation_status": d.validation_status,
-                "has_photo": bool(d.photo),
-                "analysis_status": d.validation_status,
-                "analysis_reason": _document_analysis_reason(d),
-                "expires_at": _document_expires_at(d),
-            }
-            for d in student.documents.all()
-        ],
+        "documents": _student_documents_dict(student),
         "pendencies": [
             {
                 "external_id": str(p.external_id),
@@ -246,6 +236,25 @@ def to_dict(student: Student) -> dict:
         if diploma
         else None,
     }
+
+
+def _student_documents_dict(student) -> list[dict]:
+    """Documentos do aluno pro coordenador decidir VENDO: foto + external_id (pra endereçar o
+    decide `.../documents/{doc_id}/decide`) + veredito da IA. Sem a foto/id o coordenador aprovava
+    às cegas e a fila `student_documents` não tinha como decidir."""
+    return [
+        {
+            "external_id": str(d.external_id),
+            "doc_type": d.doc_type,
+            "photo": d.photo,
+            "validation_status": d.validation_status,
+            "has_photo": bool(d.photo),
+            "analysis_status": d.validation_status,
+            "analysis_reason": _document_analysis_reason(d),
+            "expires_at": _document_expires_at(d),
+        }
+        for d in student.documents.all()
+    ]
 
 
 def _document_analysis_reason(doc: StudentDocument) -> str | None:

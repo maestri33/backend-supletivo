@@ -463,14 +463,26 @@ class CandidateUserOut(Schema):
     email: str | None = None
 
 
+class CandidateDocumentDetailOut(Schema):
+    """Documento (RG/CNH) do candidato pro coordenador decidir VENDO — fotos + veredito da IA."""
+
+    doc_type: str
+    front_photo: str | None = None
+    back_photo: str | None = None
+    full_photo: str | None = None
+    analysis_status: str | None = None  # pending|approved|rejected|review
+    analysis_reason: str | None = None
+
+
 class CandidateDetailOut(Schema):
     """Detalhe do candidato pro coordenador decidir VENDO (perfil + coleta). Identidade/Pix vêm do
-    Profile; `selfie_image` é o caminho da foto (servida em /media)."""
+    Profile; `selfie_image`/`document.*_photo` são caminhos de foto (servidos em /media)."""
 
     external_id: str
     status: str
     user: CandidateUserOut
     doc_type: str | None = None
+    document: CandidateDocumentDetailOut | None = None
     mother_name: str | None = None
     father_name: str | None = None
     marital_status: str | None = None
@@ -549,9 +561,16 @@ class StudentPlatformOut(Schema):
 
 
 class StudentDocItemOut(Schema):
+    external_id: str  # pra endereçar o decide .../documents/{doc_id}/decide
     doc_type: str
+    photo: str | None = (
+        None  # caminho servido em /media (coordenador vê antes de decidir)
+    )
     validation_status: str
     has_photo: bool
+    analysis_status: str | None = None
+    analysis_reason: str | None = None
+    expires_at: str | None = None
 
 
 class StudentPendencyOut(Schema):

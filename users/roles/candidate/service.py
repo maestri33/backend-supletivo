@@ -1711,6 +1711,27 @@ def _notify_candidate_rejected(cand: Candidate) -> None:
         logger.warning("candidate.notify_rejected_failed", error=str(exc))
 
 
+def _candidate_document_dict(cand) -> dict | None:
+    """Bloco do DOCUMENTO (RG/CNH) do candidato pro coordenador decidir VENDO — fotos + status IA +
+    motivo. Espelha `enrollment._rg_section_dict`. None se não há doc_type/sub-doc ainda."""
+    if not cand.doc_type:
+        return None
+    sub = documents_iface.get_doc_sub(str(cand.user.external_id), cand.doc_type)
+    if sub is None:
+        return None
+    result = (getattr(sub, "validation_result", None) or {}) if sub else {}
+    has_photo = bool(sub.front_photo or sub.back_photo or sub.full_photo)
+    return {
+        "doc_type": cand.doc_type,
+        "front_photo": sub.front_photo,
+        "back_photo": sub.back_photo,
+        "full_photo": sub.full_photo,
+        # canônico (proposta #4): sem foto → sem análise em voo (não mostra "extraindo…")
+        "analysis_status": sub.validation_status if has_photo else None,
+        "analysis_reason": result.get("reason") if isinstance(result, dict) else None,
+    }
+
+
 def candidate_detail_for_coordinator(
     *, candidate_external_id: str, coordinator
 ) -> dict:
@@ -1729,6 +1750,7 @@ def candidate_detail_for_coordinator(
         )
     p = profiles.get(cand.user)
     return {
+        "document": _candidate_document_dict(cand),
         "external_id": str(cand.external_id),
         "status": cand.status,
         "user": {
