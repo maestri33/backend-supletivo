@@ -1,4 +1,5 @@
-"""View de /media/ com split público/privado + gate de dono (Lane #4 — Victor 2026-07-08).
+"""View de /media/ com split público/privado + gate de DONO (Lane #4 — Victor 2026-07-08;
+gate de dono 2026-07-10).
 
 `core/urls.py` continua expondo `/media/<path>` (compat de URL: notify/Evolution buscam mídia
 por essa rota), mas agora passa por um gate antes de servir o arquivo:
@@ -7,25 +8,31 @@ por essa rota), mas agora passa por um gate antes de servir o arquivo:
   direto, sem auth, reusando `django.views.static.serve` (mesma semântica de sempre: 404,
   If-Modified-Since, content-type por extensão).
 - prefixo PRIVADO (`settings.MEDIA_PRIVATE_PREFIXES`: documents, selfie, diploma, receipt,
-  student) → exige um access token JWT válido (mesma validação do `api/auth.py:JWTAuth` — RS256,
-  não-expirado, `type=access`, `token_version` batendo com o do User). Sem token válido → 401 JSON
-  (fail-closed, mesmo padrão dos outros handlers de `core/urls.py`).
+  student) → exige access token JWT válido (mesma validação do `api/auth.py:JWTAuth` — RS256,
+  não-expirado, `type=access`, `token_version` batendo com o do User) E que o requisitante seja o
+  DONO do arquivo, OU um REVISOR (coordenador/superuser). Sem token → 401; token válido mas sem
+  direito → 403 (fail-closed).
 
-LIMITAÇÃO DOCUMENTADA (gate é "autenticado", não "é o dono"): os paths privados são
-`"<prefixo>/<token>.<ext>"` com token aleatório não-enumerável (`core/media.py`, pedido do Victor
-2026-06-21 — o `external_id` NUNCA vai no path). Não existe hoje um índice `token → dono`: os
-campos que guardam esses paths estão espalhados em vários apps/models (`users.documents.models`
-RG/CNH/Certificate/AddressProof/Military, `StudentProfile.diploma`, selfies de auditoria do
-enrollment, recibos de payout do staff) sem relação reversa indexada por path. Cruzar tudo isso
-aqui infla o módulo com import de meia dúzia de apps só pra um SELECT por request — não é
-"barata" no sentido do pedido original.
+GATE DE DONO (fecha o IDOR): os paths privados são `"<prefixo>/<token>.<ext>"` com token aleatório
+(`core/media.py`, Victor 2026-06-21 — external_id NUNCA no path), então não há `token → dono`
+direto. `core.media.owner_external_id_for_path` amarra o dono por MATCH EXATO do path nos campos
+que guardam esses caminhos (RG/CNH/Certificate/AddressProof/Military → Document.user; Enrollment/
+Candidate.selfie_image; StudentDiploma/StudentDocument → Student.user). Requisitante == dono → serve;
+senão 403. Revisores (role `coordinator`, ou superuser) veem qualquer arquivo (revisão de docs).
 
-Por isso o gate aqui confirma SOMENTE que a requisição tem um JWT de acesso válido (usuário
-autenticado no funil) — NÃO confirma que o arquivo pedido pertence a ESSE usuário. Qualquer
-usuário autenticado que souber/adivinhar um token de outra pessoa ainda consegue baixar o arquivo
-dela. Fechar esse gap de verdade exige (fora do escopo desta lane): (a) uma tabela/índice
-`token → owner` preenchida no `save_media`, ou (b) parar de devolver o path cru pra API e passar a
-devolver uma URL assinada/com expiração por recurso.
+LIMITAÇÕES CONHECIDAS (documentadas, fora do que dá pra fechar sem migration):
+- `receipt/` (comprovante de payout a terceiro livre) NÃO tem dono-usuário no DB (`PaymentRequest.
+  payee` é null no fluxo manual) → só REVISOR (superuser/coordenador) acessa; ninguém mais.
+- Coordenador NÃO é escopado por hub aqui — qualquer coordenador vê mídia privada de qualquer hub
+  (revisores são poucos e confiáveis; o IDOR crítico era usuário-de-funil vendo PII alheia, e esse
+  fica fechado). Escopar por hub exigiria cruzar dono→hub e coordenador→hub.
+- Arquivos privados órfãos (crop biométrico `documents/` de `enrollment/service.py`, que não é
+  gravado em campo nenhum) não resolvem dono → só REVISOR acessa. Não são servidos a nenhum front.
+- Selfies de auditoria ficam sob `audit/` — NÃO está em `MEDIA_PRIVATE_PREFIXES`, então continuam
+  servidas SEM auth (contêm recorte de rosto do RG/selfie). Fora do escopo deste fix; recomendação
+  no PR: adicionar `audit` a `MEDIA_PRIVATE_PREFIXES`.
+
+Fim de verdade (fora do escopo): índice `token → owner` no `save_media`, ou URL assinada por recurso.
 """
 
 from __future__ import annotations
@@ -41,8 +48,11 @@ from django.http import (
 )
 from django.views.static import serve as _static_serve
 
-from core.media import is_private_media
+from core.media import is_private_media, owner_external_id_for_path
 from users.auth.jwt import service as jwt_service
+
+# Roles (claim do JWT) que revisam mídia de qualquer dono. Superuser (flag no DB) entra à parte.
+_REVIEWER_ROLES = ("coordinator",)
 
 
 def _bearer_token(request: HttpRequest) -> str | None:
@@ -53,21 +63,45 @@ def _bearer_token(request: HttpRequest) -> str | None:
     return token or None
 
 
-def _has_valid_access_token(request: HttpRequest) -> bool:
-    """Mesma checagem do `api/auth.py:JWTAuth`: assinatura+exp+tipo (ninja-jwt) + token_version."""
+def _authenticated_principal(request: HttpRequest) -> tuple[str, list[str]] | None:
+    """`(external_id, roles)` do access token válido, ou None. Mesma checagem do `api/auth.py:
+    JWTAuth`: assinatura+exp+tipo (ninja-jwt) + token_version."""
     token = _bearer_token(request)
     if not token:
-        return False
+        return None
     try:
         payload = jwt_service.decode(token)
     except jwt_service.TokenError:
-        return False
+        return None
     external_id = payload.get("external_id", "")
-    return jwt_service.version_matches(external_id, payload.get("token_version"))
+    if not jwt_service.version_matches(external_id, payload.get("token_version")):
+        return None
+    return external_id, payload.get("roles", [])
+
+
+def _is_superuser(external_id: str) -> bool:
+    """Flag `is_superuser` no DB (staff nativo do Django) — não vem nos claims (ver api/auth.py)."""
+    from django.contrib.auth import get_user_model
+
+    return (
+        get_user_model()
+        .objects.filter(external_id=external_id, is_active=True, is_superuser=True)
+        .exists()
+    )
+
+
+def _authorized_for_private(external_id: str, roles: list[str], path: str) -> bool:
+    """Requisitante pode ver este arquivo privado? Dono OU revisor (coordenador/superuser)."""
+    if any(r in _REVIEWER_ROLES for r in roles):  # revisor por claim: sem tocar o DB
+        return True
+    owner = owner_external_id_for_path(path)
+    if owner is not None and owner == external_id:
+        return True
+    return _is_superuser(external_id)  # fallback só p/ não-dono não-coordenador (raro)
 
 
 def media_serve(request: HttpRequest, path: str) -> HttpResponse:
-    """Serve `MEDIA_ROOT/<path>`. Prefixo privado sem JWT válido → 401 (ver docstring do módulo).
+    """Serve `MEDIA_ROOT/<path>`. Prefixo privado: sem JWT válido → 401; sem ser dono/revisor → 403.
 
     G1: normaliza o path ANTES de classificar/servir. Sem isso, `training/../documents/<tok>.jpg`
     era classificado pelo 1º segmento (`training`, público) e servido sem token — apesar de o
@@ -76,6 +110,11 @@ def media_serve(request: HttpRequest, path: str) -> HttpResponse:
     norm = posixpath.normpath("/" + path).lstrip("/")
     if not norm or norm.startswith("../"):
         return HttpResponseNotFound()
-    if is_private_media(norm) and not _has_valid_access_token(request):
-        return JsonResponse({"detail": "Não autenticado."}, status=401)
+    if is_private_media(norm):
+        principal = _authenticated_principal(request)
+        if principal is None:
+            return JsonResponse({"detail": "Não autenticado."}, status=401)
+        external_id, roles = principal
+        if not _authorized_for_private(external_id, roles, norm):
+            return JsonResponse({"detail": "Acesso negado."}, status=403)
     return _static_serve(request, norm, document_root=settings.MEDIA_ROOT)
