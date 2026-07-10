@@ -44,6 +44,7 @@ jobs:
 
       - name: pip-audit (deps vuln — falha em HIGH/CRITICAL, warn em baixa severidade)
         run: |
-          .venv/bin/pip install pip-audit -q
+          # uv não instala `pip` no venv (gerencia direto) → usa `uv pip install`, como o passo de deps.
+          /usr/local/bin/uv pip install pip-audit -q
           # --strict: exit 1 se achar qualquer vulnerabilidade com severity >= high
           .venv/bin/pip-audit --strict || true
