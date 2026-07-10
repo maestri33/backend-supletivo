@@ -17,6 +17,7 @@ from django.views.decorators.http import require_POST
 
 from bot.models import InboundEvent
 from bot.security import check_access_token
+from core.net import source_ip as _source_ip
 
 logger = structlog.get_logger()
 
@@ -69,7 +70,7 @@ def _enqueue(event_id: int) -> None:
 
         async_task("bot.worker.handle_inbound", event_id)
     except Exception as exc:  # noqa: BLE001
-        logger.error("bot.webhook.enqueue_failed", event=event_id, error=str(exc))
+        logger.error("bot.webhook.enqueue_failed", wa_event_id=event_id, error=str(exc))
 
 
 def _wa_message_id(payload):
@@ -90,11 +91,3 @@ def _parse_json(request):
     except json.JSONDecodeError:
         return {}
     return data if isinstance(data, dict) else {}
-
-
-def _source_ip(request):
-    """IP de origem, resolvendo X-Forwarded-For atrás do proxy. Igual ao asaas."""
-    xff = request.headers.get("x-forwarded-for", "")
-    if xff:
-        return xff.split(",")[0].strip()
-    return request.META.get("REMOTE_ADDR")

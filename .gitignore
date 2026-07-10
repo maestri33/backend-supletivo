@@ -15,3 +15,7 @@ staticfiles/
 ruvector.db
 dev.sqlite3
 data/
+
+# claude/ponytail: nunca versionar backups de env
+.env.bak.*
+*.bak

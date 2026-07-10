@@ -18,6 +18,7 @@ from __future__ import annotations
 import structlog
 from asgiref.sync import async_to_sync
 from django.conf import settings
+from django.db import transaction
 
 from integrations.communication.mail import client as mail_client
 from integrations.communication.mail import templates as mail_templates
@@ -27,6 +28,7 @@ from notify import sanitize
 from notify.models import (
     STATUS_FAILED,
     STATUS_PENDING,
+    STATUS_SENDING,
     STATUS_SENT,
     STATUS_SKIPPED,
     Notification,
@@ -36,43 +38,128 @@ logger = structlog.get_logger()
 
 
 def dispatch(notification_id: int) -> None:
-    """Envia a Notification pelos canais ainda pendentes e grava o status de cada um."""
-    notif = Notification.objects.filter(id=notification_id).first()
-    if notif is None:
-        logger.warning("notify.dispatch_missing", id=notification_id)
-        return
+    """Envia a Notification pelos canais ainda pendentes e grava o status de cada um.
 
-    notif.attempts += 1
+    G16 — três fases pra não duplicar envio quando o worker morre no meio (OOM/timeout do Django-Q,
+    que re-executa a task após `retry`):
 
-    # ── WhatsApp: mídia > TTS(áudio, fallback texto) > texto ──
-    if notif.whatsapp_status == STATUS_PENDING:
-        if notif.media_url:
-            if notif.want_tts and notif.tts_status == STATUS_PENDING:
+      1. CLAIM: sob `select_for_update`, marca os canais PENDENTES como SENDING e COMMITA. A trava
+         serializa execuções concorrentes (o 2º worker vê SENDING, não PENDING), e o commit persiste
+         o "estou enviando" ANTES de qualquer chamada de rede.
+      2. ENVIO: FORA da transação. A rede (WhatsApp/e-mail/IA-TTS) não é desfeita por rollback, então
+         não pode rodar dentro de uma transação que pode reverter — era essa a causa da duplicação:
+         o áudio ia pro aluno, a transação revertia o status pra PENDING, e o retry reenviava.
+      3. RESULTADO: grava SENT/FAILED de cada canal.
+
+    Recuperação (regra do Victor): se uma execução anterior morreu no meio (canal em SENDING), o
+    retry RECUPERA por TEXTO — não regenera o TTS (a geração de áudio é a única coisa que custa IA e
+    não pode duplicar). Assim a mensagem sempre chega (texto é comum e sem problema); o áudio, se
+    saiu antes do crash, o aluno recebe além do texto. Nunca fica sem mensagem, nunca cobra a IA 2×.
+    """
+    # ── FASE 1: CLAIM ────────────────────────────────────────────────────────
+    with transaction.atomic():
+        notif = (
+            Notification.objects.select_for_update().filter(id=notification_id).first()
+        )
+        if notif is None:
+            logger.warning("notify.dispatch_missing", id=notification_id)
+            return
+
+        notif.attempts += 1
+
+        # A4 — TEST_MODE: dry-run — marca todos os canais pendentes como SENT e NÃO envia nada pela
+        # rede (sem WhatsApp/e-mail/TTS). O caller (ex.: OTP service) completa normalmente porque só
+        # lê o status; nada chega a um destinatário real.
+        if getattr(settings, "TEST_MODE", False):
+            if notif.whatsapp_status == STATUS_PENDING:
+                notif.whatsapp_status = STATUS_SENT
+            if notif.email_status == STATUS_PENDING:
+                notif.email_status = STATUS_SENT
+            if notif.tts_status == STATUS_PENDING:
+                notif.tts_status = STATUS_SENT
+            notif.save()
+            logger.info(
+                "notify.dispatched_dry_run",
+                external_id=str(notif.external_id),
+                caller=notif.caller,
+            )
+            return
+
+        # PENDING = nunca tentado. SENDING = execução anterior morreu no meio → RECUPERA por TEXTO
+        # (regra do Victor): garante a entrega SEM regenerar o TTS (a geração de áudio é a única
+        # coisa cara/não-duplicável, pois custa IA). Texto e e-mail são baratos e reenviáveis "como
+        # é comum, sem problema" — se o áudio chegou a sair antes do crash, o aluno recebe áudio +
+        # texto; se não saiu, recebe só o texto. Nunca fica sem mensagem.
+        wa_pending = notif.whatsapp_status == STATUS_PENDING
+        wa_recover = notif.whatsapp_status == STATUS_SENDING
+        email_pending = notif.email_status == STATUS_PENDING
+        email_recover = notif.email_status == STATUS_SENDING
+        tts_pending = notif.want_tts and notif.tts_status == STATUS_PENDING
+
+        do_whatsapp = wa_pending or wa_recover
+        do_email = email_pending or email_recover
+        if wa_recover or email_recover:
+            logger.warning(
+                "notify.recovering_as_text",
+                external_id=str(notif.external_id),
+                whatsapp=wa_recover,
+                email=email_recover,
+            )
+
+        if not (do_whatsapp or do_email):
+            notif.save(update_fields=["attempts"])
+            return
+
+        # marca o CLAIM (SENDING) nos canais que vão ser enviados e COMMITA (fim do `with`). O TTS só
+        # é reclamado quando é um envio NOVO (tts_pending); na recuperação, ele NÃO é regenerado.
+        if do_whatsapp:
+            notif.whatsapp_status = STATUS_SENDING
+        if do_email:
+            notif.email_status = STATUS_SENDING
+        if tts_pending:
+            notif.tts_status = STATUS_SENDING
+        notif.save()
+
+    # ── FASE 2: ENVIO (fora da transação) ────────────────────────────────────
+    # Usa as flags do_*/*_recover (não os status, que agora são SENDING). Os _send_* mutam notif.
+    if do_whatsapp:
+        if wa_recover:
+            # RECUPERAÇÃO: execução anterior interrompida → manda TEXTO, sem regenerar o TTS.
+            if notif.tts_status == STATUS_SENDING:
+                notif.tts_status = STATUS_FAILED
+                notif.tts_error = "recuperado como texto (envio anterior interrompido)"
+            _send_whatsapp_text(notif)
+        elif notif.media_url:
+            if tts_pending:
                 notif.tts_status = (
                     STATUS_SKIPPED  # mídia tem precedência sobre voice-note
                 )
             _send_whatsapp_media(notif)
         elif notif.want_tts:
-            _send_tts(notif)  # áudio; falha → texto (fallback interno)
+            _send_tts(
+                notif
+            )  # áudio; falha SÍNCRONA → texto (fallback interno já existente)
         else:
             _send_whatsapp_text(notif)
-    elif notif.want_tts and notif.tts_status == STATUS_PENDING:
+    elif tts_pending:
         # whatsapp sem destino (SKIPPED) mas TTS pendente: áudio não tem pra onde ir → skipa.
         notif.tts_status = STATUS_SKIPPED
 
-    if notif.email_status == STATUS_PENDING:
+    if do_email:
         _send_email(notif)
 
-    notif.save()
-    logger.info(
-        "notify.dispatched",
-        external_id=str(notif.external_id),
-        caller=notif.caller,
-        whatsapp=notif.whatsapp_status,
-        email=notif.email_status,
-        tts=notif.tts_status,
-        attempts=notif.attempts,
-    )
+    # ── FASE 3: RESULTADO ────────────────────────────────────────────────────
+    with transaction.atomic():
+        notif.save()
+        logger.info(
+            "notify.dispatched",
+            external_id=str(notif.external_id),
+            caller=notif.caller,
+            whatsapp=notif.whatsapp_status,
+            email=notif.email_status,
+            tts=notif.tts_status,
+            attempts=notif.attempts,
+        )
 
 
 def _to_lan(url: str) -> str:

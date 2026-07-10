@@ -32,6 +32,19 @@ APPROVED = SelfieStatus.APPROVED
 REJECTED = SelfieStatus.REJECTED
 REVIEW = SelfieStatus.REVIEW
 
+# F2 (Victor 2026-07-08): reprovou a selfie N vezes → NÃO bloqueia; salva a foto como está, acumula
+# os comentários da IA e sobe `Profile.selfie_needs_meeting` (encontro presencial no fim do curso).
+MAX_REJECTS_BEFORE_MEETING = 5
+
+
+def append_reason(previous: str | None, attempt: int, desc: str | None) -> str:
+    """Acumula os motivos das reprovações da selfie (F2), um bloco por tentativa — a IA "comenta
+    todas que viu". Trunca defensivamente pra não estourar o TextField em loop de re-upload."""
+    block = f"[tentativa {attempt}] {desc or ''}".strip()
+    joined = f"{previous}\n\n{block}" if previous else block
+    return joined[-8000:]
+
+
 _PROMPT = (
     "Você é o verificador de selfie de um cadastro escolar. A imagem é uma selfie de uma PESSOA "
     "REAL, fotografada ao vivo agora? Só reprove se for CLARAMENTE foto de outra foto, de tela, de "
@@ -100,12 +113,21 @@ def add_face_match(
 
     from integrations.tools.biometric import service as biometric
 
-    fm = biometric.verify_identity(
-        user=user, selfie_image_path=selfie_image_path, caller=caller
-    )
-    status = combine(liveness_status, fm.status)
-    score = "—" if fm.score is None else f"{fm.score:.3f}"
-    desc = f"{liveness_desc or ''} | biometria[{fm.status} score={score}]: {fm.reason}".strip(
+    # O face-match já devolve `review` p/ modelo fora / sem rosto / sem documento. Qualquer OUTRA
+    # falha (DB, erro inesperado) NÃO pode descartar o veredito da visão nem passar no escuro →
+    # fail-safe em REVIEW (o coordenador decide) em vez de derrubar o pipeline da selfie.
+    try:
+        fm = biometric.verify_identity(
+            user=user, selfie_image_path=selfie_image_path, caller=caller
+        )
+        fm_status, fm_score, fm_reason = fm.status, fm.score, fm.reason
+    except Exception as exc:  # noqa: BLE001 — biometria é gate de segurança; falha → revisão humana
+        logger.warning("selfie_face_match_failed", caller=caller, error=str(exc)[:200])
+        fm_status, fm_score, fm_reason = REVIEW, None, f"face-match indisponível: {exc}"
+
+    status = combine(liveness_status, fm_status)
+    score = "—" if fm_score is None else f"{fm_score:.3f}"
+    desc = f"{liveness_desc or ''} | biometria[{fm_status} score={score}]: {fm_reason}".strip(
         " |"
     )
     return status, desc

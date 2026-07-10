@@ -12,6 +12,8 @@ from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_POST
 
+from core.net import source_ip as _source_ip
+
 from . import webhooks
 
 
@@ -41,11 +43,3 @@ def _parse_json(request):
     except json.JSONDecodeError:
         return {}
     return data if isinstance(data, dict) else {}
-
-
-def _source_ip(request):
-    """IP de origem, resolvendo X-Forwarded-For atrás do proxy."""
-    xff = request.headers.get("x-forwarded-for", "")
-    if xff:
-        return xff.split(",")[0].strip()
-    return request.META.get("REMOTE_ADDR")

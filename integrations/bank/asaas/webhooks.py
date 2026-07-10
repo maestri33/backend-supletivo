@@ -39,6 +39,22 @@ ASAAS_TO_PAYOUT_STATUS = {
 
 _PAYOUT_KINDS = (Payment.Kind.PIXKEY, Payment.Kind.QRCODE)
 
+# Trechos do `failReason` do Asaas que indicam SALDO insuficiente na conta — não é recusa
+# definitiva: o Payment (e a PaymentRequest que reconcilia por cima) fica AWAITING_BALANCE e a
+# fila re-tenta sozinha (CONVENTION §8: não perde dinheiro), em vez de FAILED terminal.
+_INSUFFICIENT_BALANCE_HINTS = (
+    "saldo insuficiente",
+    "insufficient balance",
+    "insufficient_balance",
+    "insufficient funds",
+)
+
+
+def is_insufficient_balance_reason(reason: str | None) -> bool:
+    """True se o motivo de falha do Asaas indica falta de saldo (retryable, não terminal)."""
+    reason = (reason or "").lower()
+    return any(hint in reason for hint in _INSUFFICIENT_BALANCE_HINTS)
+
 
 def handle_event(payload, source_ip=None, user_agent=None):
     """Persiste o evento bruto e roteia. Retorna o WebhookEvent.
@@ -66,20 +82,25 @@ def handle_event(payload, source_ip=None, user_agent=None):
         payment, reason = None, f"apply_failed: {exc}"
 
     if payment is not None:
-        row.forwarded_ok = True
-        row.forwarded_at = timezone.now()
-        row.save(update_fields=["forwarded_ok", "forwarded_at"])
         # COBRANÇA PAGA (kind=charge) -> dispara o hook do app destino (lead) §7.3.
+        # G4: reraise=True — se o handler (comissão/matrícula) falhar, a exceção propaga, a view dá
+        # 500 e o Asaas re-tenta (o retry re-dispatcha via `already_paid_redispatch`). Antes o
+        # dispatch engolia e a view respondia 200 → dinheiro recebido sem efeito, mascarado. O row
+        # NÃO é marcado forwarded_ok se o dispatch levantar (a linha abaixo não executa).
         consumed = False
         if payment.status == "PAID" and payment.kind == Payment.Kind.CHARGE:
             consumed = core_hooks.dispatch(
                 "payment.paid",
+                reraise=True,
                 provider="asaas",
                 provider_payment_id=payment.payment_id,
                 amount_cents=int(payment.amount * 100),
                 # comprovante PIX (Asaas) → o lead manda pro aluno na notify de pago.
                 receipt_url=(payload.get("payment") or {}).get("transactionReceiptUrl"),
             )
+        row.forwarded_ok = True
+        row.forwarded_at = timezone.now()
+        row.save(update_fields=["forwarded_ok", "forwarded_at"])
         # ninguém consumiu (ou não é cobrança paga) -> fallback rastreável (§7.4), não perde o evento.
         if not consumed:
             log_unrouted_event(
@@ -115,7 +136,20 @@ def _apply_charge(payload, event):
     if new_status is None:  # PAYMENT_UPDATED -> só refresh, sem mudar status
         row.save()
         return None, "payment_updated_noop"
+    # G5: não rebaixa estado terminal por evento tardio/fora de ordem. REFUNDED é final; PAID só
+    # aceita ir pra PAID/REFUNDED. Pagamento tardio legítimo (PENDING/EXPIRED -> PAID) continua. Sem
+    # isso, um PAYMENT_OVERDUE reentregue sobre um PAID gravava EXPIRED e travava o reembolso depois.
+    if row.status == "REFUNDED" or (
+        row.status == "PAID" and new_status not in ("PAID", "REFUNDED")
+    ):
+        return None, f"terminal_{row.status}_ignora_{new_status}"
     if row.status == new_status:
+        # G4: PAID já-pago ainda RE-dispatcha (retorna o row). No retry após uma falha de efeito, o
+        # Payment já está PAID; sem isso, `status_unchanged` pulava o re-dispatch e o efeito
+        # (comissão/matrícula) nunca reprocessava. O handler é idempotente → re-dispatch de sucesso
+        # é no-op seguro. Só PAID (terminal de cobrança) re-dispatcha; os demais seguem no-op.
+        if new_status == "PAID":
+            return row, "already_paid_redispatch"
         return None, "status_unchanged"
     row.status = new_status
     row.save()
@@ -136,6 +170,12 @@ def _apply_payout(payload, event):
     data = payload.get("transfer") or {}
     asaas_id = data.get("id")
     ext_ref = data.get("externalReference")
+    fail_reason = data.get("failReason") or ""
+
+    # saldo insuficiente NÃO é recusa definitiva: vira AWAITING_BALANCE (não-terminal, a fila
+    # do finance re-tenta sozinha) em vez de FAILED.
+    if new_status == "FAILED" and is_insufficient_balance_reason(fail_reason):
+        new_status = "AWAITING_BALANCE"
 
     row = _find_payment(ext_ref, asaas_id, kinds=_PAYOUT_KINDS)
     if row is None:
@@ -147,7 +187,7 @@ def _apply_payout(payload, event):
         return None, "status_unchanged"
     row.status = new_status
     if new_status == "FAILED":
-        row.last_error = data.get("failReason") or f"event={event}"
+        row.last_error = fail_reason or f"event={event}"
     row.save()
     logger.info(
         "payout_status_changed",

@@ -9,15 +9,19 @@ dependencies = [
     "django-ninja>=1.6.2",
     "django-ninja-jwt>=5.4.4",
     "django-q2>=1.10.0",
-    "dnspython>=2.8.0",
+    "cryptography>=45",
     "httpx>=0.28.1",
     "insightface>=1.0.1",
-    "numpy>=2.4.6",
-    "onnxruntime>=1.26.0",
     "opencv-python-headless>=4.13.0.92",
     "pillow>=12.2.0",
-    "pyjwt[crypto]>=2.10",
     "pypdfium2>=5.9.0",
     "structlog>=25.5.0",
     "whitenoise>=6.12.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8",
+    "pytest-django>=4",
+    "factory-boy>=3",
 ]

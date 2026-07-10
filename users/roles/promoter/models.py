@@ -36,6 +36,10 @@ class Promoter(ExternalIdModel):
         default=Status.ACTIVE,
         db_index=True,
     )
+    # pré-matriculado (Victor 2026-07-08): promotor SEM ensino médio completo. Abordagem diferenciada;
+    # aos 3 leads pagos, entra sozinho no enrollment como BOLSISTA e a flag cai. Decidido no
+    # `create_promoter` lendo `Profile.education_*` (F3).
+    pre_matriculado = models.BooleanField("pré-matriculado (bolsa)", default=False)
     created_at = models.DateTimeField("criado em", auto_now_add=True)
     updated_at = models.DateTimeField("atualizado em", auto_now=True)
 

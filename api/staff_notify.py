@@ -516,7 +516,10 @@ def test_template(request, event: str, payload: TestSendIn):
         user=str(request.auth.external_id),
         ctx=payload.ctx,
         channels_override=tuple(payload.channels) if payload.channels else None,
-        idempotency_key=f"staff_test_{event}_{request.auth.external_id}",
+        # G19: SEM idempotency_key. A key era estável (event+staff), então o 2º clique em "testar"
+        # retornava a notificação anterior e NÃO enviava — o preview parava de funcionar. Preview é
+        # pra ver o resultado a CADA clique; idempotência não faz sentido aqui (não é evento de
+        # negócio com risco de duplicação, é o próprio staff testando).
         run_sync=True,  # síncrono pra o staff ver o resultado AGORA
     )
     if ext is None:

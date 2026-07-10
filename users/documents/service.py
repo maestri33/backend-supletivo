@@ -171,6 +171,11 @@ def get_cnh(external_id: str) -> CNH | None:
     return CNH.objects.filter(document__user__external_id=external_id).first()
 
 
+def get_address_proof(external_id: str) -> AddressProof | None:
+    """A instância AddressProof do usuário (pro orquestrador da validação IA do comprovante, F1)."""
+    return AddressProof.objects.filter(document__user__external_id=external_id).first()
+
+
 def get_doc_sub(external_id: str, doc_type: str):
     """Devolve a instância do sub-doc pelo tipo (`rg` ou `cnh`). Helper do orquestrador de IA
     do funil (plan/15 B3) — espelha `get_rg` mas sem acoplar num tipo só."""
@@ -210,6 +215,28 @@ def update(external_id: str, payload: dict) -> dict:
         "documents.updated", external_id=external_id, parts=list(payload.keys())
     )
     return as_dict(document)
+
+
+def read_image_upload(upload) -> tuple[bytes, str]:
+    """Valida e lê um UploadedFile de imagem (JPEG/PNG/WEBP). Reusado pelas rotas de selfie/doc do
+    aluno que NÃO passam por `upload_photo` — antes elas faziam `file.read()` cru, sem checar nada:
+    um arquivo de 2 GB estourava a RAM e bytes não-imagem eram persistidos.
+
+    Ordem importa: content_type e `size` são checados ANTES de ler (não materializa 2 GB na memória);
+    o decode real (Pillow) vem depois (arquivo renomeado não passa). Devolve (bytes, content_type)."""
+    content_type = getattr(upload, "content_type", "") or ""
+    if content_type not in _ALLOWED_IMAGE:
+        raise ValidationError(
+            "Arquivo deve ser JPEG, PNG ou WEBP.", code="IMAGE_TYPE_INVALID"
+        )
+    max_bytes = settings.MAX_UPLOAD_MB * 1024 * 1024
+    if getattr(upload, "size", 0) > max_bytes:
+        raise ValidationError(
+            f"Imagem maior que {settings.MAX_UPLOAD_MB} MB.", code="IMAGE_TOO_LARGE"
+        )
+    data = upload.read()
+    _decode_image(data)  # decode real: bytes não-imagem levantam IMAGE_DECODE_FAILED
+    return data, content_type
 
 
 def _decode_image(data: bytes) -> None:

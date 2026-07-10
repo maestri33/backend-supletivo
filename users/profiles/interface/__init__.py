@@ -153,6 +153,36 @@ def set_pix(
     return profile
 
 
+def set_education(user, *, level: str, completed: bool) -> Profile | None:
+    """Grava a escolaridade no Profile (nível-pessoa, Victor 2026-07-08). Sobrescreve (correção).
+    None se não tem profile. Validação de `level` fica no service que chama."""
+    p = Profile.objects.filter(user=user).first()
+    if p is None:
+        return None
+    p.education_level = level
+    p.education_completed = completed
+    p.save(update_fields=["education_level", "education_completed", "updated_at"])
+    return p
+
+
+def has_medio_completo(user) -> bool:
+    """Ensino médio COMPLETO? (decide `Promoter.pre_matriculado`). Sem profile / sem dado → False
+    (na dúvida, pré-matriculado — o promotor sem médio confirmado entra no fluxo diferenciado)."""
+    p = Profile.objects.filter(user=user).first()
+    return bool(p and p.education_level == "medio" and p.education_completed)
+
+
+def set_selfie_needs_meeting(user, value: bool = True) -> Profile | None:
+    """Flag nível-pessoa (F2): selfie reprovou 5× → exige encontro presencial no fim do curso.
+    Vive no Profile p/ sobreviver candidate→promoter→enrollment→student. None se não tem profile."""
+    p = Profile.objects.filter(user=user).first()
+    if p is None:
+        return None
+    p.selfie_needs_meeting = value
+    p.save(update_fields=["selfie_needs_meeting", "updated_at"])
+    return p
+
+
 def set_phone(user, phone: str) -> Profile | None:
     """Grava o telefone de login no profile — usado pelo resgate do staff (`auth.change_phone`)
     quando o usuário perde o número e fica trancado fora do OTP. None se não tem profile."""
@@ -177,4 +207,7 @@ __all__ = [
     "get_address",
     "set_pix",
     "set_phone",
+    "set_education",
+    "has_medio_completo",
+    "set_selfie_needs_meeting",
 ]

@@ -19,6 +19,7 @@ from finance.models import Commission, PaymentRequest
 from integrations.bank.asaas import billpay as asaas_billpay
 from integrations.bank.asaas import payout as asaas_payout
 from integrations.bank.asaas import qrpay as asaas_qrpay
+from integrations.bank.asaas.webhooks import is_insufficient_balance_reason
 from users.profiles.interface import get as get_profile
 
 logger = structlog.get_logger()
@@ -185,6 +186,33 @@ def _submit(pr: PaymentRequest, summary: dict) -> None:
     ) as exc:
         reason = str(exc)
         if reason.startswith("asaas_rejected"):
+            if is_insufficient_balance_reason(reason):
+                # saldo insuficiente NÃO é recusa definitiva: espera na fila (AWAITING_BALANCE),
+                # a mesma garantia documentada acima — não falha, não perde dinheiro.
+                pr.status = PaymentRequest.Status.AWAITING_BALANCE
+                pr.last_error = reason
+                pr.next_attempt_at = timezone.now() + _backoff(pr.attempts)
+                pr.save(
+                    update_fields=[
+                        "status",
+                        "last_error",
+                        "attempts",
+                        "next_attempt_at",
+                        "updated_at",
+                    ]
+                )
+                _dispatch_fee_hook(
+                    pr,
+                    "fee.problem",
+                    detail="sem saldo na conta Asaas — a fila re-tenta sozinha quando houver",
+                )
+                summary["awaiting"] += 1
+                logger.warning(
+                    "finance.payout_awaiting_balance",
+                    ref=pr.external_reference,
+                    error=reason,
+                )
+                return
             # recusa definitiva do asaas: falha terminal, cascateia.
             pr.status = PaymentRequest.Status.FAILED
             pr.last_error = reason

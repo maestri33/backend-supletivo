@@ -43,14 +43,15 @@ def handle_event(order_nsu, payload, *, source_ip=None, user_agent=None):
         checkout, result, reason = None, {"ok": True}, f"apply_failed: {exc}"
 
     if checkout is not None:
-        row.forwarded_ok = True
-        row.forwarded_at = timezone.now()
-        row.save(update_fields=["forwarded_ok", "forwarded_at"])
         # CHECKOUT PAGO -> dispara o hook do app destino (lead) §7.3.
+        # G4: reraise=True — efeito de negócio que falha propaga (view não-2xx → InfinitePay
+        # re-tenta), em vez de mascarar como sucesso. `_apply` já retorna o row em `duplicate`
+        # (checkout PAID), então o retry re-dispatcha. forwarded_ok só após o dispatch não levantar.
         consumed = False
         if checkout.status == Checkout.Status.PAID:
             consumed = core_hooks.dispatch(
                 "payment.paid",
+                reraise=True,
                 provider="infinitepay",
                 provider_payment_id=str(checkout.external_id),
                 amount_cents=checkout.paid_amount_cents,
@@ -59,6 +60,9 @@ def handle_event(order_nsu, payload, *, source_ip=None, user_agent=None):
                 if isinstance(payload, dict)
                 else None,
             )
+        row.forwarded_ok = True
+        row.forwarded_at = timezone.now()
+        row.save(update_fields=["forwarded_ok", "forwarded_at"])
         # ninguém consumiu -> fallback rastreável (§7.4), não perde o evento.
         if not consumed:
             log_unrouted_event(
@@ -115,13 +119,34 @@ def _apply(order_nsu, payload):
     if not check.get("paid"):
         return None, {"ok": True, "paid": False}, "not_paid"
 
+    # VALOR: confia SÓ no payment_check (out-of-band verificado), NUNCA no payload forjável. E confirma
+    # que o pago cobre o esperado (amount_cents é fixo, gravado na criação do checkout). Parcelamento
+    # pode pagar a MAIS (juros do cliente) → exigimos >= esperado; pagar a MENOS é rejeitado.
+    paid_raw = check.get("paid_amount")
+    if paid_raw is not None and int(paid_raw) < row.amount_cents:
+        logger.warning(
+            "infinitepay_underpaid",
+            order_nsu=nsu,
+            expected_cents=row.amount_cents,
+            paid_cents=paid_raw,
+        )
+        return (
+            None,
+            {"ok": True, "paid": False},
+            f"amount_mismatch: expected={row.amount_cents} paid={paid_raw}",
+        )
+
     row.status = Checkout.Status.PAID
     row.transaction_nsu = transaction_nsu
     row.slug = slug
-    row.paid_amount_cents = payload.get("paid_amount") or check.get("paid_amount")
-    row.installments = payload.get("installments") or check.get("installments")
-    row.capture_method = payload.get("capture_method") or check.get("capture_method")
-    row.receipt_url = payload.get("receipt_url")
+    row.paid_amount_cents = int(paid_raw) if paid_raw is not None else row.amount_cents
+    # Informativos (NÃO decidem dinheiro): prefere o payment_check verificado, mas cai pro payload
+    # quando o check omite — senão grava NULL à toa (fallback restaurado; wave1 tinha zerado).
+    row.installments = check.get("installments") or payload.get("installments")
+    row.capture_method = check.get("capture_method") or payload.get("capture_method")
+    row.receipt_url = payload.get(
+        "receipt_url"
+    )  # cosmético (link do recibo), não decide dinheiro
     row.save()
     logger.info(
         "checkout_paid",

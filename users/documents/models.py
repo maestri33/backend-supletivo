@@ -160,13 +160,37 @@ class Certificate(models.Model):
 
 
 class AddressProof(models.Model):
-    """Comprovante de residência — foto só (sem campos digitados nem validação IA por ora).
-    Documento OPCIONAL do funil do colaborador: não gateia o wizard."""
+    """Comprovante de residência (foto/PDF) — OBRIGATÓRIO + validado por IA (Victor 2026-07-08):
+    confere se o endereço bate com o informado E o titular (sobrenome). Titular diferente NÃO reprova
+    → `needs_kinship`: pede o grau de parentesco (cônjuge/pai/mãe...) e libera. Gateia a etapa endereço."""
+
+    class Validation(models.TextChoices):
+        PENDING = "pending", "aguardando IA"
+        APPROVED = "approved", "aprovado"
+        REJECTED = "rejected", "reprovado (refazer)"
+        REVIEW = "review", "em revisão (coordenador decide)"
+        NEEDS_KINSHIP = "needs_kinship", "aguardando explicação de parentesco"
 
     document = models.OneToOneField(
         Document, on_delete=models.CASCADE, related_name="address_proof"
     )
     photo = models.CharField("foto", max_length=500, null=True, blank=True)
+    validation_status = models.CharField(
+        max_length=20,
+        choices=Validation.choices,
+        default=Validation.PENDING,
+        db_index=True,
+    )
+    validation_result = models.JSONField("resultado da IA", null=True, blank=True)
+    validated_at = models.DateTimeField("validado em", null=True, blank=True)
+    # titular diferente: quem é + grau de parentesco (texto livre — "não importa quem seja, mas temos
+    # que saber pra não virar baderna", Victor).
+    kinship_relation = models.CharField(
+        "grau de parentesco do titular", max_length=200, null=True, blank=True
+    )
+    kinship_provided_at = models.DateTimeField(
+        "parentesco informado em", null=True, blank=True
+    )
 
     class Meta:
         app_label = "users"

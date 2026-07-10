@@ -17,7 +17,7 @@ from ninja.errors import AuthenticationError, HttpError
 from ninja.errors import ValidationError as NinjaValidationError
 
 from api.auth import JWTAuth
-from api.schemas import RefreshIn, TokenOut
+from api.schemas import LoginIn, RefreshIn, TokenOut
 from users.exceptions import DomainError
 
 logger = structlog.get_logger()
@@ -41,14 +41,16 @@ class HealthOut(Schema):
     status: str
 
 
-def build_group(name: str, description: str) -> NinjaAPI:
-    """Cria o `NinjaAPI` de um público: versionado, auth JWT default, com health + whoami."""
+def build_group(name: str, description: str, auth_override=None) -> NinjaAPI:
+    """Cria o `NinjaAPI` de um público: versionado, auth JWT default, com health + whoami.
+
+    `auth_override` = força auth=None (grupo público como health) ou outro auth customizado."""
     api = NinjaAPI(
         version=API_VERSION,
         urls_namespace=f"api-{name}",
         title=f"API {name}",
         description=description,
-        auth=JWTAuth(),
+        auth=auth_override if auth_override is not None else JWTAuth(),
     )
 
     @api.exception_handler(DomainError)
@@ -150,3 +152,29 @@ def add_auth_refresh(router) -> None:
             raise Unauthorized(
                 "Sessão expirada — faça login novamente.", code="SESSION_EXPIRED"
             ) from exc
+
+
+def add_funnel_login(
+    router, *, funnel_roles: tuple[str, ...], not_in_funnel_msg: str
+) -> None:
+    """Registra o `POST /login` passwordless (OTP) de um funil — idêntico entre grupos, só mudam a
+    cadeia de papéis (`funnel_roles`, do mais avançado ao menos) e a mensagem do 403 (dedup)."""
+    from users.auth import service as auth_iface
+    from users.auth.models import User
+    from users.exceptions import Forbidden, NotFound
+    from users.roles import interface as roles
+
+    @router.post("/login", response=TokenOut, auth=None)
+    def login(request, payload: LoginIn):
+        """Login passwordless (OTP) — resolve o papel mais avançado do funil e emite JWT com TODAS
+        as roles ativas."""
+        user = User.objects.filter(external_id=payload.external_id).first()
+        if user is None:
+            raise NotFound("Usuário não encontrado.", code="USER_NOT_FOUND")
+        active = roles.active_roles(user)
+        funnel_role = next((r for r in funnel_roles if r in active), None)
+        if funnel_role is None:
+            raise Forbidden(not_in_funnel_msg, code="NOT_IN_FUNNEL")
+        return auth_iface.login(
+            external_id=payload.external_id, role=funnel_role, otp=payload.otp
+        )

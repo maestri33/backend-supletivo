@@ -16,6 +16,7 @@ import time
 
 import structlog
 from asgiref.sync import async_to_sync
+from django.conf import settings
 from django.db import IntegrityError, transaction
 
 from integrations.communication.whatsapp.client import WhatsAppError, get_client
@@ -34,7 +35,7 @@ from users.exceptions import (
     ValidationError,
 )
 from users.address import interface as address_iface
-from users.documents import interface as documents_iface
+from users.documents import service as documents_iface
 from users.profiles import interface as profiles
 from users.roles import interface as roles
 
@@ -44,12 +45,40 @@ logger = structlog.get_logger()
 _JITTER_MIN = 0.10
 _JITTER_MAX = 0.30
 
+# A4 — TEST_MODE: nomes sintéticos determinísticos p/ a identidade fake (não chama CPFHub).
+_FAKE_NAMES_M = ("João da Silva", "Pedro Almeida", "Lucas Pereira")
+_FAKE_NAMES_F = ("Maria Oliveira", "Ana Souza", "Carla Lima")
+
+
+def _synthetic_identity(cpf: str):
+    """Monta uma CpfIdentity determinística a partir do CPF (TEST_MODE=1). Gênero/nome pelo
+    11º dígito — mesmo CPF gera mesma identidade, pra reproducibilidade de teste."""
+    from datetime import date as _date
+
+    from integrations.tools.cpf.scripts.cpfhub import CpfIdentity
+
+    digit = int(cpf[-1])
+    male = digit % 2 == 0
+    name = _FAKE_NAMES_M[digit % 3] if male else _FAKE_NAMES_F[digit % 3]
+    return CpfIdentity(
+        cpf=cpf,
+        name=name,
+        name_upper=name.upper(),
+        gender="M" if male else "F",
+        birth_date=_date(1990 + (digit % 20), 1, 1),
+    )
+
 
 # ── helpers de integração (async → sync) ──────────────────────────────────
 
 
 def _lookup_cpf(cpf: str):
-    """CPFHub: identidade real do CPF. None = não encontrado/ inválido; erro real → IntegrationError."""
+    """CPFHub: identidade real do CPF. None = não encontrado/ inválido; erro real → IntegrationError.
+
+    TEST_MODE=1: devolve identidade sintética (não chama a API) — aceita qualquer CPF bem formado."""
+    if getattr(settings, "TEST_MODE", False):
+        logger.info("auth.test_mode.cpf_lookup_mock")
+        return _synthetic_identity(cpf)
     try:
         return async_to_sync(cpfhub.lookup)(cpf)
     except cpfhub.CpfHubError as exc:
@@ -59,6 +88,11 @@ def _lookup_cpf(cpf: str):
 
 
 async def _wa_check(phone: str) -> tuple[bool, str]:
+    if getattr(settings, "TEST_MODE", False):
+        return (
+            True,
+            phone,
+        )  # TEST_MODE=1: número "existe" no zap sem chamar a Evolution API.
     async with get_client() as wa:
         resolved = await wa.resolve_br_number(phone)
         result = await wa.check_numbers([resolved])
@@ -234,12 +268,14 @@ def check(
     phone: str | None = None,
     external_id: str | None = None,
     send_otp: bool = True,
+    service_authed: bool = False,
 ) -> dict:
     """Acha o usuário por cpf/phone/external_id. **O NORMAL é disparar OTP** (`send_otp=True`).
 
     `send_otp=False` = o antigo `check_bot` integrado como parâmetro (Victor 2026-07-04): mesma
-    função, mas NÃO dispara OTP e devolve o `token` (JWT) direto — o canal do chamador é a prova
-    de identidade (bot WhatsApp) ou o front só quer espiar (`found`/`roles`) sem gastar o OTP.
+    função, mas NÃO dispara OTP e devolve o `token` (JWT) direto. **Exige `service_authed=True`** —
+    o segredo de serviço interno checado na view (a rota é pública, então o "canal do chamador" NÃO
+    é prova de identidade sozinho). Sem o segredo, recusa com `SERVICE_SECRET_REQUIRED` (fail-closed).
 
     **VAZA existência DE PROPÓSITO (CONVENTION §5):** devolve `found` honesto — se existe, manda OTP e
     retorna `external_id`+`roles`; se NÃO existe, `found:false`+`otp_sent:false`. O front decide cadastro
@@ -281,7 +317,13 @@ def check(
 
     active = roles.active_roles(user)
     if not send_otp:
-        # modo sem OTP (ex-check_bot): JWT direto — o canal do chamador é a prova de identidade.
+        # modo sem OTP (bot_v2): JWT direto — SÓ com o segredo de serviço (service_authed).
+        # Sem o segredo, a rota pública `/auth/check` viraria bypass de OTP: recusa fail-closed.
+        if not service_authed:
+            raise Unauthorized(
+                "Login sem OTP exige segredo de serviço interno.",
+                code="SERVICE_SECRET_REQUIRED",
+            )
         tokens = jwt_service.issue(str(user.external_id), active)
         logger.info(
             "auth.check_no_otp", external_id=str(user.external_id), roles=active
@@ -335,9 +377,11 @@ def recover(*, cpf: str | None = None, phone: str | None = None) -> dict:
 
 
 def check_bot(*, phone: str) -> dict:
-    """DEPRECATED (Victor 2026-07-04): virou `check(phone=..., send_otp=False)` — mantido como
-    alias fino pra compat do bot_v2 (FastAPI em LXC separada, chama via HTTP)."""
-    return check(phone=phone, send_otp=False)
+    """DEPRECATED (Victor 2026-07-04): virou `check(phone=..., send_otp=False)`. Alias fino
+    **in-process** (só chamável de dentro do Django = confiável), por isso já entra com
+    `service_authed=True`. O bot_v2 externo NÃO usa isto — ele bate na view HTTP `/auth/check`,
+    que exige o header de segredo (`service_secret_ok`)."""
+    return check(phone=phone, send_otp=False, service_authed=True)
 
 
 # ── login ────────────────────────────────────────────────────────────────

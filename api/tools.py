@@ -16,8 +16,9 @@ from datetime import datetime
 from ninja import Schema
 
 from api.base import build_group
+from core.net import require_internal_ip
 from users.exceptions import ValidationError
-from users.roles.lead import interface as lead_iface
+from users.roles.lead import service as lead_iface
 from users.roles.lead.models import Lead
 
 _ERROR_REGISTRY = """
@@ -64,6 +65,7 @@ def tools_leads(
     """Radar de leads: todos os leads (mais novos primeiro), com nome/telefone/link de pagamento.
 
     Filtros: `status` (pending/paid/failed), `created_after` (ISO-8601), `limit` (1..500, default 100)."""
+    require_internal_ip(request)
     if status and status not in Lead.Status.values:
         raise ValidationError(
             f"Status inválido: {status} (use {'/'.join(Lead.Status.values)}).",
@@ -105,6 +107,8 @@ def tools_notifications_send(request, payload: ToolsNotifyIn):
     """Gatilho de disparo: envia WhatsApp e/ou e-mail a um USUÁRIO (`user_external_id`, herda
     phone/email do Profile) OU a um destino LIVRE (`phone`/`email`). `channels` opcional (default:
     todos com destino). Devolve o `external_id` da notificação enfileirada (audit no notify)."""
+    require_internal_ip(request)
+
     from notify.interface.send import send_adhoc
 
     external_id = send_adhoc(

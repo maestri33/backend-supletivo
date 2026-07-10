@@ -16,16 +16,16 @@ from ninja import Field, File, Form, Router, Schema
 from ninja.files import UploadedFile
 
 from api.auth import require_roles
-from api.base import add_auth_refresh, build_group
-from api.schemas import TokenOut
-from users.auth import interface as auth_iface
-from users.auth.models import User
-from users.exceptions import Forbidden, NotFound
-from users.roles import interface as roles
-from users.roles.candidate import interface as candidate_iface
-from users.roles.lead import interface as lead_iface
-from users.roles.promoter import interface as promoter_iface
-from users.roles.training import interface as training_iface
+from api.base import add_auth_refresh, add_funnel_login, build_group
+from api.schemas import CheckIn, CheckOut
+from core.net import source_ip
+from users.auth import service as auth_iface
+from users.consent import PROMOTER_CONTRACT
+from users.exceptions import NotFound
+from users.roles.candidate import service as candidate_iface
+from users.roles.lead import service as lead_iface
+from users.roles.promoter import service as promoter_iface
+from users.roles.training import service as training_iface
 
 # Registry de `code` de erro (plan/15 A1, espelha o clients): TODO 4xx sai `{detail, code, …extra}` — o
 # front roteia por `switch(code)`, nunca parseando `detail`. Vai na descrição do grupo → OpenAPI.
@@ -88,32 +88,6 @@ class CandidateOut(Schema):
     status: str
 
 
-class CheckIn(Schema):
-    cpf: str | None = None
-    phone: str | None = None
-    external_id: str | None = None  # re-dispara OTP de usuário já conhecido (do USER)
-    # O NORMAL é disparar OTP. `false` = modo sem OTP: espia found/roles e devolve `token` direto.
-    send_otp: bool = True
-
-
-class CheckOut(Schema):
-    found: bool
-    external_id: str | None = Field(
-        None, description="external_id do USER (é o que o /auth/login espera)"
-    )
-    otp_sent: bool
-    otp_wait: int | None = None
-    whatsapp: bool | None = None
-    roles: list[str] | None = None
-    # só no modo `send_otp=false`: JWT de acesso direto.
-    token: str | None = None
-
-
-class LoginIn(Schema):
-    external_id: str = Field(description="external_id do USER (veio do /auth/check)")
-    otp: str
-
-
 class ProfileIn(Schema):
     mother_name: str | None = None
     father_name: str | None = None
@@ -153,6 +127,15 @@ class PixIn(Schema):
     key_type: str
 
 
+class EducationIn(Schema):
+    level: str  # fundamental | medio
+    completed: bool  # concluiu o nível?
+
+
+class KinshipIn(Schema):
+    relation: str  # quem é o titular do comprovante + grau de parentesco
+
+
 class SubmissionIn(Schema):
     material_external_id: str
     answer: str
@@ -171,6 +154,8 @@ class CandidateProfileOut(Schema):
     nationality: str | None = None
     name: str | None = None
     birth_date: str | None = None
+    education_level: str | None = None
+    education_completed: bool | None = None
     locked_fields: list[str] = []
 
 
@@ -237,6 +222,17 @@ class CandidateSelfieOut(Schema):
     description: str | None = None
 
 
+class AddressProofSectionOut(Schema):
+    """Bloco do comprovante de endereço no /me (F1): status da validação IA + parentesco."""
+
+    exists: bool = False
+    photo: str | None = None
+    status: str | None = None  # pending|approved|rejected|review|needs_kinship
+    reason: str | None = None
+    needs_kinship: bool = False
+    kinship_relation: str | None = None
+
+
 class CandidateMeOut(Schema):
     """/me RICO do candidato — devolvido por TODA mutação do wizard."""
 
@@ -248,12 +244,15 @@ class CandidateMeOut(Schema):
     selfie_status: str | None = None
     profile: CandidateProfileOut | None = None
     address: CandidateAddressOut | None = None
+    address_proof: AddressProofSectionOut | None = None
     documents: CandidateDocumentsOut | None = None
     selfie: CandidateSelfieOut | None = None
 
 
 class CandidateDocumentSectionOut(Schema):
-    """Seção rica do documento (GET /candidate/document): tipo + fotos + validação IA + extraídos + missing_fields."""
+    """Seção rica do documento (GET /candidate/document): tipo + fotos + validação IA + extraídos + missing_fields.
+    `next_slot` = qual slot o front deve pedir AGORA (None = completo ou aguardando análise).
+    `photos` = status por slot individual ({slot: {status, reason}})."""
 
     doc_type: str | None = None
     number: str | None = None
@@ -272,6 +271,8 @@ class CandidateDocumentSectionOut(Schema):
     analysis_reason: str | None = None
     extracted: dict = {}
     missing_fields: list[str] = []
+    next_slot: str | None = None
+    photos: dict = {}
 
 
 class AnalysisAckOut(Schema):
@@ -444,32 +445,22 @@ def check(request, payload: CheckIn):
 
     `send_otp=false` = modo sem OTP (integração do ex-/auth/check-bot): mesma função sem gastar o
     OTP, devolvendo `token` (JWT) direto."""
+    from core.webhook_auth import service_secret_ok
+
     return auth_iface.check(
         cpf=payload.cpf,
         phone=payload.phone,
         external_id=payload.external_id,
         send_otp=payload.send_otp,
+        service_authed=service_secret_ok(request),
     )
 
 
-@auth_router.post("/login", response=TokenOut, auth=None)
-def login(request, payload: LoginIn):
-    """Login passwordless (OTP) — resolve o papel mais avançado do funil do colaborador
-    (coordinator→promoter→training→candidate) e emite JWT com TODAS as roles ativas."""
-    user = User.objects.filter(external_id=payload.external_id).first()
-    if user is None:
-        raise NotFound("Usuário não encontrado.", code="USER_NOT_FOUND")
-    active = roles.active_roles(user)
-    funnel_role = next((r for r in _FUNNEL_ROLES if r in active), None)
-    if funnel_role is None:
-        raise Forbidden(
-            "Usuário não faz parte do funil do colaborador.", code="NOT_IN_FUNNEL"
-        )
-    return auth_iface.login(
-        external_id=payload.external_id, role=funnel_role, otp=payload.otp
-    )
-
-
+add_funnel_login(
+    auth_router,
+    funnel_roles=_FUNNEL_ROLES,
+    not_in_funnel_msg="Usuário não faz parte do funil do colaborador.",
+)
 add_auth_refresh(auth_router)
 
 
@@ -578,11 +569,25 @@ def candidate_document_photo(request, slot: str, file: UploadedFile = File(...))
     "/candidate/documents/address-proof", response=CandidateMeOut, tags=["candidate"]
 )
 def candidate_address_proof(request, file: UploadedFile = File(...)):
-    """Comprovante de residência (JPEG/PNG/WEBP/PDF, multipart) — documento OPCIONAL: não define
-    `doc_type`, não passa pela IA e não gateia o wizard. Devolve o `me_dict` canônico (a foto
-    aparece em `documents.address_proof.photo`)."""
+    """Comprovante de residência (JPEG/PNG/WEBP/PDF, multipart) — OBRIGATÓRIO, validado por IA
+    (endereço + titular, F1). Assíncrono: acompanhe `address_proof.status` no `me_dict` até
+    `approved`/`rejected`/`review`/`needs_kinship`. `needs_kinship` → POST .../address-proof/kinship."""
     ext = _guard(request, "candidate")
     return candidate_iface.upload_address_proof(user_external_id=ext, upload=file)
+
+
+@api.post(
+    "/candidate/documents/address-proof/kinship",
+    response=CandidateMeOut,
+    tags=["candidate"],
+)
+def candidate_address_proof_kinship(request, payload: KinshipIn):
+    """Titular do comprovante é outra pessoa (`needs_kinship`): informe quem é e o grau de parentesco
+    (cônjuge/pai/mãe...) → libera o comprovante e avança o wizard."""
+    ext = _guard(request, "candidate")
+    return candidate_iface.submit_address_proof_kinship(
+        user_external_id=ext, relation=payload.relation
+    )
 
 
 @api.post("/candidate/pix", response=CandidateMeOut, tags=["candidate"])
@@ -592,6 +597,16 @@ def candidate_pix(request, payload: PixIn):
     ext = _guard(request, "candidate")
     return candidate_iface.set_pix(
         user_external_id=ext, key=payload.key, key_type=payload.key_type
+    )
+
+
+@api.post("/candidate/education", response=CandidateMeOut, tags=["candidate"])
+def candidate_education(request, payload: EducationIn):
+    """Escolaridade — ÚLTIMA pergunta antes da selfie. Grava no Profile (nível-pessoa); sem médio
+    completo o promotor nasce `pre_matriculado`. Devolve o `me_dict` canônico."""
+    ext = _guard(request, "candidate")
+    return candidate_iface.set_education(
+        user_external_id=ext, level=payload.level, completed=payload.completed
     )
 
 
@@ -608,7 +623,25 @@ def candidate_selfie(request, file: UploadedFile = File(...)):
         user_external_id=ext,
         image_bytes=file.read(),
         content_type=getattr(file, "content_type", "image/jpeg"),
+        consent_ip=source_ip(request),
+        consent_user_agent=request.headers.get("user-agent"),
     )
+
+
+class ContractOut(Schema):
+    """Contrato de adesão do promotor versionado (lane #6): o front exibe `text` e, ao enviar a
+    selfie, assina implicitamente a `version`/`hash` retornadas aqui."""
+
+    version: str
+    hash: str
+    text: str
+
+
+@api.get("/contract/current", response=ContractOut, tags=["candidate"])
+def get_current_contract(request):
+    """Contrato de adesão do promotor ATUAL (texto + versão + hash SHA-256). Fonte da verdade no
+    backend (`users/consent`); a selfie é a assinatura deste aceite."""
+    return PROMOTER_CONTRACT.as_dict()
 
 
 @api.get("/candidate/selfie", response=CandidateSelfieOut, tags=["candidate"])

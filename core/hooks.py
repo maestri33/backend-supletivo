@@ -27,28 +27,27 @@ def register(event: str, handler: Callable) -> None:
         handlers.append(handler)
 
 
-def dispatch(event: str, **kwargs) -> bool:
+def dispatch(event: str, *, reraise: bool = False, **kwargs) -> bool:
     """Chama os handlers do evento. Retorna True se ALGUM consumiu (handler retornou truthy).
 
-    Exceção de handler é logada e NÃO propaga — um consumidor com bug não pode derrubar o webhook
-    (o Asaas/InfinitePay re-tentaria à toa). Quem precisa de atomicidade abre a transação dentro do
-    próprio handler.
+    Exceção de handler é sempre logada. `reraise=False` (default): NÃO propaga — um consumidor com
+    bug não derruba o caller. `reraise=True` (G4): PROPAGA — o webhook de pagamento PRECISA disso:
+    se o efeito de negócio (comissão/matrícula) falhou, a view deve dar não-2xx pro gateway
+    re-tentar, em vez de mascarar como sucesso (200) e nunca reprocessar. O retry é seguro porque os
+    handlers são idempotentes (lead.status==PAID → no-op).
     """
     consumed = False
     for handler in _HOOKS.get(event, ()):
         try:
             if handler(**kwargs):
                 consumed = True
-        except Exception as exc:  # noqa: BLE001 — isola o webhook de bug do consumidor
+        except Exception as exc:  # noqa: BLE001 — isola o caller de bug do consumidor
             logger.error(
                 "hook_failed",
-                event=event,
+                hook_event=event,  # 'event' colide com o posicional do structlog
                 handler=getattr(handler, "__name__", repr(handler)),
                 error=str(exc),
             )
+            if reraise:
+                raise
     return consumed
-
-
-def registered_events() -> tuple[str, ...]:
-    """Eventos com pelo menos um handler (introspecção/testes)."""
-    return tuple(_HOOKS.keys())

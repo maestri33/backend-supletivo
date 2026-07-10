@@ -14,11 +14,12 @@ import structlog
 from django.db import transaction
 
 from hub import interface as hub_iface
-from users.auth import interface as auth_iface
+from users.auth import service as auth_iface
 from users.auth.models import User
 from users.exceptions import DomainError
 from users.profiles import interface as profiles
 from users.roles.lead import config
+from users.roles.lead import checkout_links
 from users.roles.lead.models import Checkout, Lead
 
 logger = structlog.get_logger()
@@ -139,8 +140,6 @@ def _notify_checkout(lead: Lead, checkout: Checkout) -> None:
     Teor/canais do DB; `{valor}`/`{link}`/`{payload}` no ctx. TTS/wording = decisão do Victor no DB."""
     from notify.interface.events import send_event
 
-    from users.roles.lead import checkout_links
-
     profile = profiles.get(lead.user)
     if profile is None:
         return
@@ -174,7 +173,7 @@ def _resolve_promoter(ref) -> User:
     promotor SUSPENSO ("não capta nem recebe") não amarra leads nem ganha comissão (auditoria 2026-06-05).
     """
     if ref:
-        from users.roles.promoter import interface as promoter_iface
+        from users.roles.promoter import service as promoter_iface
 
         u = promoter_iface.validate_ref(ref)
         if u is not None:
@@ -194,8 +193,6 @@ def _create_checkout_row(lead: Lead, method: str) -> Checkout:
 
     Os campos do gateway (URL/QR/payment_id) ficam nulos até `fill_checkout_from_provider` —
     chamado pela task async (com retry) ou pelo clique no link curto (lazy)."""
-    from users.roles.lead import checkout_links
-
     self_study = lead.self_study  # auto-matrícula de promotor → preço PRÓPRIO
     if method == "pix":
         provider = Checkout.Provider.ASAAS
@@ -265,7 +262,6 @@ def _fill_pix(checkout: Checkout, profile) -> None:
     from integrations.bank.asaas import charge as asaas_charge
     from integrations.bank.asaas.customers import PayerData
     from integrations.bank.asaas.qr import qr_url_for
-    from users.roles.lead import checkout_links
 
     lead = checkout.lead
     pid = f"lead_{lead.external_id.hex[:16]}"  # = externalReference que o webhook do asaas casa
@@ -304,7 +300,6 @@ def _fill_pix(checkout: Checkout, profile) -> None:
 
 def _fill_card(checkout: Checkout, profile) -> None:
     from integrations.bank.infinitepay import checkout as ip_checkout
-    from users.roles.lead import checkout_links
 
     # pré-preenche o checkout com os dados que JÁ temos (nome do CPFHub + email + telefone). Schema
     # {name, email, phone_number} = porte do legado (sancionado). Telefone BR sem o DDI 55.
@@ -330,8 +325,6 @@ def _fill_card(checkout: Checkout, profile) -> None:
 
 
 def _checkout_dict(c: Checkout) -> dict:
-    from users.roles.lead import checkout_links
-
     return {
         "payment_method": c.payment_method,
         "provider": c.provider,
@@ -362,8 +355,6 @@ def get_for_user_external_id(user_external_id: str) -> Lead | None:
 def checkout_url_for(lead: Lead) -> str | None:
     """A URL ÚNICA do lead (link curto): `checkout_links.resolve` redireciona pro gateway se NÃO pago,
     pro recibo se pago. `None` se ainda não há checkout."""
-    from users.roles.lead import checkout_links
-
     c = getattr(lead, "checkout", None)
     return checkout_links.short_url(c.short_token) if c else None
 
@@ -439,9 +430,9 @@ def create_self_study_lead(*, user, payment_method=None) -> dict:
     """Auto-matrícula de um PROMOTOR que quer estudar (Victor 2026-06-16): Lead(self_study) + Checkout no
     PREÇO DE PROMOTOR, SEM comissão a ninguém. NÃO troca role agora (a role lead/enrollment entra no
     PAGAMENTO) — o promotor segue logado no app dele até pagar. `user` já existe (promotor ATIVO)."""
-    from users.roles.promoter import interface as promoter_iface
+    from users.roles.promoter import service as promoter_iface
     from users.roles.promoter.models import Promoter
-    from users.roles.training import interface as training_iface
+    from users.roles.training import service as training_iface
 
     method = _API_METHODS.get((payment_method or "card").strip().lower())
     if method is None:
@@ -519,7 +510,7 @@ def _apply_effects(lead: Lead):
     from finance.interface import commissions
     from finance.models import Commission
     from users.roles import interface as roles
-    from users.roles.enrollment import interface as enrollment_iface
+    from users.roles.enrollment import service as enrollment_iface
 
     if lead.self_study:
         hub = hub_iface.hub_of(lead.user)  # o próprio polo do promotor
@@ -534,16 +525,48 @@ def _apply_effects(lead: Lead):
         )
         return hub
 
-    commissions.credit_commission(
-        payee=lead.promoter,
-        payee_role=Commission.Role.PROMOTER,
-        source_type=Commission.Source.LEAD,
-        source_external_id=lead.external_id,
-    )
+    # G7: promotor SUSPENSO não recebe comissão de lead que paga após a suspensão (Promoter.suspend
+    # documenta "não capta nem recebe"). O cliente ainda vira matrícula — só a comissão é pulada.
+    from users.roles.promoter.models import Promoter
+
+    suspenso = Promoter.objects.filter(
+        user=lead.promoter, status=Promoter.Status.SUSPENDED
+    ).exists()
+    if suspenso:
+        logger.info(
+            "lead.commission_skipped_promoter_suspended",
+            promoter=str(lead.promoter.external_id),
+            lead=str(lead.external_id),
+        )
+    else:
+        commissions.credit_commission(
+            payee=lead.promoter,
+            payee_role=Commission.Role.PROMOTER,
+            source_type=Commission.Source.LEAD,
+            source_external_id=lead.external_id,
+        )
     hub = hub_iface.hub_of(lead.promoter)
     if hub is None:
         raise LeadError("no_hub_for_promoter")
     enrollment_iface.create_from_lead(user=lead.user, promoter=lead.promoter, hub=hub)
+    # F4: este lead pago conta como indicação — se o promotor é pré-matriculado e bateu 3, entra
+    # sozinho como bolsista (SEM pagamento). G4/#21: em SAVEPOINT — a auto-matrícula do PROMOTOR é
+    # efeito secundário; se ela falha, reverte só a si mesma e o pagamento do CLIENTE (comissão +
+    # matrícula, já commitados acima nesta transação) sobrevive. A falha fica visível no log.
+    from users.roles.promoter import service as promoter_iface
+
+    try:
+        with transaction.atomic():
+            promoter_iface.maybe_auto_enroll_bolsista(lead.promoter)
+    except Exception:
+        logger.exception(
+            "lead.bolsista_auto_enroll_failed", promoter=str(lead.promoter.external_id)
+        )
+    # G8/#5: esta indicação paga incrementa o paid_referrals do promotor; se ele é um student
+    # bolsista que já completou docs, re-avalia a liberação da prova (senão fica preso). No-op senão.
+    from users.roles.student import service as student_iface
+
+    student_iface.reevaluate_exam_release(lead.promoter)
     return hub
 
 
@@ -634,8 +657,6 @@ def list_leads(*, hub=None, status=None, created_after=None, limit=None) -> list
 
 def lead_to_dict(lead: Lead) -> dict:
     """Lead pra listagem do hub/staff: dados + LINK de pagamento + COMPROVANTE (Victor)."""
-    from users.roles.lead import checkout_links
-
     c = getattr(lead, "checkout", None)
     p = profiles.get(lead.user)
     return {

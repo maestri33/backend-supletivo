@@ -63,6 +63,9 @@ class Student(ExternalIdModel):
     )
     # auto-matrícula de promotor (herdado do enrollment): coordenador NÃO recebe comissão na formatura.
     self_study = models.BooleanField(default=False)
+    # bolsista (Victor 2026-07-08, herdado do enrollment): teste final exige ≥10 leads pagos do
+    # promotor-que-ele-foi, além de docs+sangue (gate em `_maybe_release_exam`).
+    bolsista = models.BooleanField(default=False)
     status = models.CharField(
         max_length=40,
         choices=Status.choices,

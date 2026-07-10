@@ -11,8 +11,16 @@ from __future__ import annotations
 
 import secrets
 
+from django.conf import settings
 from django.core.files.base import ContentFile
 from django.core.files.storage import default_storage
+
+
+def is_private_media(path: str) -> bool:
+    """True se o 1º segmento de `path` está em `settings.MEDIA_PRIVATE_PREFIXES` (Lane #4, gate de
+    /media/ em `core/media_views.py`). O resto (ex.: `training/`, `ai/`) é público."""
+    prefix = path.strip("/").split("/", 1)[0]
+    return prefix in settings.MEDIA_PRIVATE_PREFIXES
 
 
 def media_token() -> str:
@@ -27,6 +35,15 @@ def save_media(*, prefix: str, data: bytes, ext: str, token: str | None = None) 
     if default_storage.exists(path):
         default_storage.delete(path)
     default_storage.save(path, ContentFile(data))
+    return path
+
+
+def replace_media(*, old: str | None, prefix: str, data: bytes, ext: str) -> str:
+    """G13: salva a nova mídia e DELETA a anterior — re-upload não pode deixar PII órfã no storage.
+    `old` é o path relativo antigo (ou None/'', no 1º upload). Devolve o path novo."""
+    path = save_media(prefix=prefix, data=data, ext=ext)
+    if old and old != path and default_storage.exists(old):
+        default_storage.delete(old)
     return path
 
 

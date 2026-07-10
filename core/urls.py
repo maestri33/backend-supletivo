@@ -15,11 +15,11 @@ Including another URLconf
     2. Add a URL to urlpatterns:  path('blog/', include('blog.urls'))
 """
 
-from django.conf import settings
 from django.http import JsonResponse
 from django.urls import include, path, re_path
 from django.contrib import admin
-from django.views.static import serve as media_serve
+
+from core.media_views import media_serve
 
 # API pública (Django Ninja, in-process) — 4 grupos por público, versionados sob /api/v1/.
 # Nomes FIXADOS (Victor 2026-06-16): clients/collaborators/leadership/staff são definitivos.
@@ -30,7 +30,8 @@ from api.staff import api as staff_api
 
 # Grupo extra `tools` (2026-07-04): ferramentas internas de integração — SEM auth (proteção externa).
 from api.tools import api as tools_api
-from users.roles.lead.checkout_links import checkout_redirect
+from api.health import health_api
+from users.roles.lead.views import checkout_redirect
 
 urlpatterns = [
     path("admin/", admin.site.urls),
@@ -50,12 +51,13 @@ urlpatterns = [
     path("api/v1/leadership/", leadership_api.urls),
     path("api/v1/staff/", staff_api.urls),
     path("api/v1/tools/", tools_api.urls),
+    path("api/v1/health/", health_api.urls),
     # /media/ servido SEMPRE pelo Django neste host (independente de DEBUG): o notify/Evolution buscam
     # mídia por URL (QR, voice-note) e DEBUG agora é False (auditoria front 2026-06-11). Em prod o
     # reverse proxy pode assumir este caminho.
-    re_path(
-        r"^media/(?P<path>.*)$", media_serve, {"document_root": settings.MEDIA_ROOT}
-    ),
+    # Lane #4 (Victor 2026-07-08): view própria (core/media_views.py) — prefixo privado
+    # (settings.MEDIA_PRIVATE_PREFIXES) agora exige JWT válido; público continua livre.
+    re_path(r"^media/(?P<path>.*)$", media_serve),
 ]
 
 

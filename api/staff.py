@@ -22,13 +22,13 @@ from finance.interface import manual as finance_manual
 from hub import interface as hub_iface
 from integrations import status as integ_status
 from integrations.bank.asaas import onboarding as asaas_onboarding
-from users.auth import interface as auth_iface
+from users.auth import service as auth_iface
 from users.profiles import interface as profiles
 from users.roles import interface as roles
-from users.roles.enrollment import interface as enrollment_iface
-from users.roles.lead import interface as lead_iface
-from users.roles.student import interface as student_iface
-from users.roles.training import interface as training_iface
+from users.roles.enrollment import service as enrollment_iface
+from users.roles.lead import service as lead_iface
+from users.roles.student import service as student_iface
+from users.roles.training import service as training_iface
 
 api = build_group(
     "staff", "Administração da plataforma: hub, coordenador, saúde dos serviços."
@@ -618,27 +618,6 @@ def set_student_platform_credentials(
     return {"external_id": str(student.external_id), "status": student.status}
 
 
-# ── bot matriculador (MOCK — o gatilho real é o signal enrollment_ready_for_matricula) ──
-class BotMatriculadorIn(Schema):
-    enrollment_external_id: str
-
-
-@api.post("/bot-matriculador", tags=["todo"])
-def bot_matriculador(request, payload: BotMatriculadorIn):
-    """STUB do bot matriculador — ainda NÃO implementado (Victor 2026-06-23). Reserva de interface;
-    o gatilho de verdade é o Django signal `enrollment_ready_for_matricula` (core/todo). Responde 501."""
-    require_superuser(request.auth)
-    from django.http import JsonResponse
-
-    return JsonResponse(
-        {
-            "detail": "Bot matriculador ainda não implementado.",
-            "code": "NOT_IMPLEMENTED",
-        },
-        status=501,
-    )
-
-
 # ── usuários da plataforma (read-only; mutação de role = «PENDÊNCIA» Victor) ──
 @api.get("/users", tags=["staff"])
 def list_users(request, role: str | None = None, limit: int = 200):
@@ -671,6 +650,11 @@ def list_users(request, role: str | None = None, limit: int = 200):
 # ── gestor de notificações (envio avulso + histórico + CRUD Template/Trigger) ──
 # Sub-router dedicado (api/staff_notify.py) pra não inflar este arquivo. Montado em /notify.
 api.add_router("/notify", notify_router)
+
+# ── health check autenticado + run-tests (Wave 2) ──
+from api.health import staff_health_router  # noqa: E402
+
+api.add_router("", staff_health_router)  # rotas em /health e /health/run-tests
 
 
 class PhoneIn(Schema):

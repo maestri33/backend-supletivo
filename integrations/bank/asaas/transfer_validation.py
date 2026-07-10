@@ -21,11 +21,18 @@ logger = structlog.get_logger()
 _TYPE_TO_KIND = {
     "TRANSFER": Payment.Kind.PIXKEY,
     "PIX_QR_CODE": Payment.Kind.QRCODE,
+    "BILL": Payment.Kind.BOLETO,  # boleto avulso (billpay.pay_bill) — também iniciado por nós.
 }
 # Tipos que NÃO iniciamos -> recusa categórica.
-_UNSUPPORTED_TYPES = {"BILL", "MOBILE_PHONE_RECHARGE", "PIX_REFUND"}
+_UNSUPPORTED_TYPES = {"MOBILE_PHONE_RECHARGE", "PIX_REFUND"}
 # Status do Payment aceitos pra autorizar (entre o claim local e o webhook de conclusão).
 _VALIDATABLE_STATUSES = ("SUBMITTING", "SUBMITTED")
+# Campo do payload onde o Asaas aninha os dados da operação, por type.
+_PAYLOAD_FIELD = {
+    "TRANSFER": "transfer",
+    "PIX_QR_CODE": "pixQrCode",
+    "BILL": "bill",
+}
 
 
 def validate(payload):
@@ -41,8 +48,8 @@ def validate(payload):
     if kind is None:
         return False, f"unknown_type: {op_type}"
 
-    # Campo do payload segue o type: transfer.id / pixQrCode.id.
-    payload_field = "transfer" if op_type == "TRANSFER" else "pixQrCode"
+    # Campo do payload segue o type: transfer.id / pixQrCode.id / bill.id.
+    payload_field = _PAYLOAD_FIELD.get(op_type, op_type.lower())
     op = payload.get(payload_field)
     if not isinstance(op, dict):
         return False, f"missing_{payload_field}_object"
@@ -71,7 +78,12 @@ def decide(payload):
     op_type = payload.get("type") if isinstance(payload, dict) else None
     op_id = None
     if isinstance(payload, dict):
-        op = payload.get("transfer") or payload.get("pixQrCode") or {}
+        op = (
+            payload.get("transfer")
+            or payload.get("pixQrCode")
+            or payload.get("bill")
+            or {}
+        )
         if isinstance(op, dict):
             op_id = op.get("id")
     logger.info(

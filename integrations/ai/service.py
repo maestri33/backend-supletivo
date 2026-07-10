@@ -30,11 +30,18 @@ logger = structlog.get_logger()
 # Modelos de raciocínio (MiniMax-M3 etc.) prefixam um bloco <think>...</think> no texto; o conteúdo
 # útil vem depois. Removemos o bloco antes de usar/parsear — robusto p/ qualquer modelo da cadeia.
 _THINK_RE = re.compile(r"<think>.*?</think>", re.DOTALL | re.IGNORECASE)
+# G18: <think> ABERTO sem fechamento — a resposta foi truncada por max_tokens no meio do raciocínio.
+# Sem isso, `_strip_think` não casava o par e o CoT cru vazava pro WhatsApp/aluno. Corta do <think>
+# em diante (não há conteúdo útil depois de um think que nem fechou).
+_THINK_OPEN_RE = re.compile(r"<think>.*\Z", re.DOTALL | re.IGNORECASE)
 
 
 def _strip_think(text: str) -> str:
-    """Remove blocos <think>...</think> (raciocínio) do texto e apara espaços nas pontas."""
-    return _THINK_RE.sub("", text or "").strip()
+    """Remove blocos <think>...</think> (raciocínio) do texto e apara espaços nas pontas. G18: um
+    <think> sem </think> (resposta truncada) também é removido — o raciocínio nunca vaza."""
+    out = _THINK_RE.sub("", text or "")
+    out = _THINK_OPEN_RE.sub("", out)
+    return out.strip()
 
 
 # ---------------------------------------------------------------------------
@@ -44,7 +51,7 @@ def _strip_think(text: str) -> str:
 _GRADE_SCHEMA = (
     "Objeto JSON com exatamente dois campos: `nota` (numero inteiro de 0 a 10) e "
     "`justificativa` (string em portugues explicando a nota com base no que o trainee "
-    "escreveu vs o gabarito)."
+    "escreveu vs o gabarito). Aceito em ingles tambem: `grade` + `justification`."
 )
 _GRADE_INSTRUCTION = (
     "Voce e corretor de uma plataforma de treinamento. Compare a resposta do trainee com o "
@@ -71,9 +78,10 @@ def _record(
     result: ChatResult | None,
     error: Exception | None,
     started_at: float,
-) -> None:
-    """Grava uma linha AiCall com as métricas de UMA tentativa. `cost` fica null até a tabela de
-    preços (IA_PRICES no .env) estar configurada — aí `pricing.cost_for` calcula pelos tokens (§8)."""
+) -> AiCall:
+    """Grava uma linha AiCall com as métricas de UMA tentativa. Devolve o AiCall criado (o caller
+    pode ligá-lo determinísticamente ao seu contexto — ex.: o bot liga à Message da conversa, em vez
+    de adivinhar pelo timestamp). `cost` fica null até a tabela de preços (IA_PRICES no .env)."""
     from . import pricing
 
     prompt_tokens = getattr(result, "prompt_tokens", 0) or 0
@@ -84,7 +92,7 @@ def _record(
         prompt_tokens=prompt_tokens,
         completion_tokens=completion_tokens,
     )
-    AiCall.objects.create(
+    return AiCall.objects.create(
         provider=provider,
         operation=operation,
         model=model,
@@ -101,10 +109,14 @@ def _record(
     )
 
 
-def _run(operation: str, caller: str, attempt, chain) -> tuple[ChatResult, str, str]:
+def _run(
+    operation: str, caller: str, attempt, chain
+) -> tuple[ChatResult, str, str, AiCall]:
     """Caminha a cadeia: tenta cada (provider, model), grava AiCall por tentativa, para na 1ª que dá
-    certo. `attempt` é uma corrotina `attempt(client, model) -> ChatResult`. Falha retryável => próximo;
-    não-retryável (4xx/inesperada) => levanta na hora. Cadeia esgotada => levanta a última falha."""
+    certo. Devolve `(result, provider, model, ai_call)` — o `ai_call` é o da tentativa BEM-SUCEDIDA
+    (auditoria determinística). `attempt` é uma corrotina `attempt(client, model) -> ChatResult`.
+    Falha retryável => próximo; não-retryável (4xx/inesperada) => levanta na hora. Cadeia esgotada =>
+    levanta a última falha."""
     last_err: Exception | None = None
     for provider, model in chain:
         client = providers.get_client(provider)
@@ -142,7 +154,7 @@ def _run(operation: str, caller: str, attempt, chain) -> tuple[ChatResult, str, 
                 started_at=started,
             )
             raise
-        _record(
+        ai_call = _record(
             operation=operation,
             provider=provider,
             model=model,
@@ -151,7 +163,7 @@ def _run(operation: str, caller: str, attempt, chain) -> tuple[ChatResult, str, 
             error=None,
             started_at=started,
         )
-        return result, provider, model
+        return result, provider, model, ai_call
     raise last_err or LLMError("IA_FALLBACK_CHAIN vazia", retryable=False)
 
 
@@ -180,7 +192,7 @@ def generate_text(
             max_tokens=max_tokens,
         )
 
-    result, _p, _m = _run(
+    result, _p, _m, _c = _run(
         AiCall.Operation.TEXT, caller, attempt, providers.fallback_chain(model)
     )
     return _strip_think(result.content).strip('"')
@@ -208,7 +220,7 @@ def generate_json(
             max_tokens=max_tokens,
         )
 
-    result, _p, _m = _run(
+    result, _p, _m, _c = _run(
         AiCall.Operation.JSON, caller, attempt, providers.fallback_chain(model)
     )
     try:
@@ -225,8 +237,11 @@ def chat(
     max_tokens: int | None = None,
     json_mode: bool = False,
     model: str | None = None,
-) -> str:
-    """Chat multi-turn. Devolve o conteúdo da resposta do assistente."""
+    return_call: bool = False,
+):
+    """Chat multi-turn. Devolve o conteúdo da resposta do assistente (str). Com `return_call=True`
+    devolve `(str, AiCall)` — o AiCall exato desta chamada, pro caller ligá-lo ao seu contexto sem
+    adivinhar por timestamp (o bot liga à Message da conversa, evitando trocar sob 2 workers)."""
 
     async def attempt(client, m):
         return await client.chat(
@@ -237,10 +252,11 @@ def chat(
             json_mode=json_mode,
         )
 
-    result, _p, _m = _run(
+    result, _p, _m, ai_call = _run(
         AiCall.Operation.CHAT, caller, attempt, providers.fallback_chain(model)
     )
-    return _strip_think(result.content)
+    text = _strip_think(result.content)
+    return (text, ai_call) if return_call else text
 
 
 def summarize(
@@ -259,41 +275,10 @@ def summarize(
             text, model=m, format=format, temperature=temperature, max_tokens=max_tokens
         )
 
-    result, _p, _m = _run(
+    result, _p, _m, _c = _run(
         AiCall.Operation.SUMMARIZE, caller, attempt, providers.fallback_chain(model)
     )
     return _strip_think(result.content)
-
-
-def extract(
-    text: str,
-    *,
-    json_schema: dict,
-    caller: str,
-    temperature: float | None = None,
-    max_tokens: int | None = None,
-    model: str | None = None,
-) -> dict:
-    """Extrai dados estruturados do texto conforme um JSON Schema. Devolve o dict parseado."""
-
-    async def attempt(client, m):
-        return await client.extract(
-            text,
-            model=m,
-            json_schema=json_schema,
-            temperature=temperature,
-            max_tokens=max_tokens,
-        )
-
-    result, _p, _m = _run(
-        AiCall.Operation.EXTRACT, caller, attempt, providers.fallback_chain(model)
-    )
-    try:
-        return json.loads(_strip_think(result.content))
-    except json.JSONDecodeError as exc:
-        raise LLMError(
-            f"resposta não é JSON válido na extração: {exc}", retryable=False
-        ) from exc
 
 
 # ---------------------------------------------------------------------------
@@ -328,16 +313,25 @@ def grade(
             temperature=0.2,
         )
 
-    result, _p, _m = _run(
+    result, _p, _m, _c = _run(
         AiCall.Operation.GRADE, caller, attempt, providers.fallback_chain(model)
     )
     try:
         data = json.loads(_strip_think(result.content))
-        grade_value = max(0.0, min(10.0, float(data["nota"])))
-        justification = str(data["justificativa"]).strip()
+        # ponytail: aceita chaves PT e EN — modelo pode responder em qualquer idioma.
+        # NÃO usar `or` (0 é falsy → nota 0 cairia no fallback EN).
+        raw_grade = data.get("nota")
+        if raw_grade is None:
+            raw_grade = data.get("grade", 0)
+        grade_value = max(0.0, min(10.0, float(raw_grade)))
+        raw_just = data.get("justificativa")
+        if raw_just is None:
+            raw_just = data.get("justification", "")
+        justification = str(raw_just).strip()
     except (json.JSONDecodeError, KeyError, TypeError, ValueError) as exc:
         raise LLMError(
-            f"resposta fora do contrato de correção: {exc}", retryable=False
+            f"resposta fora do contrato de correção (esperado JSON com nota/grade + justificativa/justification): {exc}",
+            retryable=False,
         ) from exc
     if not justification:
         raise LLMError("IA devolveu nota sem justificativa", retryable=False)
@@ -391,6 +385,31 @@ def _media_call(*, operation: str, provider: str, model: str, caller: str, coro)
     return result
 
 
+def _media_chain(operation: str, caller: str, attempts):
+    """Tenta cada `(provider, model, coro)` em ordem; grava 1 AiCall POR TENTATIVA (via `_media_call`,
+    pelo provider REAL). Devolve o 1º sucesso; se todos caírem, propaga a última exceção. É o
+    equivalente-mídia do `_run` (que não serve aqui porque mídia não usa ChatResult/LLMError)."""
+    last_exc: Exception | None = None
+    for provider, model, coro in attempts:
+        try:
+            return _media_call(
+                operation=operation,
+                provider=provider,
+                model=model,
+                caller=caller,
+                coro=coro,
+            )
+        except Exception as exc:  # noqa: BLE001 — provider caiu → tenta o próximo da cadeia
+            last_exc = exc
+            logger.warning(
+                "ai.media_fallback_next",
+                op=operation,
+                provider=provider,
+                error=str(exc)[:160],
+            )
+    raise last_exc or RuntimeError(f"cadeia de mídia {operation} vazia")
+
+
 def describe_image(
     image_bytes: bytes,
     *,
@@ -400,42 +419,59 @@ def describe_image(
 ) -> str:
     """Visão: descreve/analisa uma imagem (selfie/documento/recibo). Devolve o texto.
 
-    MiniMax-M3 é o PRIMÁRIO (multimodal, com o raciocínio <think> desligado); em falha cai pro Gemini
-    (fallback). Grava 1 AiCall por tentativa.
+    Wave 4 — IA centralizada: OmniRoute (gateway OpenAI-compatible, /v1/chat/completions com model
+    multimodal) é o primário QUANDO configurado; em falha cai pro MiniMax-M3 direto. Grava 1 AiCall
+    por tentativa, pelo provider REAL que serviu.
     """
+    import base64
+
     from .minimax import MiniMaxClient
 
-    mm = MiniMaxClient()
+    instruction = prompt or "Descreva esta imagem."
+    attempts: list[tuple[str, str, object]] = []
 
-    async def mm_coro():
+    # primário (só se OmniRoute estiver configurado + tiver modelo de visão): gateway via chat()
+    # multimodal — o LLMClient NÃO tem describe_image, a visão OpenAI-compatible vai como content
+    # blocks (text + image_url inline) no chat.
+    omni = settings.IA_PROVIDERS.get("omniroute")
+    vision_model = getattr(settings, "IA_OMNIROUTE_VISION_MODEL", "")
+    if omni and vision_model:
+        from .client import LLMClient
+
+        gateway = LLMClient(
+            provider="omniroute",
+            base_url=omni["base_url"],
+            api_key=omni["api_key"],
+            temperature=settings.IA_DEFAULT_TEMPERATURE,
+            max_tokens=settings.IA_MAX_TOKENS,
+            timeout=settings.IA_TIMEOUT,
+        )
+        data_url = f"data:{mime_type};base64,{base64.b64encode(image_bytes).decode()}"
+        messages = [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": instruction},
+                    {"type": "image_url", "image_url": {"url": data_url}},
+                ],
+            }
+        ]
+
+        async def gateway_call():
+            res = await gateway.chat(messages, model=vision_model)
+            return _strip_think(res.content)
+
+        attempts.append(("omniroute", vision_model, gateway_call))
+
+    # fallback (SEMPRE presente): MiniMax-M3 direto — chave própria, sem depender do OmniRoute.
+    mm = MiniMaxClient(direct=True)
+
+    async def direct_call():
         return await mm.describe(image_bytes, mime_type=mime_type, prompt=prompt)
 
-    try:
-        return _media_call(
-            operation=AiCall.Operation.VISION,
-            provider="minimax",
-            model=settings.MINIMAX_VISION_MODEL,
-            caller=caller,
-            coro=mm_coro,
-        )
-    except Exception as exc:  # noqa: BLE001 — MiniMax falhou → tenta o Gemini (fallback)
-        logger.warning("ai.vision_fallback_gemini", error=str(exc)[:160])
-        from .gemini import GeminiClient
+    attempts.append(("minimax", settings.MINIMAX_VISION_MODEL, direct_call))
 
-        gemini = GeminiClient()
-
-        async def gemini_coro():
-            return await gemini.describe(
-                image_bytes, mime_type=mime_type, prompt=prompt
-            )
-
-        return _media_call(
-            operation=AiCall.Operation.VISION,
-            provider="gemini",
-            model=settings.GEMINI_VISION_MODEL,
-            caller=caller,
-            coro=gemini_coro,
-        )
+    return _media_chain(AiCall.Operation.VISION, caller, attempts)
 
 
 def generate_image(prompt: str, *, caller: str) -> str:
@@ -496,43 +532,34 @@ def tts(
 ) -> str:
     """TTS: gera áudio a partir do texto. Salva em media/ai/audio/ e devolve o caminho.
 
-    ElevenLabs é o PRIMÁRIO (voz mais natural, Victor 2026-06-21); em falha cai pro MiniMax (fallback).
-    A voz segue: `voice_id` explícito > voz por `gender` (M/F → ELEVENLABS_VOICE_* no primário;
-    MINIMAX_VOICE_* no fallback) > voz default do provider. `voice_id` explícito casa com o provider ativo.
+    Wave 4 — IA centralizada: ElevenLabs (gateway mode: ELEVENLABS_BASE_URL → OmniRoute /v1/audio/
+    speech) é o primário; em falha cai pro MiniMax-M3 direto (chave própria). Grava 1 AiCall por
+    tentativa, pelo provider REAL que serviu. Voz segue: gender → voz cross-gender (regra de marketing).
     """
     from .elevenlabs import ElevenLabsClient
+    from .minimax import MiniMaxClient
 
-    el = ElevenLabsClient()
+    gateway = ElevenLabsClient()  # honra ELEVENLABS_GATEWAY_MODE (→ OmniRoute) via env
     el_voice = voice_id or _voice_for_gender(gender)
 
-    async def el_coro():
-        return await el.tts(text, voice_id=el_voice)
+    async def gateway_call():
+        return await gateway.tts(text, voice_id=el_voice)
 
-    try:
-        audio = _media_call(
-            operation=AiCall.Operation.TTS,
-            provider="elevenlabs",
-            model=settings.ELEVENLABS_MODEL_ID,
-            caller=caller,
-            coro=el_coro,
-        )
-    except Exception as exc:  # noqa: BLE001 — ElevenLabs falhou → tenta o MiniMax (fallback)
-        logger.warning("ai.tts_fallback_minimax", error=str(exc)[:160])
-        from .minimax import MiniMaxClient
+    # fallback: MiniMax-M3 direto (sem gateway) — chave própria
+    mm = MiniMaxClient(direct=True)
+    mm_voice = voice_id or _minimax_voice_for_gender(gender)
 
-        mm = MiniMaxClient()
-        mm_voice = voice_id or _minimax_voice_for_gender(gender)
+    async def direct_call():
+        return await mm.tts(text, voice_id=mm_voice)
 
-        async def mm_coro():
-            return await mm.tts(text, voice_id=mm_voice)
-
-        audio = _media_call(
-            operation=AiCall.Operation.TTS,
-            provider="minimax",
-            model=settings.MINIMAX_TTS_MODEL,
-            caller=caller,
-            coro=mm_coro,
-        )
+    audio = _media_chain(
+        AiCall.Operation.TTS,
+        caller,
+        [
+            ("elevenlabs", settings.ELEVENLABS_MODEL_ID, gateway_call),
+            ("minimax", settings.MINIMAX_TTS_MODEL, direct_call),
+        ],
+    )
     return _save_media("audio", "mp3", audio)
 
 

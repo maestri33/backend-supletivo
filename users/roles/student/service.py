@@ -66,6 +66,7 @@ def create_from_enrollment(
     platform_password=None,
     platform_notes=None,
     self_study=False,
+    bolsista=False,
 ) -> Student:
     """Cria o `Student(AWAITING_DOCUMENTS)` na liberação da matrícula. Idempotente (1-1 com o User)."""
     existing = Student.objects.filter(user=user).first()
@@ -75,6 +76,7 @@ def create_from_enrollment(
         user=user,
         hub=hub,
         self_study=self_study,
+        bolsista=bolsista,
         platform_url=platform_url,
         platform_login=platform_login,
         platform_password=platform_password,
@@ -186,6 +188,19 @@ def get_for_user_external_id(external_id: str) -> Student | None:
         .select_related("hub", "user")
         .first()
     )
+
+
+def reevaluate_exam_release(user) -> None:
+    """G8/#5: re-avalia a liberação da prova de um student BOLSISTA quando uma indicação paga entra.
+
+    O gate do bolsista exige >=10 indicações pagas ALÉM de docs+sangue. Se ele completa os docs com
+    <10 indicações, `_maybe_release_exam` retorna cedo; e quando a 8ª/9ª/10ª indicação paga, nada
+    re-avaliava → ficava preso em DOCUMENTS_UNDER_REVIEW. Chamado por `lead._apply_effects` a cada
+    lead pago do promotor. No-op se o user não é student ou não é bolsista."""
+    student = Student.objects.filter(user=user).select_related("user").first()
+    if student is None or not student.bolsista:
+        return
+    _maybe_release_exam(student)
 
 
 def to_dict(student: Student) -> dict:
@@ -550,6 +565,25 @@ def _maybe_release_exam(student: Student) -> None:
     )
     if not needed.issubset(approved):
         return
+    # F2: selfie reprovada 5× no cadastro → flag nível-pessoa exige encontro presencial com o
+    # coordenador (que posta a foto manual) ANTES de liberar a prova. "Fim do curso" = este gate.
+    from users.profiles import interface as profiles
+
+    p = profiles.get(student.user)
+    if p and p.selfie_needs_meeting:
+        return
+    # F4: bolsista (herdado do promotor pré-matriculado) precisa de ≥10 leads pagos, ALÉM de
+    # docs+sangue (soma, não substitui). `student.user` era o promotor.
+    if student.bolsista:
+        # `rules` é folha (só lê lead.models): importar `promoter.service` aqui fecharia o ciclo
+        # promoter -> enrollment -> student -> promoter.
+        from users.roles.promoter import rules as promoter_rules
+
+        if (
+            promoter_rules.paid_referrals(student.user)
+            < promoter_rules.BOLSA_EXAM_THRESHOLD
+        ):
+            return
     _set_status(student, Student.Status.EXAM_RELEASED)
     _notify(
         student,
@@ -912,6 +946,28 @@ def register_pickup(
     return student
 
 
+def clear_manual_selfie(
+    *, student_external_id: str, coordinator, image_bytes: bytes, content_type: str
+) -> Student:
+    """F2 — encontro presencial: o aluno cuja selfie reprovou 5× no cadastro chega ao fim do curso
+    com `Profile.selfie_needs_meeting`. O coordenador tira a foto DELE pelo app e posta aqui como
+    assinatura → a flag cai e a prova destrava (`_maybe_release_exam`). Espelha `register_pickup`."""
+    from users.profiles import interface as profiles
+
+    student = _coordinated(student_external_id, coordinator)
+    _save_photo(student, "manual_selfie", image_bytes, content_type)
+    profiles.set_selfie_needs_meeting(student.user, False)
+    logger.info(
+        "student.manual_selfie_cleared",
+        external_id=str(student.external_id),
+        by=str(coordinator.external_id),
+    )
+    _maybe_release_exam(
+        student
+    )  # a flag era o que segurava a liberação — reavalia agora
+    return student
+
+
 def _become_veteran(student: Student, diploma: StudentDiploma) -> None:
     """Adiciona a role `veteran` (mantém `student`), marca VETERAN e credita a comissão. Roda DENTRO
     da transação do `register_pickup` — se a comissão falhar, tudo é desfeito (nada de veteran sem ela)."""
@@ -997,12 +1053,14 @@ def detail_for_coordinator(*, student_external_id: str, coordinator) -> dict:
 
 
 def veteran_detail(*, user_external_id: str) -> dict:
-    """Visão consolidada do VETERANO (read-only): TODOS os dados dele numa chamada — identidade/
-    matrícula (perfil, endereço, escolaridade, RG, selfie), os documentos que ELE postou como aluno
-    e o que o COORDENADOR postou (diploma + histórico + foto da retirada). O veterano mantém a role
-    student; aqui é só leitura do estado final (não move nada)."""
+    """Parte STUDENT da visão do veterano (read-only): identidade, os documentos que ELE postou e o
+    que o COORDENADOR postou (diploma + histórico + foto da retirada). O veterano mantém a role
+    student; aqui é só leitura do estado final (não move nada).
+
+    O bloco `enrollment` (perfil/endereço/escolaridade/RG/selfie) NÃO vem daqui: buscá-lo faria
+    `student.service` importar `enrollment.service`, que já importa `student.service` no `conclude`
+    (ciclo). Quem cruza os dois domínios é a rota `veteran_me` em `api/clients.py`."""
     from users.profiles import interface as profiles
-    from users.roles.enrollment import interface as enrollment_iface
 
     student = _by_user(user_external_id)
     data = to_dict(student)
@@ -1028,21 +1086,6 @@ def veteran_detail(*, user_external_id: str) -> dict:
         }
         for d in student.documents.all()
     ]
-
-    # bloco da MATRÍCULA (perfil/endereço/escolaridade/RG/selfie) — o enrollment persiste após virar
-    # student (nada o deleta). Reusa o me_dict rico do enrollment (cruza domínio pelo interface, §3).
-    enr = enrollment_iface.get_for_user_external_id(user_external_id)
-    if enr is not None:
-        m = enrollment_iface.me_dict(enr)
-        data["enrollment"] = {
-            "profile": m.get("profile"),
-            "address": m.get("address"),
-            "education": m.get("education"),
-            "rg": m.get("rg"),
-            "selfie": m.get("selfie"),
-        }
-    else:
-        data["enrollment"] = None
 
     # diploma RICO: os arquivos que o COORDENADOR postou (diploma + histórico + foto da retirada).
     # Paths relativos; o front prefixa /media/.

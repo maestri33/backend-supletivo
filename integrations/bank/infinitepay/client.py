@@ -1,8 +1,9 @@
 """Camada HTTP fina e isolada sobre a API de Checkout da InfinitePay (porte do micro legado).
 
 Regras (CONVENTION §8/§10):
- - base_url vem do .env via settings: https://api.infinitepay.io (doc oficial). Os paths completos são
-   /invoices/public/checkout/links e .../payment_check.
+ - base_url vem do .env via settings: https://api.checkout.infinitepay.io (API de Checkout atual). Os
+   paths são /links e /payment_check. O endpoint antigo (api.infinitepay.io/invoices/public/checkout/*)
+   foi descontinuado — mesma lógica, só a URL mudou.
  - SEM auth / SEM api-key: a InfinitePay autentica só pelo `handle` (InfiniteTag) — quem recebe é o dono
    da conta, então não há segredo a proteger no envio (palavra do Victor + doc oficial).
  - Zero regra de negócio aqui. Cada função mapeia 1:1 um endpoint.
@@ -64,7 +65,7 @@ class InfinitePayClient:
     # ---------- checkout ----------
     async def create_checkout_link(self, payload: dict) -> dict:
         """POST /links — gera o link de pagamento. Valida que veio uma URL de checkout."""
-        data = await self._post("/invoices/public/checkout/links", payload)
+        data = await self._post("/links", payload)
         if data.get("success") is False:
             raise InfinitePayError("InfinitePay returned success=false", payload=data)
         if not (data.get("url") or data.get("checkout_url") or data.get("link")):
@@ -78,7 +79,7 @@ class InfinitePayClient:
     ) -> dict:
         """POST /payment_check — reconfirma o pagamento out-of-band (a trava real do webhook)."""
         return await self._post(
-            "/invoices/public/checkout/payment_check",
+            "/payment_check",
             {
                 "handle": handle,
                 "order_nsu": order_nsu,

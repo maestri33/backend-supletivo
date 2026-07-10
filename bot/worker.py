@@ -143,7 +143,7 @@ def handle_inbound(inbound_event_id: int) -> str:
     event.save(update_fields=["processed", "processed_at"])
 
     if not phone or not text:
-        logger.info("bot.skip_non_text", event=inbound_event_id)
+        logger.info("bot.skip_non_text", inbound_event_id=inbound_event_id)
         return "not_text_inbound"
 
     # resolve quem fala (cadastrado ou estranho) + roles
@@ -194,6 +194,12 @@ def handle_inbound(inbound_event_id: int) -> str:
         logger.info("bot.awaiting_human_silent", conv=conversation.id)
         return "awaiting_human"
 
+    # usuário BLOQUEADO (role bloqueante ativa) → nunca a política normal do público: escala pra
+    # humano direto, sem guardrail/rate-limit/engine/IA.
+    if policy.audience == router.AUDIENCE_BLOCKED:
+        _escalate(conversation, phone, reason="blocked_user")
+        return "blocked_user"
+
     # GUARDRAIL entrada (fail-closed): injeção → escala, não chama IA
     scan = guardrail.scan_inbound(text)
     if not scan.safe:
@@ -228,6 +234,7 @@ def handle_inbound(inbound_event_id: int) -> str:
     # canônica da etapa; a IA só conversa. Cadastrado → Actor (token emitido+validado pelo gate da
     # API); estranho → sem actor (engine vira no-op, segue na FAQ pública).
     actor = Actor.for_user(user) if user is not None else None
+
     decision = engine.run(actor, policy, text)
 
     # Escrita falhou na API → humano assume (NUNCA finge que fez).
@@ -266,17 +273,20 @@ def handle_inbound(inbound_event_id: int) -> str:
 
     # IA chat — caída (cadeia esgotada) → canned + awaiting_human (fallback, nunca erro cru)
     from integrations.ai import service as ia
-    from integrations.ai.client import LLMError
 
-    before = timezone.now()
+    ai_call = None
     try:
-        answer = ia.chat(
+        # return_call=True: liga DETERMINISTICAMENTE a resposta ao AiCall desta chamada. Antes o
+        # worker adivinhava pelo timestamp (`caller`+created_at), e sob 2 workers do bot
+        # simultâneos podia pegar o AiCall de OUTRO atendimento — auditoria de custo trocada.
+        answer, ai_call = ia.chat(
             messages,
             caller=ratelimit.AI_CALLER,
             temperature=getattr(settings, "BOT_AI_TEMPERATURE", 0.3),
             max_tokens=getattr(settings, "BOT_AI_MAX_TOKENS", 500) or None,
+            return_call=True,
         )
-    except (LLMError, Exception) as exc:  # noqa: BLE001 — IA fora → escala, nunca quebra pro usuário
+    except Exception as exc:  # noqa: BLE001 — IA fora → escala, nunca quebra pro usuário
         logger.warning("bot.ai_failed", conv=conversation.id, error=str(exc)[:160])
         _escalate(conversation, phone, reason="ai_unavailable")
         return "ai_failed"
@@ -290,19 +300,6 @@ def handle_inbound(inbound_event_id: int) -> str:
     if guardrail.has_pii(answer):
         _escalate(conversation, phone, reason="outbound_pii")
         return "blocked_pii"
-
-    # liga (best-effort) a resposta ao AiCall que a gerou — auditoria/custo
-    ai_call = None
-    try:
-        from integrations.ai.models import AiCall
-
-        ai_call = (
-            AiCall.objects.filter(caller=ratelimit.AI_CALLER, created_at__gte=before)
-            .order_by("-id")
-            .first()
-        )
-    except Exception:  # noqa: BLE001 — link de auditoria nunca trava o envio
-        ai_call = None
 
     conversation.state = STATE_OPEN
     conversation.save(update_fields=["last_activity"])

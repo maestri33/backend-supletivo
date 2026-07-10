@@ -11,6 +11,7 @@ https://docs.djangoproject.com/en/5.2/ref/settings/
 """
 
 import os
+import socket
 from datetime import timedelta
 from pathlib import Path
 
@@ -34,6 +35,33 @@ SECRET_KEY = env("SECRET_KEY")
 DEBUG = env("DEBUG")
 
 ALLOWED_HOSTS = env.list("ALLOWED_HOSTS", default=[])
+
+# ── A4 — TEST_MODE ────────────────────────────────────────────────────────
+# Modo de teste integrado: simula CPFHub (aceita qualquer CPF bem formado), força WhatsApp
+# check_numbers=True, usa código OTP fixo e aponta Asaas pro sandbox. Ligado pelo .env
+# (`TEST_MODE=1`). TRAVA anti-prod única e correta: `socket.gethostname() ∈
+# TEST_MODE_ALLOWED_HOSTS` (lista explícita, default vazia). **Não** trava por nome de
+# settings module — o `core.prod_settings` é usado tanto em prod real quanto em STAGING
+# ISOLADO (test-v7m), que não é prod: tem DB local + Asaas sandbox + DEBUG=true. O que
+# protege prod é o HOSTNAME, não o módulo (o .env do prod real fica num host NÃO listado).
+# Falha → ImproperlyConfigured no import. Source of truth único: este settings.
+TEST_MODE = env.bool("TEST_MODE", default=False)
+TEST_MODE_ALLOWED_HOSTS = env.list("TEST_MODE_ALLOWED_HOSTS", default=[])
+TEST_MODE_OTP_CODE = env("TEST_MODE_OTP_CODE", default="000000")
+TEST_MODE_ASAAS_SANDBOX_URL = env(
+    "TEST_MODE_ASAAS_SANDBOX_URL", default="https://api-sandbox.asaas.com"
+)
+if TEST_MODE:
+    from django.core.exceptions import ImproperlyConfigured
+
+    _hostname = socket.gethostname()
+    if _hostname not in TEST_MODE_ALLOWED_HOSTS:
+        raise ImproperlyConfigured(
+            f"TEST_MODE=1 recusado: hostname {_hostname!r} não está em "
+            f"TEST_MODE_ALLOWED_HOSTS={TEST_MODE_ALLOWED_HOSTS}. "
+            "Anti-prod: TEST_MODE só roda em hosts explicitamente autorizados."
+        )
+
 
 # CORS (django-cors-headers) — config no .env (CONVENTION §10: um .env, nada hardcoded).
 # Em dev liberamos geral p/ a rede interna acessar fácil; em prod = lista explícita + allow_all False.
@@ -102,6 +130,8 @@ MIDDLEWARE = [
     "corsheaders.middleware.CorsMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
+    # ponytail: logging estruturado (request_id + method/path/status/duration) — após Common.
+    "core.logging_middleware.RequestLoggingMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
@@ -263,7 +293,11 @@ URL_VERIFY_NONCE_TTL = env.int("URL_VERIFY_NONCE_TTL", default=600)
 # às vezes é colado com "$" à esquerda (InfiniteTag); removemos pra não furar a chamada. Lemos via
 # os.environ por simetria com a key do asaas (read_env() já populou os.environ acima).
 INFINITEPAY_HANDLE = os.environ.get("INFINITEPAY_HANDLE", "").lstrip("$")
-INFINITEPAY_BASE_URL = env("INFINITEPAY_BASE_URL", default="https://api.infinitepay.io")
+# API de Checkout atual: api.checkout.infinitepay.io (paths /links e /payment_check). O endpoint antigo
+# api.infinitepay.io/invoices/public/checkout/* foi descontinuado — mesma lógica, só a URL mudou.
+INFINITEPAY_BASE_URL = env(
+    "INFINITEPAY_BASE_URL", default="https://api.checkout.infinitepay.io"
+)
 INFINITEPAY_HTTP_TIMEOUT = env.float("INFINITEPAY_HTTP_TIMEOUT", default=10.0)
 # URL de sucesso pós-pagamento (opcional; default = EXTERNAL_URL no serviço de checkout).
 INFINITEPAY_REDIRECT_URL = env("INFINITEPAY_REDIRECT_URL", default="")
@@ -306,6 +340,9 @@ for _ia_item in env.list("IA_FALLBACK_CHAIN", default=[]):
 IA_DEFAULT_TEMPERATURE = env.float("IA_DEFAULT_TEMPERATURE", default=0.3)
 IA_MAX_TOKENS = env.int("IA_MAX_TOKENS", default=0)
 IA_TIMEOUT = env.float("IA_TIMEOUT", default=60.0)
+# Modelo multimodal do gateway OmniRoute para VISÃO (describe_image via /v1/chat/completions). Vazio
+# => o primário OmniRoute é pulado e a visão vai direto pro MiniMax-M3 (fallback sempre presente).
+IA_OMNIROUTE_VISION_MODEL = env("IA_OMNIROUTE_VISION_MODEL", default="")
 
 # IA — tabela de preços OPCIONAL (integrations.ai.pricing). Formato: "provider:model:in:out, ..."
 # (in/out = preço por 1 MILHÃO de tokens, moeda à escolha do Victor). VAZIO por padrão → AiCall.cost
@@ -398,6 +435,25 @@ WHATSAPP_INSTANCE_NAME = env("WHATSAPP_INSTANCE_NAME", default="default")
 # compartilhado (x-webhook-token == este valor), comparado em tempo constante. Sem ele o webhook
 # do bot dá 401 (fail-closed) e o check bot.W001 avisa no boot (não trava — padrão asaas.W001).
 WHATSAPP_WEBHOOK_SECRET = env("WHATSAPP_WEBHOOK_SECRET", default="")
+
+# Segredo de serviço p/ o login SEM OTP (bot_v2 externo chama /auth/check com send_otp=false).
+# Fail-closed: vazio no .env => a rota sem-OTP recusa (o segredo é a prova de identidade, não a rede).
+BOT_SERVICE_SECRET = env("BOT_SERVICE_SECRET", default="")
+BOT_SERVICE_HEADER = env("BOT_SERVICE_HEADER", default="x-bot-service-token")
+# Wave1 hardening — consumido por api/tools (allowlist DMZ) e pelo serve de mídia privada.
+# TOOLS_ALLOWED_IPS aceita IPs e CIDRs (o gate usa o módulo ipaddress). Default = loopback + rede interna.
+TOOLS_ALLOWED_IPS = env.list(
+    "TOOLS_ALLOWED_IPS", default=["127.0.0.1", "::1", "10.0.0.0/8"]
+)
+# Nº de proxies CONFIÁVEIS na frente do app (nginx/Caddy). O gate por IP (core.net.client_ip) conta
+# esse tanto de hops a partir da DIREITA do X-Forwarded-For — o XFF esquerdo é forjável pelo cliente
+# e NUNCA decide acesso. Default 1 (um reverse-proxy). Ajuste se houver cadeia de proxies confiáveis.
+TRUSTED_PROXY_COUNT = env.int("TRUSTED_PROXY_COUNT", default=1)
+# Prefixos de mídia que exigem autorização (dono do recurso). O resto (training/IA) é público.
+MEDIA_PRIVATE_PREFIXES = env.list(
+    "MEDIA_PRIVATE_PREFIXES",
+    default=["documents", "selfie", "diploma", "receipt", "student"],
+)
 # Rate-limit por TELEFONE em DB (sem Redis), espelha o OTP: janela curta (1 a cada WINDOW_S) +
 # janela horária (máx HOURLY_MAX/h). Anti-abuso de custo de IA/WhatsApp; alto p/ não trancar
 # usuário legítimo. Estouro da janela curta = silêncio; da horária = FAQ estática (modo degradado).
@@ -575,3 +631,35 @@ DEFAULT_STAFF_PASSWORD = os.environ.get("DEFAULT_STAFF_PASSWORD", "")
 # no Profile se estiver vazio (fecha o «rabo» "setei à mão" dos flashes de 06-06 e 06-10). Sem validação
 # DICT aqui: é seed de sistema; a chave já foi provada em payout real.
 DEFAULT_STAFF_PIX = env("DEFAULT_STAFF_PIX", default="")
+
+# ── Logging estruturado (structlog) ──────────────────────────────────────────
+# ponytail: structlog já está no pyproject.toml. Config mínima: console em dev, JSON em prod.
+import structlog  # noqa: E402 — import perto da sua config (deliberado), não no topo
+
+_structlog_processors = [
+    structlog.stdlib.add_log_level,
+    structlog.processors.TimeStamper(fmt="iso"),
+]
+if DEBUG:
+    _structlog_processors.append(structlog.dev.ConsoleRenderer())
+else:
+    _structlog_processors.append(structlog.processors.JSONRenderer())
+
+structlog.configure(
+    processors=_structlog_processors,
+    wrapper_class=structlog.stdlib.BoundLogger,
+    context_class=dict,
+    logger_factory=structlog.stdlib.LoggerFactory(),
+    cache_logger_on_first_use=True,
+)
+
+# ── Sentry / GlitchTip (opcional — sem DSN = no-op) ──────────────────────────
+SENTRY_DSN = env("SENTRY_DSN", default="")
+if SENTRY_DSN:
+    import sentry_sdk
+
+    sentry_sdk.init(
+        dsn=SENTRY_DSN,
+        traces_sample_rate=env.float("SENTRY_TRACES_SAMPLE_RATE", default=0.1),
+        environment=env("SENTRY_ENVIRONMENT", default="development"),
+    )

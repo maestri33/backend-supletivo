@@ -561,7 +561,7 @@ def _notify(user, event: str, *, key: str, tts: bool = False) -> None:
     try:
         send_event(event, profile=p, idempotency_key=key)
     except Exception as exc:  # noqa: BLE001
-        logger.warning("training.notify_failed", event=event, error=str(exc))
+        logger.warning("training.notify_failed", notify_event=event, error=str(exc))
 
 
 def _notify_cleared(user, trigger=None) -> None:

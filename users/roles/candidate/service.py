@@ -13,9 +13,9 @@ from django.db import transaction
 
 from hub import interface as hub_iface
 from users.address import interface as address_iface
-from users.auth import interface as auth_iface
+from users.auth import service as auth_iface
 from users.auth.models import User
-from users.documents import interface as documents_iface
+from users.documents import service as documents_iface
 from users.exceptions import Conflict, DomainError, Forbidden, NotFound
 from users.profiles import interface as profiles
 from users.roles import interface as roles
@@ -148,6 +148,9 @@ def me_dict(cand: Candidate) -> dict:
             "nationality": p.nationality,
             "name": p.name,
             "birth_date": p.birth_date.isoformat() if p.birth_date else None,
+            # escolaridade (nível-pessoa, F3): o front usa pra renderizar/pré-marcar a etapa `education`.
+            "education_level": p.education_level,
+            "education_completed": p.education_completed,
             # autoritativos do CPFHub — nenhum endpoint do candidato os edita; o front usa
             # esta flag pra travar/destacar os inputs (sombra verde + ✓).
             "locked_fields": ["name", "birth_date"],
@@ -156,12 +159,15 @@ def me_dict(cand: Candidate) -> dict:
     address = address_iface.as_public_dict(address_iface.get_by_external_id(user_ext))
     address["missing_fields"] = [f for f in _ADDRESS_FIELDS if not address.get(f)]
 
+    from users.roles import _address_proof
+
     selfie = _selfie_dict(cand)
 
     return {
         **to_dict(cand),
         "profile": profile,
         "address": address,
+        "address_proof": _address_proof.section_dict(user_ext),
         "documents": documents_iface.get_by_external_id(user_ext),
         "selfie": selfie,
     }
@@ -227,9 +233,16 @@ def set_address_data(*, user_external_id, **fields) -> dict:
 
 
 def _advance_address(cand: Candidate, user_external_id) -> None:
-    """Avança PROFILE→ADDRESS quando o endereço fica completo (campos essenciais preenchidos)."""
-    if cand.status == _S.PROFILE and address_iface.is_complete(
-        address_iface.get_by_external_id(user_external_id)
+    """Avança PROFILE→ADDRESS quando o endereço fica completo E o comprovante está aprovado (F1).
+    O comprovante é validado por IA (endereço + titular) — sem ele aprovado, o wizard não passa."""
+    from users.roles import _address_proof
+
+    if (
+        cand.status == _S.PROFILE
+        and address_iface.is_complete(
+            address_iface.get_by_external_id(user_external_id)
+        )
+        and _address_proof.is_approved(user_external_id)
     ):
         _set_status(cand, _S.ADDRESS)
 
@@ -328,13 +341,57 @@ def upload_document_photo(*, user_external_id, slot: str, upload) -> dict:
 
 
 def upload_address_proof(*, user_external_id, upload) -> dict:
-    """Comprovante de residência (foto/PDF) — documento OPCIONAL: não mexe no `doc_type` (rg/cnh),
-    não entra no pipeline de IA nem gateia o wizard. Aceito de `address` até `selfie`."""
+    """Comprovante de residência (foto/PDF) — OBRIGATÓRIO + validado por IA (F1). Salva a foto,
+    marca `pending` e enfileira a validação (endereço + titular). Aceito já na etapa `address`."""
     cand = _require(
-        user_external_id, _S.ADDRESS, _S.DOCUMENTS, _S.PIX, _S.SELFIE, _S.COMPLETED
+        user_external_id,
+        _S.PROFILE,
+        _S.ADDRESS,
+        _S.DOCUMENTS,
+        _S.PIX,
+        _S.SELFIE,
+        _S.COMPLETED,
     )
     documents_iface.upload_photo(user_external_id, "address_proof_photo", upload)
+    ap = documents_iface.get_address_proof(user_external_id)
+    if ap is not None:
+        ap.validation_status = "pending"
+        ap.save(update_fields=["validation_status"])
+    from django_q.tasks import async_task
+
+    async_task("users.roles.candidate.tasks.validate_address_proof", cand.id)
     return me_dict(cand)
+
+
+def submit_address_proof_kinship(*, user_external_id, relation: str) -> dict:
+    """Titular do comprovante é outra pessoa (`needs_kinship`): a pessoa explica o parentesco → libera."""
+    from users.roles import _address_proof
+
+    cand = _require(
+        user_external_id,
+        _S.PROFILE,
+        _S.ADDRESS,
+        _S.DOCUMENTS,
+        _S.PIX,
+        _S.SELFIE,
+        _S.COMPLETED,
+    )
+    _address_proof.submit_kinship(user_external_id, relation)
+    _advance_address(cand, user_external_id)
+    return me_dict(cand)
+
+
+def run_address_proof_validation(candidate_id: int) -> None:
+    """Task async: valida o comprovante (visão → endereço → titular) e, se aprovar, avança o wizard."""
+    from users.roles import _address_proof
+
+    cand = Candidate.objects.filter(id=candidate_id).select_related("user").first()
+    if cand is None:
+        return
+    user_ext = str(cand.user.external_id)
+    _address_proof.validate_and_store(user_ext, caller="candidate.address_proof")
+    cand.refresh_from_db(fields=["status"])
+    _advance_address(cand, user_ext)
 
 
 # ── validação do documento por IA (plan/12+15 B3) ───────────────────────────
@@ -389,22 +446,12 @@ _DOC_PROFILE_FIELDS = (
 def _doc_started_at(sub):
     """Datetime do início da análise (pro TTL do ack). `validation_result` guarda como string
     ISO; aqui parseia de volta. `_analysis.ack` precisa de datetime pra somar com timedelta."""
-    from datetime import datetime
-
-    from django.utils import timezone
+    from users.roles import _analysis
 
     if sub is None:
         return None
-    started = (sub.validation_result or {}).get("analysis_started_at")
-    if not started:
-        return None
-    if isinstance(started, datetime):
-        return started if started.tzinfo else started.replace(tzinfo=timezone.utc)
-    try:
-        dt = datetime.fromisoformat(started)
-    except (TypeError, ValueError):
-        return None
-    return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+    raw = (sub.validation_result or {}).get("analysis_started_at")
+    return _analysis.started_at_from(raw, coerce_tz=True)
 
 
 def _reconcile_stale_analyses(cand: Candidate) -> None:
@@ -437,9 +484,54 @@ def _reconcile_stale_analyses(cand: Candidate) -> None:
         sub.save(update_fields=["validation_status"])
 
 
+def _next_slot(cand: Candidate, photos: dict) -> str | None:
+    """Qual slot o front deve enviar a seguir? Lógica sequencial (plan/15 B3).
+
+    Retorna o nome do slot (ex: "rg_back") ou None se completo/aguardando.
+    O front mostra APENAS este slot — nunca frente+verso ao mesmo tempo."""
+    from users.roles import _document_ai as doc_ai
+
+    if not cand.doc_type:
+        return None
+    prefix = cand.doc_type  # "rg" ou "cnh"
+    full_slot = f"{prefix}_full"
+    front_slot = f"{prefix}_front"
+    back_slot = f"{prefix}_back"
+
+    def _status(slot: str) -> str | None:
+        return (photos.get(slot) or {}).get("status")
+
+    # full aprovada → completo
+    if _status(full_slot) == doc_ai.APPROVED:
+        return None
+    # frente+verso aprovadas → completo
+    if _status(front_slot) == doc_ai.APPROVED and _status(back_slot) == doc_ai.APPROVED:
+        return None
+    # qualquer slot pendente → aguardando análise (front não pede nada)
+    for slot in (full_slot, front_slot, back_slot):
+        if _status(slot) == doc_ai.PENDING:
+            return None
+    # qualquer slot em review → aguardando coordenador
+    for slot in (full_slot, front_slot, back_slot):
+        if _status(slot) == doc_ai.REVIEW:
+            return None
+    # full reprovada → reenviar full
+    if _status(full_slot) == doc_ai.REJECTED:
+        return full_slot
+    # frente aprovada, verso não enviada ou reprovada → pedir verso
+    if _status(front_slot) == doc_ai.APPROVED:
+        return back_slot
+    # verso aprovada, frente não enviada ou reprovada → pedir frente
+    if _status(back_slot) == doc_ai.APPROVED:
+        return front_slot
+    # nenhuma foto ou todas reprovadas → pedir frente primeiro
+    return front_slot
+
+
 def _doc_section_dict(cand: Candidate) -> dict:
     """Seção rica do doc: bloco `doc_type` (rg|cnh) com sub-bloco do tipo + fotos+validação
-    + campos extraídos + `missing_fields` (o que a IA não trouxe E o candidato precisa digitar)."""
+    + campos extraídos + `missing_fields` (o que a IA não trouxe E o candidato precisa digitar)
+    + `next_slot` (qual foto o front deve pedir) + `photos` (status por slot individual)."""
     from users.roles import _analysis
 
     docs = documents_iface.get_by_external_id(str(cand.user.external_id))
@@ -447,6 +539,8 @@ def _doc_section_dict(cand: Candidate) -> dict:
     section = {"doc_type": doc_type}
     if not doc_type:
         section["missing_fields"] = ["doc_type"]
+        section["next_slot"] = None
+        section["photos"] = {}
         return section
     sub = docs.get(doc_type) or {}
     section.update(
@@ -456,12 +550,17 @@ def _doc_section_dict(cand: Candidate) -> dict:
     section["analysis_status"] = sub.get("validation_status") or _analysis.PENDING
     section["analysis_reason"] = sub.get("validation_reason")
     # extraídos pela IA (se houver) — fica no validation_result
-    extracted = (
-        ((sub.get("validation_result") or {}).get("extracted") or {})
+    result = (
+        sub.get("validation_result")
         if isinstance(sub.get("validation_result"), dict)
         else {}
     )
+    extracted = (result.get("extracted") or {}) if isinstance(result, dict) else {}
     section["extracted"] = extracted
+    # photos por slot individual (front precisa saber qual slot enviar)
+    section["photos"] = (result.get("photos") or {}) if isinstance(result, dict) else {}
+    # next_slot: qual foto o front deve pedir AGORA
+    section["next_slot"] = _next_slot(cand, section["photos"])
     # missing_fields: o que a IA não trouxe (extraídos vazios) E o usuário ainda não digitou
     # (sub-doc). Considera os campos que o funil exige pra avançar.
     required = _required_doc_fields(doc_type)
@@ -747,6 +846,11 @@ def _apply_doc_extracted(cand: Candidate, sub, data: dict) -> None:
         birthplace=_clean(data["birthplace"], 128) if data.get("birthplace") else None,
         birth_date=_date(data.get("birth_date")),
     )
+    # G8/#19: o OCR pode ter acabado de preencher o `number` que faltava — re-avalia o avanço
+    # DOCUMENTS→PIX. Guarded (só avança com doc aprovado + number), idempotente nos callsites de
+    # validação que já chamam _advance_documents depois. Sem isso, o candidato ficava preso em
+    # DOCUMENTS após a aprovação manual quando o número só veio pelo OCR.
+    _advance_documents(cand, str(cand.user.external_id))
 
 
 def _finish_doc(
@@ -961,7 +1065,9 @@ def _notify_doc_event(
             channels_override=channels,
         )
     except Exception as exc:  # noqa: BLE001
-        logger.warning("candidate.notify_doc_event_failed", event=event, error=str(exc))
+        logger.warning(
+            "candidate.notify_doc_event_failed", doc_event=event, error=str(exc)
+        )
 
 
 def _sweep_stale_reviews(hub) -> None:
@@ -1059,17 +1165,49 @@ def set_pix(*, user_external_id, key: str, key_type: str) -> dict:
     return me_dict(cand)
 
 
+# escolaridade — ÚLTIMA pergunta antes da selfie (Victor 2026-07-08). Grava no Profile (nível-pessoa),
+# reusada quando/se virar aluno. Sem médio completo → o promotor nasce `pre_matriculado` (F4). Fica
+# ANTES da selfie de propósito: a selfie aprovada auto-promove (F2), então a escolaridade tem que
+# ser coletada antes disso. Só nível+concluiu (série/escola são riqueza do enrollment, não do funil promotor).
+_EDU_LEVELS = ("fundamental", "medio")
+
+
+def set_education(*, user_external_id, level: str, completed: bool) -> dict:
+    cand = _require(user_external_id, _S.PIX, _S.EDUCATION)
+    if level not in _EDU_LEVELS:
+        raise CandidateError(
+            "Nível de ensino inválido.",
+            code="EDUCATION_LEVEL_INVALID",
+            extra={"level": level, "allowed": list(_EDU_LEVELS)},
+        )
+    profiles.set_education(cand.user, level=level, completed=bool(completed))
+    if cand.status == _S.PIX:
+        _set_status(cand, _S.EDUCATION)
+    logger.info(
+        "candidate.education_set",
+        external_id=str(cand.external_id),
+        level=level,
+        completed=bool(completed),
+    )
+    return me_dict(cand)
+
+
 def get_selfie(*, user_external_id: str) -> dict:
     """GET da selfie/ASSINATURA (plan/15 C). Espelha a seção do enrollment: foto, taken_at,
     `analysis_status` (canônico) + `status` (alias), `analysis_reason` (instruções se reprovou),
     `expires_at` (TTL do `pending`). Aplica o TTL: pending estourado → `review` + notifica coord."""
-    cand = _require(user_external_id, _S.PIX, _S.SELFIE, _S.COMPLETED)
+    cand = _require(user_external_id, _S.PIX, _S.EDUCATION, _S.SELFIE, _S.COMPLETED)
     _reconcile_selfie_stale(cand)
     return _selfie_dict(cand)
 
 
 def set_selfie(
-    *, user_external_id, image_bytes: bytes, content_type="image/jpeg"
+    *,
+    user_external_id,
+    image_bytes: bytes,
+    content_type="image/jpeg",
+    consent_ip: str | None = None,
+    consent_user_agent: str | None = None,
 ) -> dict:
     """Selfie ("assinar") — ASSÍNCRONA (plan/15 C, espelha o enrollment):
 
@@ -1083,18 +1221,26 @@ def set_selfie(
     o veredito final decide promover / notificar o candidato / escalar pro coordenador."""
     from django.utils import timezone
 
+    from users.consent import PROMOTER_CONTRACT
     from users.roles import _selfie
 
-    cand = _require(user_external_id, _S.PIX, _S.SELFIE)
+    cand = _require(user_external_id, _S.EDUCATION, _S.SELFIE)
     cand.selfie_image = _save_selfie(cand, image_bytes, content_type)
     cand.selfie_taken_at = timezone.now()
     cand.selfie_status = _selfie.SelfieStatus.PENDING
     cand.selfie_verified = False
     cand.selfie_description = None
+    # consentimento LGPD (lane #6): a selfie enviada com sucesso É o aceite do contrato.
+    cand.consent_accepted = True
+    cand.contract_version = PROMOTER_CONTRACT.version
+    cand.contract_hash = PROMOTER_CONTRACT.hash
+    cand.consent_ip = consent_ip
+    cand.consent_user_agent = consent_user_agent
+    cand.consent_accepted_at = cand.selfie_taken_at
     # BUG-4 (M2c FE-painel, 2026-06-16): worker exige `status==SELFIE` (`run_selfie_validation`
     # linha 1120) — se não avançar, bail-out silencioso e o pending vira review via TTL reconcile.
     # Espelha o `enrollment.set_selfie` (gate em `_S.SELFIE`, advance feito no `set_education`).
-    if cand.status == _S.PIX:
+    if cand.status == _S.EDUCATION:
         _set_status(cand, _S.SELFIE)
     cand.save()
     from django_q.tasks import async_task
@@ -1178,11 +1324,15 @@ def run_selfie_validation(candidate_id: int) -> None:
         return
     if cand.selfie_status != _selfie.SelfieStatus.PENDING:
         return
+    # G11: discriminador da foto desta task (status não detecta re-upload — ele re-arma PENDING).
+    started_taken_at = cand.selfie_taken_at
     fp = Path(settings.MEDIA_ROOT) / cand.selfie_image
     if not fp.exists():
         return
     image_bytes = fp.read_bytes()
-    content_type = "image/jpeg"
+    # G21/#13: mime derivado da extensão (como o enrollment) — antes era "image/jpeg" hardcoded, e
+    # uma selfie PNG/WebP ia pra visão/biometria rotulada como JPEG.
+    content_type = _MIME_BY_EXT.get(fp.suffix.lstrip(".").lower(), "image/jpeg")
     status, desc = _selfie.verify(image_bytes, content_type, caller="candidate.selfie")
     # SOMAR (Victor 2026-06-05): face-match biométrico selfie × documento.
     status, desc = _selfie.add_face_match(
@@ -1198,20 +1348,35 @@ def run_selfie_validation(candidate_id: int) -> None:
         )
         if tips:
             desc = f"{desc}\n\nComo resolver: {tips}"
-    cand.refresh_from_db(fields=["selfie_status"])
-    if cand.selfie_status != _selfie.SelfieStatus.PENDING:
-        return  # re-upload — veredito é de foto velha, descarta
+    cand.refresh_from_db(
+        fields=["selfie_status", "selfie_reject_count", "selfie_taken_at"]
+    )
+    # G11: descarta se saiu de PENDING OU se a foto trocou (taken_at != o do início). Sem o check de
+    # taken_at, um re-upload que re-armou PENDING passava e o veredito da foto velha gravava sobre a
+    # nova (mesma classe do enrollment; o candidate estava com o mesmo bug).
+    if (
+        cand.selfie_status != _selfie.SelfieStatus.PENDING
+        or cand.selfie_taken_at != started_taken_at
+    ):
+        return
     cand.selfie_status = status
     cand.selfie_verified = status == _selfie.APPROVED
-    cand.selfie_description = desc
-    cand.save(
-        update_fields=[
-            "selfie_status",
-            "selfie_verified",
-            "selfie_description",
-            "updated_at",
-        ]
-    )
+    update_fields = [
+        "selfie_status",
+        "selfie_verified",
+        "selfie_description",
+        "updated_at",
+    ]
+    if status == _selfie.REJECTED:
+        # F2: acumula os comentários da IA (não sobrescreve) e conta a reprovação — 5× sobe a flag.
+        cand.selfie_reject_count += 1
+        cand.selfie_description = _selfie.append_reason(
+            cand.selfie_description, cand.selfie_reject_count, desc
+        )
+        update_fields.append("selfie_reject_count")
+    else:
+        cand.selfie_description = desc
+    cand.save(update_fields=update_fields)
     logger.info(
         "candidate.selfie_validated", candidate=str(cand.external_id), status=status
     )
@@ -1238,6 +1403,11 @@ def _resolve_selfie(cand: Candidate) -> None:
         _complete_candidate(cand)
     elif cand.selfie_status == _selfie.REJECTED:
         _notify_selfie_rejected(cand)
+        # F2: 5ª reprovação → sobe a flag nível-pessoa (não bloqueia) e SEGUE promovendo — o encontro
+        # presencial fica pro fim do curso (gate em `student._maybe_release_exam`).
+        if cand.selfie_reject_count >= _selfie.MAX_REJECTS_BEFORE_MEETING:
+            profiles.set_selfie_needs_meeting(cand.user)
+            _complete_candidate(cand)
     elif cand.selfie_status == _selfie.REVIEW:
         _notify_selfie_review(cand)
 
@@ -1259,13 +1429,31 @@ def _notify_selfie_approved(cand: Candidate) -> None:
         logger.warning("candidate.notify_selfie_approved_failed", error=str(exc))
 
 
+def _promote_to_promoter(cand: Candidate) -> bool:
+    """Promove candidate→PROMOTOR: cria Promoter + atribui matérias FIXAS do treino. Se houver
+    matéria obrigatória pendente, o promotor nasce TRAVADO (overlay `training`, lido do /me). Devolve
+    `locked`. Idempotente. Usado pela auto-promoção da selfie (F2) e pelo `approve_candidate`."""
+    from users.roles.promoter import service as promoter_iface
+    from users.roles.training import service as training_iface
+
+    with transaction.atomic():
+        if "promoter" not in roles.active_roles(cand.user):
+            roles.promote(cand.user, "promoter")
+        promoter_iface.create_promoter(user=cand.user, hub=cand.hub)
+        _set_status(cand, _S.APPROVED)
+        locked = training_iface.on_became_promoter(cand.user)
+    _notify_became_promoter(cand, locked=locked)
+    logger.info("candidate.approved", external_id=str(cand.external_id), locked=locked)
+    return locked
+
+
 def _complete_candidate(cand: Candidate) -> None:
-    """Selfie aprovada → COMPLETED = aguardando a APROVAÇÃO do coordenador. NÃO promove (Victor 2026-06-16):
-    quem promove candidate→PROMOTOR é o coordenador (`approve_candidate`). Idempotente (só em SELFIE)."""
+    """Selfie aprovada → AUTO-PROMOVE a promotor (Victor 2026-07-08): "só de nome, porque o treino
+    trava o promotor". O treino (blocking) segura as funções de promotor até as notas; o coordenador
+    só entra se a selfie cair em `review` (`decide_selfie`). Idempotente (só em SELFIE)."""
     if cand.status != _S.SELFIE:
         return
-    _set_status(cand, _S.COMPLETED)
-    _notify_awaiting_approval(cand)
+    _promote_to_promoter(cand)
 
 
 def decide_selfie(
@@ -1430,12 +1618,9 @@ def _notify_doc_type_reset(cand: Candidate) -> None:
 
 
 def approve_candidate(*, candidate_external_id: str, coordinator) -> Candidate:
-    """Coordenador do polo APROVA o candidato → promove candidate→PROMOTOR + cria Promoter + atribui
-    as matérias FIXAS (treino). Se houver matéria obrigatória pendente, o promotor nasce TRAVADO
-    (role overlay `training`; a trava é lida do /me, não do JWT). Victor 2026-06-16."""
-    from users.roles.promoter import interface as promoter_iface
-    from users.roles.training import interface as training_iface
-
+    """Coordenador do polo APROVA o candidato manualmente → promove candidate→PROMOTOR (reusa
+    `_promote_to_promoter`). Fallback do caminho de selfie em `review` (a selfie aprovada já
+    auto-promove, F2). Rejeição é SOFT (Victor 2026-06-17)."""
     cand = (
         Candidate.objects.filter(external_id=candidate_external_id)
         .select_related("hub", "user")
@@ -1447,25 +1632,20 @@ def approve_candidate(*, candidate_external_id: str, coordinator) -> Candidate:
         raise Forbidden(
             "Você não coordena o polo deste candidato.", code="NOT_HUB_COORDINATOR"
         )
-    # rejeição é SOFT (Victor 2026-06-17: "aguarda ser aprovado") — um candidato REJEITADO continua
-    # aguardando e pode ser aprovado depois (o coordenador mudou de ideia / a situação mudou). Não é
-    # beco terminal. Só barra quem ainda está na coleta (não concluiu).
-    if cand.status not in (_S.COMPLETED, _S.REJECTED):
+    # rejeição é SOFT: um candidato REJEITADO continua aguardando e pode ser aprovado depois. Só barra
+    # quem ainda está na coleta (não concluiu). `SELFIE` entra: a selfie em review deixa o candidato
+    # nessa etapa e o coordenador aprova por aqui.
+    if cand.status not in (_S.COMPLETED, _S.REJECTED, _S.SELFIE):
         raise Conflict(
             "O candidato ainda não concluiu a coleta.",
             code="WRONG_STATUS",
             extra={"expected_status": _S.COMPLETED},
         )
-
-    with transaction.atomic():
-        if "promoter" not in roles.active_roles(cand.user):
-            roles.promote(cand.user, "promoter")
-        promoter_iface.create_promoter(user=cand.user, hub=cand.hub)
-        _set_status(cand, _S.APPROVED)
-        locked = training_iface.on_became_promoter(cand.user)
-
-    _notify_became_promoter(cand, locked=locked)
-    logger.info("candidate.approved", external_id=str(cand.external_id), locked=locked)
+    # `_promote_to_promoter` exige status SELFIE p/ `_set_status(APPROVED)` fazer sentido; se veio de
+    # COMPLETED/REJECTED, normaliza pra SELFIE (transição de coleta → promoção).
+    if cand.status != _S.SELFIE:
+        _set_status(cand, _S.SELFIE)
+    _promote_to_promoter(cand)
     return cand
 
 
@@ -1484,11 +1664,14 @@ def reject_candidate(
         raise Forbidden(
             "Você não coordena o polo deste candidato.", code="NOT_HUB_COORDINATOR"
         )
-    if cand.status != _S.COMPLETED:
+    # G10: mesmo conjunto de status que `approve_candidate` aceita. Antes exigia COMPLETED — estado
+    # que o fluxo atual NUNCA atinge (a selfie aprovada auto-promove; a em review deixa em SELFIE),
+    # então rejeitar dava 409 sempre. O candidato aguardando decisão está em SELFIE (selfie review).
+    if cand.status not in (_S.COMPLETED, _S.REJECTED, _S.SELFIE):
         raise Conflict(
-            "O candidato não está aguardando aprovação.",
+            "O candidato ainda não concluiu a coleta.",
             code="WRONG_STATUS",
-            extra={"expected_status": _S.COMPLETED},
+            extra={"expected_status": _S.SELFIE},
         )
     _set_status(cand, _S.REJECTED)
     _notify_candidate_rejected(cand)
@@ -1577,8 +1760,19 @@ def list_awaiting_approval_for_hub(*, hub) -> list[dict]:
     o rejeitado não some, fica na fila e pode ser aprovado depois). `rejected: true` marca quem o
     coordenador já tinha rejeitado, pro front mostrar diferente."""
     out = []
+    # G10: inclui SELFIE-em-review (o estado real de "aguardando decisão do coordenador"), além de
+    # COMPLETED/REJECTED. Antes só COMPLETED/REJECTED, e como COMPLETED é inatingível, o inbox ficava
+    # vazio — o coordenador nunca via os candidatos que precisavam da decisão dele.
+    from django.db.models import Q
+
+    from users.roles._selfie import SelfieStatus
+
     qs = (
-        Candidate.objects.filter(hub=hub, status__in=[_S.COMPLETED, _S.REJECTED])
+        Candidate.objects.filter(hub=hub)
+        .filter(
+            Q(status__in=[_S.COMPLETED, _S.REJECTED])
+            | Q(status=_S.SELFIE, selfie_status=SelfieStatus.REVIEW)
+        )
         .select_related("user")
         .order_by("updated_at")
     )

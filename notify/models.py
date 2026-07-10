@@ -15,6 +15,7 @@ from core.models import ExternalIdModel
 
 # Status de envio por canal.
 STATUS_PENDING = "pending"
+STATUS_SENDING = "sending"  # CLAIM transitório: o dispatch reivindicou o canal (sob lock) e vai bater na rede
 STATUS_SENT = "sent"
 STATUS_FAILED = "failed"
 STATUS_SKIPPED = (
@@ -23,6 +24,7 @@ STATUS_SKIPPED = (
 
 _STATUS_CHOICES = [
     (STATUS_PENDING, "pendente"),
+    (STATUS_SENDING, "enviando"),
     (STATUS_SENT, "enviado"),
     (STATUS_FAILED, "falhou"),
     (STATUS_SKIPPED, "ignorado"),

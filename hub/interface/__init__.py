@@ -148,9 +148,11 @@ def hub_of(user) -> Hub | None:
     comum (não-coordenador) caía no padrão e a comissão da matrícula/veteran ia pro polo ERRADO. Como a
     conta-mãe tem `Promoter.hub` = hub padrão, o caso atual não muda; o promotor comum (Fatia 2) já fica certo.
     """
-    from users.roles.promoter import interface as promoter_iface
+    # Lê o model, não o `promoter.service`: o service importa `hub.interface` de volta (auto-matrícula
+    # do bolsista) e fechava ciclo. `get_for_user` era exatamente esta query.
+    from users.roles.promoter.models import Promoter
 
-    promoter = promoter_iface.get_for_user(user)
+    promoter = Promoter.objects.filter(user=user).select_related("hub").first()
     if promoter is not None:
         return promoter.hub
     coordinated = (

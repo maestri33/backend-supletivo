@@ -76,7 +76,7 @@ class Actor:
     # ── LEITURAS do próprio usuário (sem dado sensível na borda do bot) ──────
     def lead(self):
         """O lead do próprio usuário (ou None). Gate = grupo lead (mesma rota /lead/me)."""
-        from users.roles.lead import interface as lead_iface
+        from users.roles.lead import service as lead_iface
 
         require_roles(self.principal, *_FUNNEL_ROLES)
         return lead_iface.get_for_user_external_id(self.external_id)
@@ -86,7 +86,7 @@ class Actor:
 
         Espelha `GET /lead/checkout-url`: `checkout_url_for` resolve checkout↔recibo. NÃO gera
         cobrança, NÃO chama provider — só devolve o link curto JÁ existente (ou None)."""
-        from users.roles.lead import interface as lead_iface
+        from users.roles.lead import service as lead_iface
 
         require_roles(self.principal, *_FUNNEL_ROLES)
         lead = lead_iface.get_for_user_external_id(self.external_id)
@@ -94,7 +94,7 @@ class Actor:
 
     def enrollment_status(self) -> str | None:
         """Status CRU da matrícula do próprio usuário (pro motor decidir a etapa). None se não há."""
-        from users.roles.enrollment import interface as enr_iface
+        from users.roles.enrollment import service as enr_iface
 
         require_roles(self.principal, "enrollment", "student", "veteran")
         enr = enr_iface.get_for_user_external_id(self.external_id)
@@ -102,7 +102,7 @@ class Actor:
 
     def student_status(self) -> str | None:
         """Status CRU do aluno do próprio usuário (pro motor decidir a etapa). None se não há."""
-        from users.roles.student import interface as student_iface
+        from users.roles.student import service as student_iface
 
         require_roles(self.principal, "student", "veteran")
         student = student_iface.get_for_user_external_id(self.external_id)
@@ -112,14 +112,14 @@ class Actor:
     def set_address_cep(self, cep: str) -> dict:
         """POST /enrollment/address (body {cep}). Idempotente: re-validar o MESMO CEP dá o MESMO
         estado. Devolve o EnrollmentMe canônico (tem `address.missing_fields`). Gate: enrollment."""
-        from users.roles.enrollment import interface as enr_iface
+        from users.roles.enrollment import service as enr_iface
 
         require_roles(self.principal, "enrollment")
         return enr_iface.set_address_cep(user_external_id=self.external_id, cep=cep)
 
     def set_blood_type(self, blood_type: str):
         """POST /student/blood-type. Idempotente: setar o MESMO tipo dá o MESMO estado. Gate: student."""
-        from users.roles.student import interface as student_iface
+        from users.roles.student import service as student_iface
 
         require_roles(self.principal, "student")
         return student_iface.set_blood_type(

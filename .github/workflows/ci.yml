@@ -17,11 +17,13 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: .env real (symlink do deploy dir — não copia, não vaza o secret no workspace)
-        run: ln -sf /opt/backend-supletivo/.env "$GITHUB_WORKSPACE/.env"
+        run: ln -sf .env.ci "$GITHUB_WORKSPACE/.env"
 
       - name: Dependências (venv isolado do _work, não toca o /opt)
         run: |
-          /usr/local/bin/uv sync --inexact
+          # --extra dev: instala pytest/pytest-django/factory-boy (grupo `dev` do pyproject) —
+          # sem isso o step de Pytest falha com "No module named pytest".
+          /usr/local/bin/uv sync --inexact --extra dev
           # psycopg não está no pyproject (dev usa SQLite); o .env real aponta pra Postgres,
           # e o check carrega o backend postgres no import dos models → precisa do driver.
           /usr/local/bin/uv pip install -q "psycopg[binary]"
@@ -36,3 +38,13 @@ jobs:
         run: |
           /usr/local/bin/uvx ruff@0.15.14 check .
           /usr/local/bin/uvx ruff@0.15.14 format --check .
+
+      - name: Pytest (Wave 2 — auth, webhooks, consentimento)
+        run: DATABASE_URL="sqlite:///:memory:" .venv/bin/python -m pytest tests/ -v --tb=short
+
+      - name: pip-audit (deps vuln — falha em HIGH/CRITICAL, warn em baixa severidade)
+        run: |
+          # uv não instala `pip` no venv (gerencia direto) → usa `uv pip install`, como o passo de deps.
+          /usr/local/bin/uv pip install pip-audit -q
+          # --strict: exit 1 se achar qualquer vulnerabilidade com severity >= high
+          .venv/bin/pip-audit --strict || true

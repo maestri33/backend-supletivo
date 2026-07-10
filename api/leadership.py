@@ -21,17 +21,18 @@ from ninja.files import UploadedFile
 
 from api.auth import require_roles
 from api.base import add_auth_refresh, build_group, resolve_rg_slot
+from core.net import source_ip
 from api.schemas import TokenOut
-from users.auth import interface as auth_iface
+from users.auth import service as auth_iface
 from users.auth.models import User
 from users.exceptions import Forbidden, NotFound
 from hub import interface as hub_iface
-from users.roles.candidate import interface as candidate_iface
-from users.roles.enrollment import interface as enrollment_iface
-from users.roles.lead import interface as lead_iface
-from users.roles.promoter import interface as promoter_iface
-from users.roles.student import interface as student_iface
-from users.roles.training import interface as training_iface
+from users.roles.candidate import service as candidate_iface
+from users.roles.enrollment import service as enrollment_iface
+from users.roles.lead import service as lead_iface
+from users.roles.promoter import service as promoter_iface
+from users.roles.student import service as student_iface
+from users.roles.training import service as training_iface
 
 _ERROR_REGISTRY = """
 ### Códigos de erro (`{detail, code, …extra}`)
@@ -427,15 +428,6 @@ class ReviewsOut(Schema):
     locked_promoters: list[ReviewItemOut] = []
 
 
-class PaginatedOut(Schema):
-    """Envelope de paginação padronizado (A5): toda lista do leadership passa a devolver isto."""
-
-    items: list
-    total: int
-    limit: int
-    offset: int
-
-
 class PaginatedStudentsOut(Schema):
     """Envelope tipado da lista de alunos do polo."""
 
@@ -608,11 +600,14 @@ def check(request, payload: CheckIn):
     propósito) e soma a resposta do coordenador: coordena um polo? Quem NÃO coordena recebe
     `detail` + `roles` — o front redireciona pra área certa levando o `external_id`, e a pessoa
     loga lá com o MESMO OTP já enviado (palavra do Victor 2026-06-12)."""
+    from core.webhook_auth import service_secret_ok
+
     result = auth_iface.check(
         cpf=payload.cpf,
         phone=payload.phone,
         external_id=payload.external_id,
         send_otp=payload.send_otp,
+        service_authed=service_secret_ok(request),
     )
     if not result.get("found"):
         return result
@@ -759,24 +754,6 @@ def list_reviews(request):
             for i in training_iface.list_locked_promoters_for_hub(hub=hub)
         ],
     }
-
-
-@api.get("/reviews/prioritized", tags=["review"])
-def list_reviews_prioritized(request):
-    """A MESMA fila do `/reviews`, mas achatada numa lista ÚNICA ordenada por urgência (triagem).
-
-    Quick win (Victor 2026-06-30): o `/reviews` entrega baldes separados sem ordem entre si — o
-    coordenador não sabe o que atacar primeiro. Aqui reusamos a fila já montada e aplicamos
-    `api.triage.prioritize` (score DETERMINÍSTICO: peso por tipo + tempo de espera). Read-only; não
-    altera o `/reviews` original. Devolve `{count, items:[...]}` com `priority_score`/`waiting_hours`
-    em cada item."""
-    from api import triage
-
-    reviews = list_reviews(
-        request
-    )  # reusa o endpoint (o decorator devolve a própria função)
-    items = triage.prioritize(reviews)
-    return {"count": len(items), "items": items}
 
 
 # ── funil do aluno: fase da TAXA (2 parcelas) → conclusão (plan/14) ─────────
@@ -1144,6 +1121,25 @@ def register_diploma_pickup(request, external_id: str, file: UploadedFile = File
     return {"external_id": str(s.external_id), "status": s.status}
 
 
+@api.post(
+    "/students/{external_id}/manual-selfie",
+    response=EnrollmentActionOut,
+    tags=["student"],
+)
+def register_manual_selfie(request, external_id: str, file: UploadedFile = File(...)):
+    """F2 — encontro presencial: aluno cuja selfie reprovou 5× chega ao fim do curso com a flag
+    `selfie_needs_meeting`. O coordenador tira a foto DELE e posta aqui → flag cai e a prova destrava."""
+    coordinator = _coordinator(request)
+    s = _student_action(
+        external_id,
+        coordinator,
+        student_iface.clear_manual_selfie,
+        image_bytes=file.read(),
+        content_type=getattr(file, "content_type", "image/jpeg"),
+    )
+    return {"external_id": str(s.external_id), "status": s.status}
+
+
 # ── funil do colaborador: aprovar candidato → PROMOTOR (Victor 2026-06-16) ──
 # A entrevista/Trainee saiu: o coordenador aprova o candidato (que concluiu a coleta) e ele vira
 # PROMOTOR direto. O treino passou a ser uma trava pós-promotor por matérias.
@@ -1380,6 +1376,8 @@ def coord_proxy_selfie(request, external_id: str, file: UploadedFile = File(...)
         user_external_id=user_ext,
         image_bytes=file.read(),
         content_type=getattr(file, "content_type", "image/jpeg"),
+        consent_ip=source_ip(request),
+        consent_user_agent=request.headers.get("user-agent"),
     )
     # mesmo contrato do wizard do cliente: o coordenador também recebe o ack de análise (poll/TTL).
     return {**enrollment_iface.me_dict(enr), **enrollment_iface.selfie_ack(enr)}

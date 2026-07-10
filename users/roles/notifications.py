@@ -267,14 +267,6 @@ def full_name(name: str | None) -> str:
     return " ".join(name.strip().split())
 
 
-def get_template(event: str):
-    """Snapshot do Template no DB (`notify.interface.templates.TemplateData`) ou None se não há row.
-    Expõe p/ o `send_event` ler channels/mídia/story sem acoplar o caller ao model do notify."""
-    from notify.interface import templates as _db
-
-    return _db.get(event)
-
-
 def text(event: str, **ctx) -> str:
     """Renderiza o teor do evento. `name` (1º nome do destinatário) deve vir no ctx (≥2× no texto).
 

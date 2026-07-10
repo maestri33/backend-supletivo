@@ -14,15 +14,16 @@ from ninja import Field, File, Router, Schema
 from ninja.files import UploadedFile
 
 from api.auth import require_roles
-from api.base import add_auth_refresh, build_group, resolve_rg_slot
-from api.schemas import TokenOut
-from users.auth import interface as auth_iface
-from users.auth.models import User
-from users.exceptions import Forbidden, NotFound
-from users.roles import interface as roles
-from users.roles.enrollment import interface as enrollment_iface
-from users.roles.lead import interface as lead_iface
-from users.roles.student import interface as student_iface
+from api.base import add_auth_refresh, add_funnel_login, build_group, resolve_rg_slot
+from api.schemas import CheckIn, CheckOut
+from core.net import source_ip
+from users.auth import service as auth_iface
+from users.consent import STUDENT_CONTRACT
+from users.documents import service as documents_iface
+from users.exceptions import NotFound
+from users.roles.enrollment import service as enrollment_iface
+from users.roles.lead import service as lead_iface
+from users.roles.student import service as student_iface
 
 # Registry de `code` de erro (proposta API #5): TODO 4xx sai `{detail, code, …extra}` — o front
 # roteia por `switch(code)`, nunca parseando `detail`. Vai na descrição do grupo → OpenAPI.
@@ -86,47 +87,6 @@ class LeadOut(Schema):
     )
     status: str
     checkout: CheckoutOut | None = None
-
-
-class CheckIn(Schema):
-    cpf: str | None = None
-    phone: str | None = None
-    external_id: str | None = (
-        None  # re-dispara OTP de usuário já conhecido (o service já aceitava)
-    )
-    # O NORMAL é disparar OTP. `false` = modo sem OTP (ex-/auth/check-bot): só espia found/roles
-    # e devolve `token` direto (o canal do chamador é a prova de identidade — bot WhatsApp).
-    send_otp: bool = True
-
-
-class CheckOut(Schema):
-    found: bool
-    external_id: str | None = Field(
-        None,
-        description="external_id do USER (é o que o /auth/login espera — proposta #8)",
-    )
-    otp_sent: bool
-    otp_wait: int | None = None
-    whatsapp: bool | None = None
-    roles: list[str] | None = None
-    # só no modo `send_otp=false` (ex-check-bot): JWT de acesso direto.
-    token: str | None = None
-
-
-class LoginIn(Schema):
-    external_id: str = Field(description="external_id do USER (veio do /auth/check)")
-    otp: str
-
-
-class CheckBotIn(Schema):
-    phone: str
-
-
-class CheckBotOut(Schema):
-    found: bool
-    external_id: str | None = None
-    roles: list[str] | None = None
-    token: str | None = None
 
 
 class CardPriceOut(Schema):
@@ -200,6 +160,17 @@ class AddressOut(Schema):
         description='O que ainda falta preencher (plan/13): ["number"] = ViaCEP achou tudo, '
         "só falta o número; rua/bairro na lista = cidade de CEP único (digitar no PATCH)",
     )
+
+
+class AddressProofSectionOut(Schema):
+    """Bloco do comprovante de endereço no /me (F1): status da validação IA + parentesco."""
+
+    exists: bool = False
+    photo: str | None = None
+    status: str | None = None  # pending|approved|rejected|review|needs_kinship
+    reason: str | None = None
+    needs_kinship: bool = False
+    kinship_relation: str | None = None
 
 
 class StudentPlatformOut(Schema):
@@ -295,39 +266,22 @@ def check(request, payload: CheckIn):
 
     `send_otp=false` = o antigo `/auth/check-bot` integrado aqui: mesma função SEM disparar OTP,
     devolvendo o `token` (JWT) direto — o canal do chamador é a prova de identidade."""
+    from core.webhook_auth import service_secret_ok
+
     return auth_iface.check(
         cpf=payload.cpf,
         phone=payload.phone,
         external_id=payload.external_id,
         send_otp=payload.send_otp,
+        service_authed=service_secret_ok(request),
     )
 
 
-@auth_router.post("/check-bot", response=CheckBotOut, auth=None, tags=["bot"])
-def check_bot(request, payload: CheckBotIn):
-    """DEPRECATED: use `POST /auth/check` com `send_otp=false` (mesma função, integrada).
-    Mantido como alias fino pra compat do bot_v2 (FastAPI)."""
-    return auth_iface.check(phone=payload.phone, send_otp=False)
-
-
-@auth_router.post("/login", response=TokenOut, auth=None)
-def login(request, payload: LoginIn):
-    """Login passwordless (OTP) — resolve o papel mais avançado do funil do cliente (lead→enrollment→
-    student; veteran exige student) e emite JWT com TODAS as roles ativas."""
-    user = User.objects.filter(external_id=payload.external_id).first()
-    if user is None:
-        raise NotFound("Usuário não encontrado.", code="USER_NOT_FOUND")
-    active = roles.active_roles(user)
-    funnel_role = next((r for r in _FUNNEL_ROLES if r in active), None)
-    if funnel_role is None:
-        raise Forbidden(
-            "Usuário não faz parte do funil do aluno.", code="NOT_IN_FUNNEL"
-        )
-    return auth_iface.login(
-        external_id=payload.external_id, role=funnel_role, otp=payload.otp
-    )
-
-
+add_funnel_login(
+    auth_router,
+    funnel_roles=_FUNNEL_ROLES,
+    not_in_funnel_msg="Usuário não faz parte do funil do aluno.",
+)
 add_auth_refresh(auth_router)
 
 
@@ -380,6 +334,10 @@ class AddressDataIn(Schema):
     state: str | None = None
 
 
+class KinshipIn(Schema):
+    relation: str  # quem é o titular do comprovante + grau de parentesco
+
+
 class EducationIn(Schema):
     level: str  # 'fundamental' | 'medio'
     grade: int  # 1–9 (fundamental) / 1–3 (médio) — validado no service por nível
@@ -426,7 +384,9 @@ class EnrollmentOut(Schema):
 
 
 class RgSectionOut(Schema):
-    """Seção DOCUMENTO completa (GET/PATCH /enrollment/documents/rg) — plan/13."""
+    """Seção DOCUMENTO completa (GET/PATCH /enrollment/documents/rg) — plan/13.
+    `next_slot` = qual slot o front deve pedir AGORA (None = completo ou aguardando análise).
+    `photos` = status por slot individual ({slot: {status, reason}})."""
 
     # editáveis no PATCH (completa/corrige o que a extração não trouxe)
     number: str | None = None
@@ -456,6 +416,8 @@ class RgSectionOut(Schema):
     )
     validation_reason: str | None = None  # [DEPRECATED — use analysis_reason]
     missing_fields: list[str] = []  # o aluno completa SÓ esses (no PATCH)
+    next_slot: str | None = None  # qual slot enviar AGORA (rg_front/rg_back/null)
+    photos: dict = {}  # status por slot individual: {slot: {status, reason}}
 
 
 class RgPatchIn(Schema):
@@ -540,6 +502,7 @@ class EnrollmentMeOut(EnrollmentOut):
         description="[DEPRECATED — use address.missing_fields]"
     )
     address: AddressOut | None = None
+    address_proof: AddressProofSectionOut | None = None
     rg: RgOut | None = None
     education: EducationOut | None = None
     selfie: SelfieOut | None = None
@@ -644,6 +607,26 @@ def enrollment_address_patch(request, payload: AddressDataIn):
     )
 
 
+@api.post("/enrollment/address/proof", response=EnrollmentMeOut, tags=["enrollment"])
+def enrollment_address_proof(request, file: UploadedFile = File(...)):
+    """Comprovante de residência (JPEG/PNG/WEBP/PDF) — OBRIGATÓRIO, validado por IA (endereço +
+    titular, F1). Assíncrono: acompanhe `address_proof.status` no `me` até `approved`/`rejected`/
+    `review`/`needs_kinship`. `needs_kinship` → POST /enrollment/address/proof/kinship."""
+    ext = _enr_guard(request)
+    return enrollment_iface.upload_address_proof(user_external_id=ext, upload=file)
+
+
+@api.post(
+    "/enrollment/address/proof/kinship", response=EnrollmentMeOut, tags=["enrollment"]
+)
+def enrollment_address_proof_kinship(request, payload: KinshipIn):
+    """Titular do comprovante é outra pessoa: informe quem é e o grau de parentesco → libera e avança."""
+    ext = _enr_guard(request)
+    return enrollment_iface.submit_address_proof_kinship(
+        user_external_id=ext, relation=payload.relation
+    )
+
+
 # ── seção EDUCAÇÃO ───────────────────────────────────────────────────────────
 @api.get("/enrollment/education", response=EducationOut, tags=["enrollment"])
 def enrollment_get_education(request):
@@ -684,14 +667,38 @@ def enrollment_selfie(request, file: UploadedFile = File(...)):
     """Envia a selfie (assinatura). A análise roda em 2º plano (IA + biometria vs rosto do
     DOCUMENTO): acompanhe `analysis_status` no `GET /enrollment/selfie` (`pending` = analisando),
     voltando a perguntar a cada `poll_after_ms` (a resposta já traz o ack — proposta #2) e o
-    **EnrollmentMe canônico** (proposta #3)."""
+    **EnrollmentMe canônico** (proposta #3).
+
+    A selfie É a assinatura do contrato (lane #6): o aceite LGPD (versão/hash do contrato + IP +
+    user-agent + timestamp) é gravado no ato do envio."""
     ext = _enr_guard(request)
+    # G-uploads: valida tamanho (MAX_UPLOAD_MB, ANTES de ler) + content-type + decode real, em vez
+    # do `file.read()` cru que aceitava 2 GB (OOM) e bytes não-imagem.
+    image_bytes, content_type = documents_iface.read_image_upload(file)
     enr = enrollment_iface.set_selfie(
         user_external_id=ext,
-        image_bytes=file.read(),
-        content_type=getattr(file, "content_type", "image/jpeg"),
+        image_bytes=image_bytes,
+        content_type=content_type,
+        consent_ip=source_ip(request),
+        consent_user_agent=request.headers.get("user-agent"),
     )
     return {**enrollment_iface.me_dict(enr), **enrollment_iface.selfie_ack(enr)}
+
+
+class ContractOut(Schema):
+    """Contrato de matrícula versionado (lane #6): o front exibe `text` e, ao enviar a selfie,
+    assina implicitamente a `version`/`hash` retornadas aqui."""
+
+    version: str
+    hash: str
+    text: str
+
+
+@api.get("/contract/current", response=ContractOut, tags=["enrollment"])
+def get_current_contract(request):
+    """Contrato de matrícula ATUAL (texto + versão + hash SHA-256). Fonte da verdade no backend
+    (`users/consent`); a selfie é a assinatura deste aceite."""
+    return STUDENT_CONTRACT.as_dict()
 
 
 # ── aluno: funil final student→veteran (autenticado, role student) — §4 item 9 ──
@@ -744,8 +751,22 @@ def _veteran_guard(request) -> str:
 def veteran_me(request):
     """Visão consolidada do VETERANO: TODOS os dados dele — pessoais, matrícula (perfil/endereço/
     escolaridade/RG/selfie), os documentos que ELE postou e o que o COORDENADOR postou (diploma +
-    histórico + foto da retirada). Read-only. Paths de mídia relativos; o front prefixa /media/."""
-    return student_iface.veteran_detail(user_external_id=_veteran_guard(request))
+    histórico + foto da retirada). Read-only. Paths de mídia relativos; o front prefixa /media/.
+
+    A composição student × enrollment mora aqui (e não no `student.service`) porque `enrollment`
+    já importa `student` no `conclude` — cruzar de volta lá dentro fecharia ciclo de import."""
+    external_id = _veteran_guard(request)
+    data = student_iface.veteran_detail(user_external_id=external_id)
+
+    # bloco da MATRÍCULA — o enrollment persiste após o aluno virar student (nada o deleta).
+    enr = enrollment_iface.get_for_user_external_id(external_id)
+    me = enrollment_iface.me_dict(enr) if enr is not None else None
+    data["enrollment"] = (
+        None
+        if me is None
+        else {k: me.get(k) for k in ("profile", "address", "education", "rg", "selfie")}
+    )
+    return data
 
 
 @api.post("/student/blood-type", response=StudentMeOut, tags=["student"])
@@ -760,11 +781,13 @@ def student_blood_type(request, payload: BloodTypeIn):
 )
 def student_document(request, doc_type: str, file: UploadedFile = File(...)):
     ext = _student_guard(request)
+    # G-uploads: valida tamanho + content-type + decode real antes de materializar os bytes.
+    image_bytes, content_type = documents_iface.read_image_upload(file)
     doc, ack = student_iface.upload_document(
         user_external_id=ext,
         doc_type=doc_type,
-        image_bytes=file.read(),
-        content_type=getattr(file, "content_type", "image/jpeg"),
+        image_bytes=image_bytes,
+        content_type=content_type,
     )
     return {
         "doc_type": doc_type,

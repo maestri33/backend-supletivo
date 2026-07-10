@@ -80,7 +80,9 @@ class Checkout(models.Model):
     )
     payment_method = models.CharField(max_length=12, choices=Method.choices)
     provider = models.CharField(max_length=12, choices=Provider.choices)
-    provider_payment_id = models.CharField(max_length=128, null=True, blank=True)
+    provider_payment_id = models.CharField(
+        max_length=128, null=True, blank=True, db_index=True
+    )
     amount = models.DecimalField(max_digits=12, decimal_places=2)
     # cartão (InfinitePay) = link de checkout; PIX (Asaas) = página hospedada (invoiceUrl). + comprovante.
     checkout_url = models.URLField(max_length=500, null=True, blank=True)
