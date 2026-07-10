@@ -8,7 +8,7 @@ Todas as rotas exigem SUPERUSER (staff = superuser nativo do Django — Victor 2
 from __future__ import annotations
 
 from django.conf import settings
-from ninja import File, Form, Router, Schema
+from ninja import File, Form, Header, Router, Schema
 from ninja.errors import HttpError
 from ninja.files import UploadedFile
 
@@ -346,11 +346,18 @@ def create_manual_payment(
     pix_key: str | None = Form(None),  # kind=pix
     boleto_line: str | None = Form(None),  # kind=boleto (linha digitável)
     receipt: UploadedFile | None = File(None),  # comprovante opcional
+    idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
 ):
     """Enfileira um pagamento avulso a um terceiro LIVRE (não precisa ser usuário): PIX por chave ou
     boleto por linha digitável, pela conta Asaas. Anexa um comprovante opcional. Entra na mesma fila
-    de saída (visível em GET /finance/payouts, kind=manual). Validação inválida → 422."""
+    de saída (visível em GET /finance/payouts, kind=manual). Validação inválida → 422.
+
+    DINHEIRO REAL: exige o header `Idempotency-Key` (um uuid do front). A `external_reference` é
+    derivada dela → um retry com a mesma key devolve o pagamento já criado em vez de disparar um 2º
+    PIX. Sem a key → 422 `IDEMPOTENCY_KEY_REQUIRED` (fail-closed)."""
     require_superuser(request.auth)
+    if not (idempotency_key or "").strip():
+        raise HttpError(422, "IDEMPOTENCY_KEY_REQUIRED")
 
     receipt_path = None
     if receipt is not None:
@@ -367,6 +374,7 @@ def create_manual_payment(
                 supplier_name=supplier_name,
                 description=description,
                 receipt=receipt_path,
+                idempotency_key=idempotency_key,
             )
         elif kind == "boleto":
             pr = finance_manual.request_boleto_payment(
@@ -375,6 +383,7 @@ def create_manual_payment(
                 supplier_name=supplier_name,
                 description=description,
                 receipt=receipt_path,
+                idempotency_key=idempotency_key,
             )
         else:
             raise HttpError(422, "kind deve ser 'pix' ou 'boleto'.")
