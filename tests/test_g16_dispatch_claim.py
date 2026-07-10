@@ -8,6 +8,7 @@ import pytest
 
 from notify import dispatch as d
 from notify.models import (
+    STATUS_FAILED,
     STATUS_PENDING,
     STATUS_SENDING,
     STATUS_SENT,
@@ -61,8 +62,10 @@ def test_g16_claim_sending_commitado_ANTES_da_rede(monkeypatch):
     assert notif.tts_status == STATUS_SENT  # fase 3 gravou o resultado
 
 
-def test_g16_canal_em_sending_nao_reenvia(monkeypatch):
-    """Retry após crash: um canal preso em SENDING NÃO é reenviado (era a duplicação)."""
+def test_g16_recover_manda_texto_SEM_regenerar_tts(monkeypatch):
+    """Retry após crash (WhatsApp/TTS presos em SENDING): recupera por TEXTO e NÃO regenera o TTS
+    (regra do Victor — a geração de áudio é a única coisa cara/que não pode duplicar; texto é comum
+    e sem problema). Garante a entrega da mensagem sem cobrar a IA de novo."""
     monkeypatch.setattr(d.settings, "TEST_MODE", False)
     notif = _notif(
         want_tts=True,
@@ -71,12 +74,19 @@ def test_g16_canal_em_sending_nao_reenvia(monkeypatch):
     )
     called = []
     monkeypatch.setattr(d, "_send_tts", lambda n: called.append("tts"))
-    monkeypatch.setattr(d, "_send_whatsapp_text", lambda n: called.append("wa"))
-    monkeypatch.setattr(d, "_send_whatsapp_media", lambda n: called.append("media"))
-    monkeypatch.setattr(d, "_send_email", lambda n: called.append("email"))
+
+    def fake_text(n):
+        called.append("text")
+        n.whatsapp_status = STATUS_SENT
+
+    monkeypatch.setattr(d, "_send_whatsapp_text", fake_text)
 
     d.dispatch(notif.id)
-    assert called == [], "canal em SENDING foi reenviado (duplicação no retry)"
+    assert "tts" not in called, "regenerou o TTS no recover (cobraria a IA 2×)"
+    assert "text" in called, "não mandou texto no recover (mensagem perdida)"
+    notif.refresh_from_db()
+    assert notif.whatsapp_status == STATUS_SENT
+    assert notif.tts_status == STATUS_FAILED  # marcado como recuperado-por-texto
 
 
 def test_g16_fluxo_normal_texto(monkeypatch):

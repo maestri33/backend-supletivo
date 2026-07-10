@@ -51,9 +51,10 @@ def dispatch(notification_id: int) -> None:
          o áudio ia pro aluno, a transação revertia o status pra PENDING, e o retry reenviava.
       3. RESULTADO: grava SENT/FAILED de cada canal.
 
-    Trade-off: um crash na janela (µs) entre o commit do claim e a chamada de rede deixa o canal
-    preso em SENDING sem enviar — preferível a duplicar cobrança de IA + áudio, e o SENDING preso é
-    logado (`notify.channels_stuck_sending`) pra reprocesso manual.
+    Recuperação (regra do Victor): se uma execução anterior morreu no meio (canal em SENDING), o
+    retry RECUPERA por TEXTO — não regenera o TTS (a geração de áudio é a única coisa que custa IA e
+    não pode duplicar). Assim a mensagem sempre chega (texto é comum e sem problema); o áudio, se
+    saiu antes do crash, o aluno recebe além do texto. Nunca fica sem mensagem, nunca cobra a IA 2×.
     """
     # ── FASE 1: CLAIM ────────────────────────────────────────────────────────
     with transaction.atomic():
@@ -84,55 +85,63 @@ def dispatch(notification_id: int) -> None:
             )
             return
 
-        do_whatsapp = notif.whatsapp_status == STATUS_PENDING
-        do_email = notif.email_status == STATUS_PENDING
-        do_tts = notif.want_tts and notif.tts_status == STATUS_PENDING
+        # PENDING = nunca tentado. SENDING = execução anterior morreu no meio → RECUPERA por TEXTO
+        # (regra do Victor): garante a entrega SEM regenerar o TTS (a geração de áudio é a única
+        # coisa cara/não-duplicável, pois custa IA). Texto e e-mail são baratos e reenviáveis "como
+        # é comum, sem problema" — se o áudio chegou a sair antes do crash, o aluno recebe áudio +
+        # texto; se não saiu, recebe só o texto. Nunca fica sem mensagem.
+        wa_pending = notif.whatsapp_status == STATUS_PENDING
+        wa_recover = notif.whatsapp_status == STATUS_SENDING
+        email_pending = notif.email_status == STATUS_PENDING
+        email_recover = notif.email_status == STATUS_SENDING
+        tts_pending = notif.want_tts and notif.tts_status == STATUS_PENDING
 
-        # canais presos em SENDING de uma execução anterior que morreu no meio: NÃO reenvia (não
-        # duplica), mas registra pra reprocesso manual.
-        stuck = [
-            name
-            for name, status in (
-                ("whatsapp", notif.whatsapp_status),
-                ("email", notif.email_status),
-                ("tts", notif.tts_status),
-            )
-            if status == STATUS_SENDING
-        ]
-        if stuck:
+        do_whatsapp = wa_pending or wa_recover
+        do_email = email_pending or email_recover
+        if wa_recover or email_recover:
             logger.warning(
-                "notify.channels_stuck_sending",
+                "notify.recovering_as_text",
                 external_id=str(notif.external_id),
-                channels=stuck,
+                whatsapp=wa_recover,
+                email=email_recover,
             )
 
-        if not (do_whatsapp or do_email or do_tts):
+        if not (do_whatsapp or do_email):
             notif.save(update_fields=["attempts"])
             return
 
-        # marca o CLAIM (SENDING) nos canais que vão ser enviados e COMMITA (fim do `with`).
+        # marca o CLAIM (SENDING) nos canais que vão ser enviados e COMMITA (fim do `with`). O TTS só
+        # é reclamado quando é um envio NOVO (tts_pending); na recuperação, ele NÃO é regenerado.
         if do_whatsapp:
             notif.whatsapp_status = STATUS_SENDING
         if do_email:
             notif.email_status = STATUS_SENDING
-        if do_tts:
+        if tts_pending:
             notif.tts_status = STATUS_SENDING
         notif.save()
 
     # ── FASE 2: ENVIO (fora da transação) ────────────────────────────────────
-    # Usa as flags do_* (não os status, que agora são SENDING). Os _send_* mutam notif em memória.
+    # Usa as flags do_*/*_recover (não os status, que agora são SENDING). Os _send_* mutam notif.
     if do_whatsapp:
-        if notif.media_url:
-            if do_tts:
+        if wa_recover:
+            # RECUPERAÇÃO: execução anterior interrompida → manda TEXTO, sem regenerar o TTS.
+            if notif.tts_status == STATUS_SENDING:
+                notif.tts_status = STATUS_FAILED
+                notif.tts_error = "recuperado como texto (envio anterior interrompido)"
+            _send_whatsapp_text(notif)
+        elif notif.media_url:
+            if tts_pending:
                 notif.tts_status = (
                     STATUS_SKIPPED  # mídia tem precedência sobre voice-note
                 )
             _send_whatsapp_media(notif)
         elif notif.want_tts:
-            _send_tts(notif)  # áudio; falha → texto (fallback interno)
+            _send_tts(
+                notif
+            )  # áudio; falha SÍNCRONA → texto (fallback interno já existente)
         else:
             _send_whatsapp_text(notif)
-    elif do_tts:
+    elif tts_pending:
         # whatsapp sem destino (SKIPPED) mas TTS pendente: áudio não tem pra onde ir → skipa.
         notif.tts_status = STATUS_SKIPPED
 
