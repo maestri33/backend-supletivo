@@ -14,7 +14,7 @@ from pathlib import Path
 
 import structlog
 from django.conf import settings
-from django.db import transaction
+from django.db import IntegrityError, transaction
 from django.utils import timezone
 
 from users.auth.otp.models import (
@@ -64,47 +64,58 @@ def _check_and_record_rate_limit(user) -> None:
     window_s = settings.OTP_RATELIMIT_WINDOW_S
     hourly_max = settings.OTP_RATELIMIT_HOURLY_MAX
 
-    with transaction.atomic():
-        rl = OtpRateLimit.objects.select_for_update().filter(user=user).first()
+    try:
+        with transaction.atomic():
+            rl = OtpRateLimit.objects.select_for_update().filter(user=user).first()
 
-        if rl is not None:
-            elapsed = (now - rl.last_created_at).total_seconds()
-            if elapsed < window_s:
-                retry = max(1, int(window_s - elapsed))
-                logger.info("otp.rate_limit.window_blocked", retry_after_s=retry)
-                raise RateLimited(
-                    f"Aguarde {retry}s antes de pedir outro código.",
-                    retry_after_s=retry,
-                )
-
-            hourly_elapsed = (now - rl.hourly_window_start).total_seconds()
-            if hourly_elapsed < 3600:
-                if rl.hourly_count >= hourly_max:
-                    retry = max(1, int(3600 - hourly_elapsed))
-                    logger.info(
-                        "otp.rate_limit.hourly_blocked",
-                        count=rl.hourly_count,
-                        retry_after_s=retry,
-                    )
+            if rl is not None:
+                elapsed = (now - rl.last_created_at).total_seconds()
+                if elapsed < window_s:
+                    retry = max(1, int(window_s - elapsed))
+                    logger.info("otp.rate_limit.window_blocked", retry_after_s=retry)
                     raise RateLimited(
-                        f"Limite de {hourly_max} códigos/hora atingido. Aguarde {retry}s.",
+                        f"Aguarde {retry}s antes de pedir outro código.",
                         retry_after_s=retry,
                     )
-                rl.hourly_count += 1
+
+                hourly_elapsed = (now - rl.hourly_window_start).total_seconds()
+                if hourly_elapsed < 3600:
+                    if rl.hourly_count >= hourly_max:
+                        retry = max(1, int(3600 - hourly_elapsed))
+                        logger.info(
+                            "otp.rate_limit.hourly_blocked",
+                            count=rl.hourly_count,
+                            retry_after_s=retry,
+                        )
+                        raise RateLimited(
+                            f"Limite de {hourly_max} códigos/hora atingido. Aguarde {retry}s.",
+                            retry_after_s=retry,
+                        )
+                    rl.hourly_count += 1
+                else:
+                    rl.hourly_count = 1
+                    rl.hourly_window_start = now
+                rl.last_created_at = now
+                rl.save(
+                    update_fields=[
+                        "last_created_at",
+                        "hourly_count",
+                        "hourly_window_start",
+                    ]
+                )
             else:
-                rl.hourly_count = 1
-                rl.hourly_window_start = now
-            rl.last_created_at = now
-            rl.save(
-                update_fields=["last_created_at", "hourly_count", "hourly_window_start"]
-            )
-        else:
-            OtpRateLimit.objects.create(
-                user=user,
-                last_created_at=now,
-                hourly_count=1,
-                hourly_window_start=now,
-            )
+                OtpRateLimit.objects.create(
+                    user=user,
+                    last_created_at=now,
+                    hourly_count=1,
+                    hourly_window_start=now,
+                )
+    except IntegrityError:
+        # baixa/#33: clique duplo — outro request concorrente criou o rate-limit entre o SELECT (que
+        # não travou nada, pois não havia linha) e o INSERT. Não é 500: re-processa FORA do atomic já
+        # revertido; agora o row existe e a janela curta bloqueia com 429 — o comportamento certo pra
+        # dois pedidos de OTP simultâneos.
+        _check_and_record_rate_limit(user)
 
 
 def generate_and_send(user) -> OtpCode:
