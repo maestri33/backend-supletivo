@@ -9,7 +9,6 @@ from __future__ import annotations
 
 from django.conf import settings
 from ninja import File, Form, Router, Schema
-from ninja.errors import HttpError
 from ninja.files import UploadedFile
 
 from api.auth import require_superuser
@@ -23,6 +22,7 @@ from hub import interface as hub_iface
 from integrations import status as integ_status
 from integrations.bank.asaas import onboarding as asaas_onboarding
 from users.auth import service as auth_iface
+from users.exceptions import NotFound, ValidationError
 from users.profiles import interface as profiles
 from users.roles import interface as roles
 from users.roles.enrollment import service as enrollment_iface
@@ -119,6 +119,44 @@ def _hub_out(hub) -> dict:
     }
 
 
+# ── tradução de erro de borda → envelope padrão `{detail, code}` (proposta API #5) ──
+# O `hub`/`finance` levantam Exception com SLUG na mensagem (ex.: "hub_not_found"). Aqui viram
+# DomainError com `code` UPPER_SNAKE estável (o front faz `switch(code)`), mantendo o MESMO status.
+_HUB_ERROR_DETAIL = {
+    "hub_not_found": "Polo não encontrado.",
+    "coordinator_not_found": "Coordenador não encontrado.",
+    "coordinator_not_promoter": "O coordenador precisa ser um promotor ativo.",
+}
+_MANUAL_PAYMENT_DETAIL = {
+    "invalid_amount": "Valor inválido.",
+    "amount_must_be_positive": "O valor deve ser positivo.",
+    "pix_key_required": "Chave PIX obrigatória.",
+    "line_code_required": "Linha digitável do boleto obrigatória.",
+}
+
+
+def _raise_hub_error(exc: Exception):
+    """HubError (slug) → DomainError com code. `hub_not_found` é 404; o resto é 422 (mesmo status
+    que o `HttpError` cru devolvia antes)."""
+    slug = str(exc)
+    if slug.startswith("invalid_brand:"):
+        raise ValidationError(
+            "Marca inválida (fora do catálogo).", code="INVALID_BRAND"
+        ) from exc
+    code = slug.upper()
+    detail = _HUB_ERROR_DETAIL.get(slug, slug)
+    if slug == "hub_not_found":
+        raise NotFound(detail, code=code) from exc
+    raise ValidationError(detail, code=code) from exc
+
+
+def _raise_manual_payment_error(exc: Exception):
+    """ManualPaymentError (slug) → 422 `PAYMENT_<SLUG>` (mantém o 422 do HttpError cru)."""
+    slug = str(exc)
+    detail = _MANUAL_PAYMENT_DETAIL.get(slug, slug)
+    raise ValidationError(detail, code=f"PAYMENT_{slug.upper()}") from exc
+
+
 # ── rotas (todas exigem superuser) ─────────────────────────────────────────
 @api.post("/hubs", response=HubOut, tags=["staff"])
 def create_hub(request, payload: HubCreateIn):
@@ -130,7 +168,7 @@ def create_hub(request, payload: HubCreateIn):
             coordinator_external_id=payload.coordinator_external_id,
         )
     except hub_iface.HubError as exc:
-        raise HttpError(422, str(exc)) from exc
+        _raise_hub_error(exc)
     return _hub_out(hub)
 
 
@@ -169,8 +207,7 @@ def set_coordinator(request, external_id: str, payload: SetCoordinatorIn):
             coordinator_external_id=payload.coordinator_external_id,
         )
     except hub_iface.HubError as exc:
-        status = 404 if exc.args and exc.args[0] == "hub_not_found" else 422
-        raise HttpError(status, str(exc)) from exc
+        _raise_hub_error(exc)
     return _hub_out(hub)
 
 
@@ -181,8 +218,7 @@ def set_default_hub(request, external_id: str):
     try:
         hub = hub_iface.set_default(external_id)
     except hub_iface.HubError as exc:
-        status = 404 if exc.args and exc.args[0] == "hub_not_found" else 422
-        raise HttpError(status, str(exc)) from exc
+        _raise_hub_error(exc)
     return _hub_out(hub)
 
 
@@ -199,7 +235,7 @@ def set_hub_address(request, external_id: str, payload: HubAddressIn):
             complement=payload.complement,
         )
     except hub_iface.HubError as exc:
-        raise HttpError(404, str(exc)) from exc
+        _raise_hub_error(exc)
     return _hub_out(hub)
 
 
@@ -272,7 +308,7 @@ def list_all_leads(request, hub: str | None = None, status: str | None = None):
         # hub passado mas inexistente → 404 (não cair silenciosamente em "todos os leads")
         hub_obj = hub_iface.get_by_external_id(hub)
         if hub_obj is None:
-            raise HttpError(404, "hub_not_found")
+            raise NotFound("Polo não encontrado.", code="HUB_NOT_FOUND")
     leads = lead_iface.list_leads(hub=hub_obj, status=status)
     return [lead_iface.lead_to_dict(lead) for lead in leads]
 
@@ -377,9 +413,11 @@ def create_manual_payment(
                 receipt=receipt_path,
             )
         else:
-            raise HttpError(422, "kind deve ser 'pix' ou 'boleto'.")
+            raise ValidationError(
+                "kind deve ser 'pix' ou 'boleto'.", code="PAYMENT_INVALID_KIND"
+            )
     except finance_manual.ManualPaymentError as exc:
-        raise HttpError(422, str(exc)) from exc
+        _raise_manual_payment_error(exc)
     return {
         "external_id": str(pr.external_id),
         "kind": pr.kind,
@@ -447,7 +485,7 @@ def integration_detail(request, name: str):
     require_superuser(request.auth)
     data = integ_status.integration_detail(name)
     if data is None:
-        raise HttpError(404, "integration_not_found")
+        raise NotFound("Integração não encontrada.", code="INTEGRATION_NOT_FOUND")
     return data
 
 
@@ -457,7 +495,7 @@ def integration_setup(request, name: str):
     require_superuser(request.auth)
     data = integ_status.run_setup(name)
     if data is None:
-        raise HttpError(404, "integration_not_found")
+        raise NotFound("Integração não encontrada.", code="INTEGRATION_NOT_FOUND")
     return data
 
 
@@ -467,7 +505,7 @@ def integration_test(request, name: str):
     require_superuser(request.auth)
     data = integ_status.run_test(name)
     if data is None:
-        raise HttpError(404, "integration_not_found")
+        raise NotFound("Integração não encontrada.", code="INTEGRATION_NOT_FOUND")
     return data
 
 
