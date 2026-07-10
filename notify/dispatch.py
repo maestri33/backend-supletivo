@@ -28,6 +28,7 @@ from notify import sanitize
 from notify.models import (
     STATUS_FAILED,
     STATUS_PENDING,
+    STATUS_SENDING,
     STATUS_SENT,
     STATUS_SKIPPED,
     Notification,
@@ -39,11 +40,22 @@ logger = structlog.get_logger()
 def dispatch(notification_id: int) -> None:
     """Envia a Notification pelos canais ainda pendentes e grava o status de cada um.
 
-    Race de despacho: leitura+decisão+save inteiras rodam sob `select_for_update` numa única
-    transação — trava a linha da Notification até o commit, então duas execuções concorrentes
-    (ex.: retry do Django-Q sobrepondo o worker original) serializam em vez de despachar o mesmo
-    canal em duplicidade (crítico em is_tts, que dispara chamada de IA + WhatsApp).
+    G16 — três fases pra não duplicar envio quando o worker morre no meio (OOM/timeout do Django-Q,
+    que re-executa a task após `retry`):
+
+      1. CLAIM: sob `select_for_update`, marca os canais PENDENTES como SENDING e COMMITA. A trava
+         serializa execuções concorrentes (o 2º worker vê SENDING, não PENDING), e o commit persiste
+         o "estou enviando" ANTES de qualquer chamada de rede.
+      2. ENVIO: FORA da transação. A rede (WhatsApp/e-mail/IA-TTS) não é desfeita por rollback, então
+         não pode rodar dentro de uma transação que pode reverter — era essa a causa da duplicação:
+         o áudio ia pro aluno, a transação revertia o status pra PENDING, e o retry reenviava.
+      3. RESULTADO: grava SENT/FAILED de cada canal.
+
+    Trade-off: um crash na janela (µs) entre o commit do claim e a chamada de rede deixa o canal
+    preso em SENDING sem enviar — preferível a duplicar cobrança de IA + áudio, e o SENDING preso é
+    logado (`notify.channels_stuck_sending`) pra reprocesso manual.
     """
+    # ── FASE 1: CLAIM ────────────────────────────────────────────────────────
     with transaction.atomic():
         notif = (
             Notification.objects.select_for_update().filter(id=notification_id).first()
@@ -72,25 +84,63 @@ def dispatch(notification_id: int) -> None:
             )
             return
 
-        # ── WhatsApp: mídia > TTS(áudio, fallback texto) > texto ──
-        if notif.whatsapp_status == STATUS_PENDING:
-            if notif.media_url:
-                if notif.want_tts and notif.tts_status == STATUS_PENDING:
-                    notif.tts_status = (
-                        STATUS_SKIPPED  # mídia tem precedência sobre voice-note
-                    )
-                _send_whatsapp_media(notif)
-            elif notif.want_tts:
-                _send_tts(notif)  # áudio; falha → texto (fallback interno)
-            else:
-                _send_whatsapp_text(notif)
-        elif notif.want_tts and notif.tts_status == STATUS_PENDING:
-            # whatsapp sem destino (SKIPPED) mas TTS pendente: áudio não tem pra onde ir → skipa.
-            notif.tts_status = STATUS_SKIPPED
+        do_whatsapp = notif.whatsapp_status == STATUS_PENDING
+        do_email = notif.email_status == STATUS_PENDING
+        do_tts = notif.want_tts and notif.tts_status == STATUS_PENDING
 
-        if notif.email_status == STATUS_PENDING:
-            _send_email(notif)
+        # canais presos em SENDING de uma execução anterior que morreu no meio: NÃO reenvia (não
+        # duplica), mas registra pra reprocesso manual.
+        stuck = [
+            name
+            for name, status in (
+                ("whatsapp", notif.whatsapp_status),
+                ("email", notif.email_status),
+                ("tts", notif.tts_status),
+            )
+            if status == STATUS_SENDING
+        ]
+        if stuck:
+            logger.warning(
+                "notify.channels_stuck_sending",
+                external_id=str(notif.external_id),
+                channels=stuck,
+            )
 
+        if not (do_whatsapp or do_email or do_tts):
+            notif.save(update_fields=["attempts"])
+            return
+
+        # marca o CLAIM (SENDING) nos canais que vão ser enviados e COMMITA (fim do `with`).
+        if do_whatsapp:
+            notif.whatsapp_status = STATUS_SENDING
+        if do_email:
+            notif.email_status = STATUS_SENDING
+        if do_tts:
+            notif.tts_status = STATUS_SENDING
+        notif.save()
+
+    # ── FASE 2: ENVIO (fora da transação) ────────────────────────────────────
+    # Usa as flags do_* (não os status, que agora são SENDING). Os _send_* mutam notif em memória.
+    if do_whatsapp:
+        if notif.media_url:
+            if do_tts:
+                notif.tts_status = (
+                    STATUS_SKIPPED  # mídia tem precedência sobre voice-note
+                )
+            _send_whatsapp_media(notif)
+        elif notif.want_tts:
+            _send_tts(notif)  # áudio; falha → texto (fallback interno)
+        else:
+            _send_whatsapp_text(notif)
+    elif do_tts:
+        # whatsapp sem destino (SKIPPED) mas TTS pendente: áudio não tem pra onde ir → skipa.
+        notif.tts_status = STATUS_SKIPPED
+
+    if do_email:
+        _send_email(notif)
+
+    # ── FASE 3: RESULTADO ────────────────────────────────────────────────────
+    with transaction.atomic():
         notif.save()
         logger.info(
             "notify.dispatched",
