@@ -1,7 +1,6 @@
 """Testes de auth: OTP + /auth/check com e sem BOT_SERVICE_SECRET."""
+
 import pytest
-from django.test import Client
-from django.conf import settings
 
 pytestmark = pytest.mark.django_db
 
@@ -11,6 +10,7 @@ def existing_user():
     """Cria um usuário de teste com Profile (phone normalizado) para os testes de auth."""
     from users.auth.models import User
     from users.profiles.models import Profile
+
     user = User.objects.create_user()
     # validate_phone normaliza 11999990001 → 5511999990001
     Profile.objects.create(user=user, phone="5511999990001")
@@ -59,6 +59,7 @@ def test_check_send_otp_true_sem_segredo_ok(client):
 def test_otp_hash_nao_e_plaintext():
     """OTP nunca é armazenado em plaintext — só SHA256."""
     from users.auth.otp.service import _hash_code
+
     code = "123456"
     hashed = _hash_code(code)
     assert hashed != code
@@ -69,5 +70,6 @@ def test_otp_compare_digest_timing_safe():
     """Verificação de OTP usa secrets.compare_digest (tempo constante)."""
     import inspect
     from users.auth.otp import service as otp_service
+
     src = inspect.getsource(otp_service.verify)
     assert "compare_digest" in src or "secrets.compare_digest" in src

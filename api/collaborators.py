@@ -17,12 +17,11 @@ from ninja.files import UploadedFile
 
 from api.auth import require_roles
 from api.base import add_auth_refresh, add_funnel_login, build_group
-from api.schemas import CheckIn, CheckOut, TokenOut
+from api.schemas import CheckIn, CheckOut
 from core.net import source_ip
 from users.auth import service as auth_iface
 from users.consent import PROMOTER_CONTRACT
 from users.exceptions import NotFound
-from users.roles import interface as roles
 from users.roles.candidate import service as candidate_iface
 from users.roles.lead import service as lead_iface
 from users.roles.promoter import service as promoter_iface

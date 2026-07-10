@@ -35,7 +35,9 @@ def test_desativar_derruba_access():
 
     u = _user()
     ext = str(u.external_id)
-    claims_version = jwt.current_version(ext)  # versão que um token emitido agora carregaria
+    claims_version = jwt.current_version(
+        ext
+    )  # versão que um token emitido agora carregaria
     User.objects.filter(pk=u.pk).update(is_active=False)
     assert jwt.version_matches(ext, claims_version) is False
 

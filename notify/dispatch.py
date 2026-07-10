@@ -45,7 +45,9 @@ def dispatch(notification_id: int) -> None:
     canal em duplicidade (crítico em is_tts, que dispara chamada de IA + WhatsApp).
     """
     with transaction.atomic():
-        notif = Notification.objects.select_for_update().filter(id=notification_id).first()
+        notif = (
+            Notification.objects.select_for_update().filter(id=notification_id).first()
+        )
         if notif is None:
             logger.warning("notify.dispatch_missing", id=notification_id)
             return

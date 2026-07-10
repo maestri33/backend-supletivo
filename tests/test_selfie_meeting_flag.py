@@ -32,11 +32,16 @@ def test_flag_sobe_e_persiste_no_profile():
 
     profiles.set_selfie_needs_meeting(user)
     # relê do banco (não do objeto em memória) — a flag tem que estar persistida
-    assert profiles.find_by_external_id(str(user.external_id)).selfie_needs_meeting is True
+    assert (
+        profiles.find_by_external_id(str(user.external_id)).selfie_needs_meeting is True
+    )
 
     # e o coordenador limpa (fim do curso, foto manual)
     profiles.set_selfie_needs_meeting(user, False)
-    assert profiles.find_by_external_id(str(user.external_id)).selfie_needs_meeting is False
+    assert (
+        profiles.find_by_external_id(str(user.external_id)).selfie_needs_meeting
+        is False
+    )
 
 
 @pytest.mark.django_db

@@ -312,4 +312,6 @@ def _notify_status(promoter: Promoter, event: str) -> None:
             idempotency_key=f"{event}_{promoter.user.external_id}_{int(promoter.updated_at.timestamp())}",
         )
     except Exception as exc:  # noqa: BLE001
-        logger.warning("promoter.notify_status_failed", notify_event=event, error=str(exc))
+        logger.warning(
+            "promoter.notify_status_failed", notify_event=event, error=str(exc)
+        )

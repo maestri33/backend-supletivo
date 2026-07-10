@@ -44,6 +44,7 @@ def append_reason(previous: str | None, attempt: int, desc: str | None) -> str:
     joined = f"{previous}\n\n{block}" if previous else block
     return joined[-8000:]
 
+
 _PROMPT = (
     "Você é o verificador de selfie de um cadastro escolar. A imagem é uma selfie de uma PESSOA "
     "REAL, fotografada ao vivo agora? Só reprove se for CLARAMENTE foto de outra foto, de tela, de "
@@ -121,9 +122,7 @@ def add_face_match(
         )
         fm_status, fm_score, fm_reason = fm.status, fm.score, fm.reason
     except Exception as exc:  # noqa: BLE001 — biometria é gate de segurança; falha → revisão humana
-        logger.warning(
-            "selfie_face_match_failed", caller=caller, error=str(exc)[:200]
-        )
+        logger.warning("selfie_face_match_failed", caller=caller, error=str(exc)[:200])
         fm_status, fm_score, fm_reason = REVIEW, None, f"face-match indisponível: {exc}"
 
     status = combine(liveness_status, fm_status)

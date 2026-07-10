@@ -11,6 +11,7 @@ from django.test import Client
 @pytest.fixture(autouse=True)
 def test_settings():
     from django.conf import settings
+
     settings.TEST_MODE = True
     settings.BOT_SERVICE_SECRET = "test_bot_secret"
     settings.BOT_SERVICE_HEADER = "x-bot-service-token"

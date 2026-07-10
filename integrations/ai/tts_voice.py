@@ -1,6 +1,7 @@
 """TTS voice resolution — mapeamento centralizado de vozes (cross-gender marketing).
 ponytail: service.py:432-460 já tem a lógica inline; aqui centraliza + adiciona fallback MiniMax.
 """
+
 from __future__ import annotations
 
 from django.conf import settings

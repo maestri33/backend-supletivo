@@ -26,7 +26,9 @@ def _mk_promoter(*, pre_matriculado: bool):
         address=addr, brand="test", coordinator=coord, is_default=True
     )
     user = User.objects.create_user(external_id=uuid.uuid4())
-    Profile.objects.create(user=user, cpf=str(uuid.uuid4().int)[:11], phone=str(uuid.uuid4().int)[:13])
+    Profile.objects.create(
+        user=user, cpf=str(uuid.uuid4().int)[:11], phone=str(uuid.uuid4().int)[:13]
+    )
     promoter = Promoter.objects.create(
         user=user, hub=hub, pre_matriculado=pre_matriculado
     )

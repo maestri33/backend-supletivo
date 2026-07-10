@@ -1,4 +1,5 @@
 """Testes do notify: dry-run dispatch, voz cross-gender do TTS e idempotência."""
+
 import pytest
 
 pytestmark = pytest.mark.django_db
@@ -47,11 +48,24 @@ def test_idempotency_key_unica():
     from notify.interface.send import send
     from notify.models import Notification
     from django.conf import settings
+
     settings.TEST_MODE = True
 
     key = "test_idem_001"
-    n1 = send(text="oi", caller="test", phone="551199990001", idempotency_key=key, run_sync=False)
-    n2 = send(text="oi", caller="test", phone="551199990001", idempotency_key=key, run_sync=False)
+    n1 = send(
+        text="oi",
+        caller="test",
+        phone="551199990001",
+        idempotency_key=key,
+        run_sync=False,
+    )
+    n2 = send(
+        text="oi",
+        caller="test",
+        phone="551199990001",
+        idempotency_key=key,
+        run_sync=False,
+    )
     assert n1 == n2
     assert Notification.objects.filter(idempotency_key=key).count() == 1
 
@@ -61,6 +75,7 @@ def test_dispatch_dry_run_nao_chama_rede():
     from notify.interface.send import send
     from notify.models import Notification
     from django.conf import settings
+
     settings.TEST_MODE = True
 
     nid = send(
@@ -95,8 +110,11 @@ def test_minimax_client_direct_mode():
 def test_ia_providers_centralizado_no_omniroute():
     """IA_PROVIDERS contém omniroute como provider primário (Wave 4 — centralizado)."""
     from django.conf import settings
+
     # setUp mínimo: omniroute é o provider primário
-    settings.IA_PROVIDERS = {"omniroute": {"base_url": "http://10.1.30.35:80", "api_key": "test"}}
+    settings.IA_PROVIDERS = {
+        "omniroute": {"base_url": "http://10.1.30.35:80", "api_key": "test"}
+    }
     settings.IA_OMNIROUTE_BASE_URL = "http://10.1.30.35:80"
     assert "omniroute" in settings.IA_PROVIDERS
     assert settings.IA_OMNIROUTE_BASE_URL == "http://10.1.30.35:80"

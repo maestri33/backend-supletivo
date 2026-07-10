@@ -31,7 +31,9 @@ AUDIENCE_STUDENT = "student"
 AUDIENCE_PROMOTER = "promoter"
 AUDIENCE_COORDINATOR = "coordinator"
 AUDIENCE_STAFF = "staff"
-AUDIENCE_BLOCKED = "blocked"  # usuário com role bloqueante ativa — NUNCA a política normal
+AUDIENCE_BLOCKED = (
+    "blocked"  # usuário com role bloqueante ativa — NUNCA a política normal
+)
 
 # Leituras SEGURAS do próprio usuário que o contexto pode incluir (resolvidas em `reads.py`).
 READ_LEAD = "lead_status"  # etapa/pagamento do próprio lead

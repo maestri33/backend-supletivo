@@ -4,15 +4,16 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
-        ('users', '0030_addressproof_kinship_provided_at_and_more'),
+        ("users", "0030_addressproof_kinship_provided_at_and_more"),
     ]
 
     operations = [
         migrations.AlterField(
-            model_name='checkout',
-            name='provider_payment_id',
-            field=models.CharField(blank=True, db_index=True, max_length=128, null=True),
+            model_name="checkout",
+            name="provider_payment_id",
+            field=models.CharField(
+                blank=True, db_index=True, max_length=128, null=True
+            ),
         ),
     ]

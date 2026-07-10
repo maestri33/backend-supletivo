@@ -65,7 +65,10 @@ def _address_matches(extracted: dict, address) -> tuple[bool, str]:
     ex_city = _norm(extracted.get("city"))
     in_city = _norm(getattr(address, "city", None))
     if ex_city and in_city and ex_city != in_city:
-        return False, f"Cidade do comprovante ({ex_city}) difere da informada ({in_city})."
+        return (
+            False,
+            f"Cidade do comprovante ({ex_city}) difere da informada ({in_city}).",
+        )
 
     # reforço leve: se CEP e cidade nada disseram (ambos ausentes de um lado), a rua precisa ao menos
     # tocar. Só reprova se houver rua nos dois lados e ZERO palavra em comum.
@@ -73,7 +76,10 @@ def _address_matches(extracted: dict, address) -> tuple[bool, str]:
     in_street = set(_norm(getattr(address, "street", None)).split())
     if not (ex_zip and in_zip) and not (ex_city and in_city):
         if ex_street and in_street and ex_street.isdisjoint(in_street):
-            return False, "Nem CEP, nem cidade, nem rua bateram com o endereço informado."
+            return (
+                False,
+                "Nem CEP, nem cidade, nem rua bateram com o endereço informado.",
+            )
 
     return True, "Endereço confere com o informado."
 
@@ -109,7 +115,9 @@ def run_validation(
             ocr_text, doc_type=_DOC_TYPE, holder_name=holder_name, caller=caller
         )
     except Exception as exc:  # noqa: BLE001 — IA fora na extração → review
-        logger.warning("address_proof.extract_failed", caller=caller, error=str(exc)[:200])
+        logger.warning(
+            "address_proof.extract_failed", caller=caller, error=str(exc)[:200]
+        )
         result["reason"] = (
             "IA indisponível na extração — enviado para revisão manual do coordenador."
         )
@@ -119,7 +127,9 @@ def run_validation(
     # (c) o endereço extraído bate com o informado?
     addr_ok, addr_reason = _address_matches(extracted, address)
     result["address_match"] = {"ok": addr_ok, "reason": addr_reason}
-    logger.info("address_proof.address_match", caller=caller, ok=addr_ok, reason=addr_reason)
+    logger.info(
+        "address_proof.address_match", caller=caller, ok=addr_ok, reason=addr_reason
+    )
     if not addr_ok:
         result["reason"] = (
             f"O endereço do comprovante não confere com o informado. {addr_reason} "
@@ -287,9 +297,7 @@ def demo() -> None:
     assert ok, "comprovante sem dados não deve reprovar por si só"
 
     # sem CEP/cidade dos dois lados e ruas disjuntas → reprova
-    ok, _ = _address_matches(
-        {"street": "Rua das Flores"}, A(street="Avenida Brasil")
-    )
+    ok, _ = _address_matches({"street": "Rua das Flores"}, A(street="Avenida Brasil"))
     assert not ok, "sem CEP/cidade e ruas totalmente diferentes deveria reprovar"
 
     print("ok _address_proof.demo")

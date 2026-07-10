@@ -1946,7 +1946,9 @@ def _notify_fee_event(
             idempotency_key=f"{event}_{enr.external_id}{idem_suffix}",
         )
     except Exception as exc:  # noqa: BLE001 — notify nunca quebra o fluxo (§12)
-        logger.warning("enrollment.fee_notify_failed", notify_event=event, error=str(exc))
+        logger.warning(
+            "enrollment.fee_notify_failed", notify_event=event, error=str(exc)
+        )
 
 
 # ── visão do COORDENADOR: listagem/detalhe do polo + análises pendentes (plan/14) ───────────

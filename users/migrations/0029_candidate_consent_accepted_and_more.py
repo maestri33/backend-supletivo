@@ -4,70 +4,73 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
-        ('users', '0028_backfill_address_proof'),
+        ("users", "0028_backfill_address_proof"),
     ]
 
     operations = [
         migrations.AddField(
-            model_name='candidate',
-            name='consent_accepted',
+            model_name="candidate",
+            name="consent_accepted",
             field=models.BooleanField(default=False),
         ),
         migrations.AddField(
-            model_name='candidate',
-            name='consent_accepted_at',
-            field=models.DateTimeField(blank=True, null=True, verbose_name='consentimento aceito em'),
+            model_name="candidate",
+            name="consent_accepted_at",
+            field=models.DateTimeField(
+                blank=True, null=True, verbose_name="consentimento aceito em"
+            ),
         ),
         migrations.AddField(
-            model_name='candidate',
-            name='consent_ip',
+            model_name="candidate",
+            name="consent_ip",
             field=models.CharField(blank=True, max_length=64, null=True),
         ),
         migrations.AddField(
-            model_name='candidate',
-            name='consent_user_agent',
+            model_name="candidate",
+            name="consent_user_agent",
             field=models.TextField(blank=True, null=True),
         ),
         migrations.AddField(
-            model_name='candidate',
-            name='contract_hash',
+            model_name="candidate",
+            name="contract_hash",
             field=models.CharField(blank=True, max_length=64, null=True),
         ),
         migrations.AddField(
-            model_name='candidate',
-            name='contract_version',
+            model_name="candidate",
+            name="contract_version",
             field=models.CharField(blank=True, max_length=32, null=True),
         ),
         migrations.AddField(
-            model_name='enrollment',
-            name='consent_accepted',
+            model_name="enrollment",
+            name="consent_accepted",
             field=models.BooleanField(default=False),
         ),
         migrations.AddField(
-            model_name='enrollment',
-            name='consent_accepted_at',
-            field=models.DateTimeField(blank=True, null=True, verbose_name='consentimento aceito em'),
+            model_name="enrollment",
+            name="consent_accepted_at",
+            field=models.DateTimeField(
+                blank=True, null=True, verbose_name="consentimento aceito em"
+            ),
         ),
         migrations.AddField(
-            model_name='enrollment',
-            name='consent_ip',
+            model_name="enrollment",
+            name="consent_ip",
             field=models.CharField(blank=True, max_length=64, null=True),
         ),
         migrations.AddField(
-            model_name='enrollment',
-            name='consent_user_agent',
+            model_name="enrollment",
+            name="consent_user_agent",
             field=models.TextField(blank=True, null=True),
         ),
         migrations.AddField(
-            model_name='enrollment',
-            name='contract_hash',
+            model_name="enrollment",
+            name="contract_hash",
             field=models.CharField(blank=True, max_length=64, null=True),
         ),
         migrations.AddField(
-            model_name='enrollment',
-            name='contract_version',
+            model_name="enrollment",
+            name="contract_version",
             field=models.CharField(blank=True, max_length=32, null=True),
         ),
     ]

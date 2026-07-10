@@ -1,7 +1,7 @@
 """Testes de webhooks: idempotência + validação de valor."""
+
 import pytest
-from unittest.mock import patch, MagicMock
-from django.test import Client
+from unittest.mock import patch
 
 pytestmark = pytest.mark.django_db
 
@@ -9,6 +9,7 @@ pytestmark = pytest.mark.django_db
 def test_asaas_webhook_duplicado_idempotente(client):
     """Webhook Asaas duplicado → idempotente (não cria evento duplicado)."""
     from integrations.bank.asaas.models import WebhookEvent
+
     # Cria evento fake (model não tem external_id — usa event+payload)
     WebhookEvent.objects.create(
         event="PAYMENT_RECEIVED",

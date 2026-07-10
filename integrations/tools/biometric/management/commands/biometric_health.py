@@ -37,7 +37,9 @@ class Command(BaseCommand):
             record_check("biometric", "health", False, mode="real", detail=repr(exc))
             return
 
-        liveness = liveness_source()  # prova de vida vem da IA de visão (só reporta a fonte)
+        liveness = (
+            liveness_source()
+        )  # prova de vida vem da IA de visão (só reporta a fonte)
         self.stdout.write(
             self.style.SUCCESS(f"modelo carregado (CPU) ✓  liveness={liveness}")
         )

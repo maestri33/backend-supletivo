@@ -634,7 +634,7 @@ DEFAULT_STAFF_PIX = env("DEFAULT_STAFF_PIX", default="")
 
 # ── Logging estruturado (structlog) ──────────────────────────────────────────
 # ponytail: structlog já está no pyproject.toml. Config mínima: console em dev, JSON em prod.
-import structlog
+import structlog  # noqa: E402 — import perto da sua config (deliberado), não no topo
 
 _structlog_processors = [
     structlog.stdlib.add_log_level,
@@ -657,6 +657,7 @@ structlog.configure(
 SENTRY_DSN = env("SENTRY_DSN", default="")
 if SENTRY_DSN:
     import sentry_sdk
+
     sentry_sdk.init(
         dsn=SENTRY_DSN,
         traces_sample_rate=env.float("SENTRY_TRACES_SAMPLE_RATE", default=0.1),

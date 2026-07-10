@@ -89,7 +89,10 @@ def _lookup_cpf(cpf: str):
 
 async def _wa_check(phone: str) -> tuple[bool, str]:
     if getattr(settings, "TEST_MODE", False):
-        return True, phone  # TEST_MODE=1: número "existe" no zap sem chamar a Evolution API.
+        return (
+            True,
+            phone,
+        )  # TEST_MODE=1: número "existe" no zap sem chamar a Evolution API.
     async with get_client() as wa:
         resolved = await wa.resolve_br_number(phone)
         result = await wa.check_numbers([resolved])

@@ -21,14 +21,16 @@ class _Addr:
 
 def _run(extracted, *, vision=("approved", "ok"), addr=None):
     """Roda run_validation com a IA mockada. `extracted` = o JSON que a extração devolve."""
-    with patch(
-        "users.roles.student._document_ai.check_student_document_photo",
-        return_value=vision,
-    ), patch(
-        "users.roles.student._document_ai.ocr_image", return_value="ocr text"
-    ), patch(
-        "users.roles.student._document_ai.extract_student_document",
-        return_value=extracted,
+    with (
+        patch(
+            "users.roles.student._document_ai.check_student_document_photo",
+            return_value=vision,
+        ),
+        patch("users.roles.student._document_ai.ocr_image", return_value="ocr text"),
+        patch(
+            "users.roles.student._document_ai.extract_student_document",
+            return_value=extracted,
+        ),
     ):
         return ap.run_validation(
             b"fake", address=addr or _Addr(), holder_name="Maria Silva", caller="test"
@@ -37,31 +39,37 @@ def _run(extracted, *, vision=("approved", "ok"), addr=None):
 
 def test_endereco_bate_titular_bate_aprova():
     status, _ = _run(
-        {"zip": "01310100", "city": "São Paulo", "street": "Av Paulista", "name_match": "sim"}
+        {
+            "zip": "01310100",
+            "city": "São Paulo",
+            "street": "Av Paulista",
+            "name_match": "sim",
+        }
     )
     assert status == ap.APPROVED
 
 
 def test_endereco_nao_bate_reprova_nao_needs_kinship():
     # cidade divergente → rejected (NÃO needs_kinship, mesmo com titular ok)
-    status, payload = _run(
-        {"city": "Campinas", "street": "Rua X", "name_match": "sim"}
-    )
+    status, payload = _run({"city": "Campinas", "street": "Rua X", "name_match": "sim"})
     assert status == ap.REJECTED
     assert "endereço" in payload["reason"].lower()
 
 
 def test_endereco_bate_titular_outro_pede_parentesco():
     status, _ = _run(
-        {"zip": "01310100", "city": "São Paulo", "name_match": "nao", "name_reason": "outro nome"}
+        {
+            "zip": "01310100",
+            "city": "São Paulo",
+            "name_match": "nao",
+            "name_reason": "outro nome",
+        }
     )
     assert status == ap.NEEDS_KINSHIP
 
 
 def test_titular_duvida_vai_pra_review():
-    status, _ = _run(
-        {"zip": "01310100", "city": "São Paulo", "name_match": "duvida"}
-    )
+    status, _ = _run({"zip": "01310100", "city": "São Paulo", "name_match": "duvida"})
     assert status == ap.REVIEW
 
 

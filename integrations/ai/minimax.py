@@ -40,7 +40,10 @@ class MiniMaxClient:
         if direct and getattr(settings, "MINIMAX_DIRECT_API_KEY", ""):
             self._api_key = api_key or settings.MINIMAX_DIRECT_API_KEY
             self._base_url = (
-                base_url or getattr(settings, "MINIMAX_DIRECT_BASE_URL", "https://api.minimax.io")
+                base_url
+                or getattr(
+                    settings, "MINIMAX_DIRECT_BASE_URL", "https://api.minimax.io"
+                )
             ).rstrip("/")
             self._gateway_mode = False  # direto, sem gateway
         else:
@@ -48,7 +51,9 @@ class MiniMaxClient:
             self._base_url = (base_url or settings.MINIMAX_BASE_URL).rstrip("/")
             # Lane #7 (2026-07-08): MINIMAX_GATEWAY_MODE=1 liga o modo gateway — fala o
             # /v1/audio/speech OpenAI-compatible via OmniRoute. Default OFF = API nativa.
-            self._gateway_mode = os.environ.get("MINIMAX_GATEWAY_MODE", "").strip().lower() in (
+            self._gateway_mode = os.environ.get(
+                "MINIMAX_GATEWAY_MODE", ""
+            ).strip().lower() in (
                 "1",
                 "true",
                 "yes",
