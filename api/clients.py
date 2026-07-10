@@ -15,12 +15,12 @@ from ninja.files import UploadedFile
 
 from api.auth import require_roles
 from api.base import add_auth_refresh, add_funnel_login, build_group, resolve_rg_slot
-from api.schemas import CheckIn, CheckOut, TokenOut
+from api.schemas import CheckIn, CheckOut
 from core.net import source_ip
 from users.auth import service as auth_iface
 from users.consent import STUDENT_CONTRACT
+from users.documents import service as documents_iface
 from users.exceptions import NotFound
-from users.roles import interface as roles
 from users.roles.enrollment import service as enrollment_iface
 from users.roles.lead import service as lead_iface
 from users.roles.student import service as student_iface
@@ -672,10 +672,13 @@ def enrollment_selfie(request, file: UploadedFile = File(...)):
     A selfie É a assinatura do contrato (lane #6): o aceite LGPD (versão/hash do contrato + IP +
     user-agent + timestamp) é gravado no ato do envio."""
     ext = _enr_guard(request)
+    # G-uploads: valida tamanho (MAX_UPLOAD_MB, ANTES de ler) + content-type + decode real, em vez
+    # do `file.read()` cru que aceitava 2 GB (OOM) e bytes não-imagem.
+    image_bytes, content_type = documents_iface.read_image_upload(file)
     enr = enrollment_iface.set_selfie(
         user_external_id=ext,
-        image_bytes=file.read(),
-        content_type=getattr(file, "content_type", "image/jpeg"),
+        image_bytes=image_bytes,
+        content_type=content_type,
         consent_ip=source_ip(request),
         consent_user_agent=request.headers.get("user-agent"),
     )
@@ -778,11 +781,13 @@ def student_blood_type(request, payload: BloodTypeIn):
 )
 def student_document(request, doc_type: str, file: UploadedFile = File(...)):
     ext = _student_guard(request)
+    # G-uploads: valida tamanho + content-type + decode real antes de materializar os bytes.
+    image_bytes, content_type = documents_iface.read_image_upload(file)
     doc, ack = student_iface.upload_document(
         user_external_id=ext,
         doc_type=doc_type,
-        image_bytes=file.read(),
-        content_type=getattr(file, "content_type", "image/jpeg"),
+        image_bytes=image_bytes,
+        content_type=content_type,
     )
     return {
         "doc_type": doc_type,
