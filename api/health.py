@@ -64,7 +64,11 @@ def _ping(url: str, timeout: float = 5.0) -> dict:
         return {"ok": False, "error": str(e)[:120]}
 
 
-@staff_health_router.get("/health", auth=JWTAuth())
+# Path `/health/full` (não `/health`): `GET /api/v1/<grupo>/health` é liveness PÚBLICA em todo grupo
+# (build_group, contrato do front — wiki/api/ninja.md). Registrar os pings autenticados em `/health`
+# os deixava SOMBREADOS pelo esqueleto público (o Ninja resolve o 1º registrado), então o gate
+# require_superuser nunca era alcançado. `/health/full` não colide.
+@staff_health_router.get("/health/full", auth=JWTAuth())
 def staff_health(request):
     require_superuser(request.auth)
     return {
