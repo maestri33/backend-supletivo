@@ -1195,9 +1195,12 @@ def set_education(*, user_external_id, level: str, completed: bool) -> dict:
 def get_selfie(*, user_external_id: str) -> dict:
     """GET da selfie/ASSINATURA (plan/15 C). Espelha a seção do enrollment: foto, taken_at,
     `analysis_status` (canônico) + `status` (alias), `analysis_reason` (instruções se reprovou),
-    `expires_at` (TTL do `pending`). Aplica o TTL: pending estourado → `review` + notifica coord."""
+    `expires_at` (TTL do `pending`).
+
+    LEITURA PURA (idempotência HTTP): NÃO muta status nem notifica. O envelhecimento do `pending`
+    estourado → `review` + notify roda no job agendado `tasks.age_stale_selfies` (Django-Q),
+    fora do caminho do GET (antes um retry/crawler/preflight disparava a transição)."""
     cand = _require(user_external_id, _S.PIX, _S.EDUCATION, _S.SELFIE, _S.COMPLETED)
-    _reconcile_selfie_stale(cand)
     return _selfie_dict(cand)
 
 
@@ -1287,9 +1290,34 @@ def _selfie_dict(cand: Candidate) -> dict:
     }
 
 
+def age_stale_selfies() -> int:
+    """Job agendado (Django-Q): selfies `pending` cujo TTL estourou → `review` + notifica coord.
+
+    Substitui o antigo reconcile-on-read do `GET /candidate/selfie` (violava idempotência HTTP).
+    Idempotente: só age em quem AINDA está `pending` e estourou o prazo — a transição vira o status
+    p/ `review`, então a próxima passada não o pega de novo (sem notify duplicado). Retorna quantos
+    envelheceu (métrica do log da task)."""
+    from datetime import timedelta
+
+    from django.utils import timezone
+
+    from users.roles import _analysis, _selfie
+
+    cutoff = timezone.now() - timedelta(seconds=_analysis.ttl_seconds())
+    stale = Candidate.objects.select_related("hub", "hub__coordinator").filter(
+        selfie_status=_selfie.SelfieStatus.PENDING, selfie_taken_at__lt=cutoff
+    )
+    aged = 0
+    for cand in stale:
+        _reconcile_selfie_stale(cand)
+        aged += 1
+    return aged
+
+
 def _reconcile_selfie_stale(cand: Candidate) -> None:
-    """TTL do `pending` da selfie (proposta #2): se a análise estourou, vira `review` na próxima
-    leitura + avisa o coordenador (mesma régua do enrollment)."""
+    """TTL do `pending` da selfie (proposta #2): se a análise estourou, vira `review` + avisa o
+    coordenador (mesma régua do enrollment). Chamado SÓ pelo job `age_stale_selfies` — nunca num
+    GET (idempotência HTTP). Re-checa `is_stale`, então é seguro rodar 2×."""
     from users.roles import _analysis, _selfie
 
     if _analysis.is_stale(cand.selfie_status, cand.selfie_taken_at):

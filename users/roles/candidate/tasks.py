@@ -36,3 +36,12 @@ def validate_address_proof(candidate_id: int) -> None:
     """Valida o comprovante de endereço (visão → endereço bate? → titular bate?) — F1."""
     service.run_address_proof_validation(candidate_id)
     logger.info("candidate.task_address_proof_validated", candidate_id=candidate_id)
+
+
+def age_stale_selfies() -> None:
+    """Schedule (Django-Q): selfies `pending` com TTL estourado → `review` + notifica coord.
+
+    Antes rodava DENTRO do `GET /candidate/selfie` (mutava/notificava numa leitura — viola a
+    idempotência HTTP). Registrado por `manage.py selfie_schedules`. Idempotente."""
+    aged = service.age_stale_selfies()
+    logger.info("candidate.task_selfies_aged", aged=aged)
