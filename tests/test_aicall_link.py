@@ -6,7 +6,6 @@ de custo trocada). Fix: ia.chat(return_call=True) devolve o AiCall EXATO desta c
 from unittest.mock import MagicMock
 
 
-
 def test_chat_sem_return_call_devolve_str(monkeypatch):
     """Compat: chat() sem return_call continua devolvendo só a string."""
     from integrations.ai import service as ai
