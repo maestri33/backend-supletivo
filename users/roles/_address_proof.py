@@ -211,7 +211,14 @@ def submit_kinship(user_external_id: str, relation: str) -> str:
     relation = (relation or "").strip()
     if not relation:
         return NEEDS_KINSHIP  # sem explicação → continua pendente
-    ap.kinship_relation = relation
+    # IA avalia se a explicação tem FUNDAMENTO e corrige o português. Sem fundamento (lixo/sem
+    # sentido) → NÃO aprova; volta pra pessoa reescrever (human-in-the-loop). Fail-open dentro da IA.
+    from integrations.ai import service as ai
+
+    verdict = ai.evaluate_kinship(relation, caller="address_proof.kinship")
+    if not verdict.get("has_merit"):
+        return NEEDS_KINSHIP
+    ap.kinship_relation = verdict.get("corrected") or relation
     ap.kinship_provided_at = timezone.now()
     ap.validation_status = APPROVED
     ap.save(
@@ -221,7 +228,7 @@ def submit_kinship(user_external_id: str, relation: str) -> str:
             "validation_status",
         ]
     )
-    logger.info("address_proof.kinship_submitted", relation=relation[:80])
+    logger.info("address_proof.kinship_submitted", relation=ap.kinship_relation[:80])
     return APPROVED
 
 
