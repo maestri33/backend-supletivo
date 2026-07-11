@@ -565,6 +565,28 @@ def candidate_document_photo(request, slot: str, file: UploadedFile = File(...))
     )
 
 
+class DocClassifyOut(Schema):
+    """Classificação RÁPIDA (síncrona) da foto ANTES do upload — só reconhece, NÃO valida; alimenta
+    a UI generativa. `is_document=null` = IA não decidiu → o front confirma com a pessoa. O promotor
+    ACEITA CNH (diferente do aluno) — a regra de rejeição fica no front."""
+
+    is_document: bool | None = None
+    doc_type: str | None = None
+    completeness: str | None = None
+    confidence: float | None = None
+
+
+@api.post("/candidate/documents/classify", response=DocClassifyOut, tags=["candidate"])
+def candidate_document_classify(request, file: UploadedFile = File(...)):
+    """Classificação RÁPIDA (síncrona) da foto ANTES de enviar — só reconhece (é doc? rg/cnh?
+    inteiro/frente/verso?), NÃO valida. Alimenta a UI generativa do promotor. A validação minuciosa
+    segue assíncrona no upload da foto."""
+    _guard(request, "candidate")
+    from integrations.ai import service as ai
+
+    return ai.classify_document(file.read(), caller="candidate.classify")
+
+
 @api.post(
     "/candidate/documents/address-proof", response=CandidateMeOut, tags=["candidate"]
 )
