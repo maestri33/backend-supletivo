@@ -474,6 +474,66 @@ def describe_image(
     return _media_chain(AiCall.Operation.VISION, caller, attempts)
 
 
+# Classificação RÁPIDA de documento (síncrona) — NÃO valida, só reconhece. É a IA "do front"
+# (via backend→OmniRoute): decide qual componente a tela mostra. A validação minuciosa (assinatura,
+# extração de dados) segue ASSÍNCRONA no pipeline de documento. `is_document=None` = indefinido → o
+# front cai no fluxo de confirmação manual (a pessoa diz o tipo), nunca bloqueia por erro da IA.
+_CLASSIFY_PROMPT = (
+    "Você é um classificador de documentos brasileiros. Olhe a imagem e responda SOMENTE um JSON "
+    "(sem texto antes/depois) com as chaves: "
+    "`is_document` (bool: é foto de um documento de identidade?), "
+    '`doc_type` ("rg" | "cnh" | null se não for identidade), '
+    '`completeness` ("front" | "back" | "full" — front=só a frente, back=só o verso, full=frente e '
+    "verso na mesma imagem/documento inteiro; null se não aplicável), "
+    "`confidence` (0 a 1). NÃO valide autenticidade nem legibilidade — só classifique o que é."
+)
+
+_CLASSIFY_ALLOWED_TYPE = {"rg", "cnh"}
+_CLASSIFY_ALLOWED_COMPLETE = {"front", "back", "full"}
+
+
+def _extract_json(text: str) -> dict | None:
+    """Extrai o 1º objeto JSON de um texto (o LLM às vezes embrulha em prosa/```json). None se não há."""
+    cleaned = _strip_think(text or "")
+    start = cleaned.find("{")
+    end = cleaned.rfind("}")
+    if start == -1 or end == -1 or end < start:
+        return None
+    try:
+        obj = json.loads(cleaned[start : end + 1])
+        return obj if isinstance(obj, dict) else None
+    except json.JSONDecodeError:
+        return None
+
+
+def classify_document(
+    image_bytes: bytes, *, caller: str, mime_type: str = "image/jpeg"
+) -> dict:
+    """RÁPIDA: `{is_document, doc_type, completeness, confidence}`. is_document=None quando a IA não
+    deu um JSON utilizável (o front então confirma o tipo com a pessoa). Nunca levanta por parse."""
+    raw = describe_image(
+        image_bytes, caller=caller, mime_type=mime_type, prompt=_CLASSIFY_PROMPT
+    )
+    data = _extract_json(raw) if isinstance(raw, str) else None
+    if not data or not isinstance(data.get("is_document"), bool):
+        return {
+            "is_document": None,
+            "doc_type": None,
+            "completeness": None,
+            "confidence": None,
+        }
+    doc_type = data.get("doc_type")
+    completeness = data.get("completeness")
+    return {
+        "is_document": data["is_document"],
+        "doc_type": doc_type if doc_type in _CLASSIFY_ALLOWED_TYPE else None,
+        "completeness": completeness
+        if completeness in _CLASSIFY_ALLOWED_COMPLETE
+        else None,
+        "confidence": data.get("confidence"),
+    }
+
+
 def generate_image(prompt: str, *, caller: str) -> str:
     """Gemini imagem: gera uma imagem a partir de um prompt. Salva em media/ai/image/ e devolve o caminho."""
     from .gemini import GeminiClient
