@@ -545,6 +545,18 @@ class RgUploadAck(Schema):
     )
 
 
+class DocClassifyOut(Schema):
+    """Classificação RÁPIDA (síncrona) da foto ANTES do upload — NÃO valida, só reconhece; alimenta
+    a UI generativa (o front escolhe o componente). `is_document=null` = a IA não decidiu → o front
+    confirma o tipo com a pessoa (erro da IA nunca bloqueia). A validação minuciosa segue assíncrona
+    no upload do RG. `doc_type`: rg|cnh|null; `completeness`: front|back|full|null."""
+
+    is_document: bool | None = None
+    doc_type: str | None = None
+    completeness: str | None = None
+    confidence: float | None = None
+
+
 @api.post(
     "/enrollment/documents/rg/photo/{slot}", response=RgUploadAck, tags=["enrollment"]
 )
@@ -559,6 +571,20 @@ def enrollment_rg_photo(request, slot: str, file: UploadedFile = File(...)):
         user_external_id=ext, slot=real_slot, upload=file
     )
     return {"slot": slot, "analysis": ack["analysis_status"], **ack}
+
+
+@api.post(
+    "/enrollment/documents/classify", response=DocClassifyOut, tags=["enrollment"]
+)
+def enrollment_document_classify(request, file: UploadedFile = File(...)):
+    """Classificação RÁPIDA (síncrona) da foto ANTES de enviar — só reconhece (é doc? rg/cnh?
+    inteiro/frente/verso?), NÃO valida. Alimenta a UI generativa: o front escolhe o componente
+    (ex.: RG frente aprovada → pede o verso; CNH + aluno → rejeita e pede RG). A validação
+    minuciosa (autenticidade + extração) segue assíncrona no upload da foto."""
+    _enr_guard(request)  # só cliente do funil (não vaza o classificador pra fora)
+    from integrations.ai import service as ai
+
+    return ai.classify_document(file.read(), caller="enrollment.classify")
 
 
 @api.get("/enrollment/documents/rg", response=RgSectionOut, tags=["enrollment"])
