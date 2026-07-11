@@ -534,6 +534,45 @@ def classify_document(
     }
 
 
+# Avaliação da explicação de PARENTESCO do comprovante (titular ≠ aluno). A pessoa escreve quem é o
+# titular; a IA checa se tem FUNDAMENTO (não é lixo) e corrige/simplifica o português antes de salvar.
+# Fail-open: IA fora → assume mérito + texto original (a validação minuciosa do comprovante ainda roda).
+_KINSHIP_INSTRUCTION = (
+    "O comprovante de residência está no nome de outra pessoa; o aluno explicou o parentesco/"
+    "vínculo com o titular. Avalie se a explicação faz SENTIDO (um vínculo plausível: mãe, pai, "
+    "cônjuge, avó, tio, locador etc.) — NÃO exija prova, só coerência. Se fizer sentido, reescreva "
+    "de forma clara e sem erros de português (curto, 1 frase). Responda APENAS o JSON pedido."
+)
+_KINSHIP_SCHEMA = (
+    "Objeto JSON com: `has_merit` (bool: a explicação é um vínculo plausível?), `corrected` "
+    "(string: a explicação reescrita clara e sem erros — vazia se has_merit=false), `reason` "
+    "(string curta em pt-br justificando)."
+)
+
+
+def evaluate_kinship(relation: str, *, caller: str) -> dict:
+    """`{has_merit, corrected, reason}`. Fail-open se a IA cair (has_merit=True + texto original)."""
+    relation = (relation or "").strip()
+    try:
+        data = generate_json(
+            relation,
+            caller=caller,
+            instruction=_KINSHIP_INSTRUCTION,
+            schema_description=_KINSHIP_SCHEMA,
+        )
+    except Exception as exc:  # noqa: BLE001 — IA fora nunca trava a pessoa (fail-open)
+        logger.warning("ai.kinship_eval_failed", error=str(exc)[:160])
+        return {"has_merit": True, "corrected": relation, "reason": "ia indisponível"}
+    has_merit = bool(data.get("has_merit"))
+    corrected = (data.get("corrected") or "").strip()
+    return {
+        "has_merit": has_merit,
+        # com mérito mas sem texto reescrito → usa o original; sem mérito → vazio
+        "corrected": (corrected or relation) if has_merit else "",
+        "reason": data.get("reason"),
+    }
+
+
 def generate_image(prompt: str, *, caller: str) -> str:
     """Gemini imagem: gera uma imagem a partir de um prompt. Salva em media/ai/image/ e devolve o caminho."""
     from .gemini import GeminiClient
