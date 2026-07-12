@@ -40,7 +40,15 @@ _SIDE_DESC = {
         "DOC DE ORIGEM, DATA DE EXPEDIÇÃO/NASCIMENTO (no modelo antigo verde, traz a referência "
         "à 'LEI Nº 7.116 DE 29/08/83')"
     ),
-    "full": "a carteira INTEIRA (frente e verso na mesma imagem)",
+    # `full` = foto ÚNICA do documento (o candidato sobe um lado só). NÃO exigir os dois lados
+    # na mesma imagem: o RG antigo (cartão verde) é dobrado — cada lado é uma foto separada, é
+    # impossível mostrar frente+verso num clique. Um lado legível já basta (a seção completa
+    # aceita `inteira OU frente+verso`; o outro lado, quando houver, entra pelos slots front/back).
+    "full": (
+        "a carteira de identidade em uma foto ÚNICA — pode conter apenas UM dos lados; no "
+        "modelo antigo (cartão verde), a frente OU o verso já basta, desde que os dados "
+        "estejam legíveis. NÃO reprove por faltar o outro lado do documento"
+    ),
 }
 
 # Por `doc_type`: como o prompt descreve o documento esperado e o que **NÃO** confundir.
