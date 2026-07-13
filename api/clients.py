@@ -14,10 +14,17 @@ from ninja import Field, File, Router, Schema
 from ninja.files import UploadedFile
 
 from api.auth import require_roles
-from api.base import add_auth_refresh, add_funnel_login, build_group, resolve_rg_slot
+from api.base import (
+    COMMON_ERROR_REGISTRY,
+    add_auth_refresh,
+    add_funnel_login,
+    build_group,
+    resolve_rg_slot,
+)
 from api.schemas import CheckIn, CheckOut
 from core.net import source_ip
 from users.auth import service as auth_iface
+from users.blocks import service as blocks_svc
 from users.consent import STUDENT_CONTRACT
 from users.documents import service as documents_iface
 from users.exceptions import NotFound
@@ -27,24 +34,20 @@ from users.roles.student import service as student_iface
 
 # Registry de `code` de erro (proposta API #5): TODO 4xx sai `{detail, code, …extra}` — o front
 # roteia por `switch(code)`, nunca parseando `detail`. Vai na descrição do grupo → OpenAPI.
-_ERROR_REGISTRY = """
-### Códigos de erro (`{detail, code, …extra}`)
+# ponytail: códigos comuns ficaram em `api.base.COMMON_ERROR_REGISTRY` (era duplicado 4×).
+_ERROR_REGISTRY = COMMON_ERROR_REGISTRY + """
+### Códigos específicos do aluno (clients)
 
 | code | quando | extras |
 |---|---|---|
 | `WRONG_STATUS` | ação fora da etapa do wizard (409) | `expected_status` (etapa a abrir), `missing_fields` (se faltam campos do RG/perfil) |
-| `VALIDATION_ERROR` | body/query fora do schema (422) | `detail` = lista do pydantic |
 | `SLOT_INVALID` | slot de foto desconhecido (422) | — |
-| `MISSING_FIELD` | faltou cpf/phone/external_id no check (422) | — |
 | `CPF_EXISTS` / `PHONE_EXISTS` / `EMAIL_EXISTS` | cadastro duplicado (409) | — |
 | `CPF_INVALID` / `PHONE_INVALID` / `CPF_NOT_FOUND` | dado rejeitado na validação (422) | — |
 | `CPF_SERVICE_DOWN` / `PHONE_SERVICE_DOWN` / `CEP_SERVICE_DOWN` | serviço externo fora (502) | — |
 | `CEP_NOT_FOUND` / `STATE_INVALID` | endereço inválido (422) | — |
-| `ENROLLMENT_NOT_FOUND` / `LEAD_NOT_FOUND` / `CHECKOUT_NOT_FOUND` / `USER_NOT_FOUND` / `STUDENT_NOT_FOUND` / `ADDRESS_NOT_FOUND` | recurso não existe (404) | — |
-| `UNAUTHORIZED` / `SESSION_EXPIRED` | sem token ou token vencido (401) | — |
-| `FORBIDDEN_ROLE` / `NOT_IN_FUNNEL` | papel sem acesso à rota (403) | — |
-| `RATE_LIMITED` | espera do OTP (429) | `retry_after_s` |
-| `ERROR` | fallback (erro sem code próprio) | — |
+| `CHECKOUT_NOT_FOUND` / `STUDENT_NOT_FOUND` / `ENROLLMENT_NOT_FOUND` | recurso específico do aluno (404) | — |
+| `BLOCK_NOT_FOUND` | bloco inválido/expirado (404) | — |
 """
 
 api = build_group(
@@ -204,6 +207,16 @@ class PendencyOut(Schema):
 
 class StudentPendencyOut(PendencyOut):
     resolved: bool
+
+
+class BlockOut(Schema):
+    external_id: str
+    source_type: str
+    title: str
+    description: str
+    action_label: str
+    action_route: str
+    created_at: str
 
 
 class StudentDiplomaOut(Schema):
@@ -848,3 +861,25 @@ def student_pendencies(request):
         }
         for p in pends
     ]
+
+
+# ── blocos de validação (polling do frontend) ─────────────────────────────────
+@api.get("/me/blocks", response=list[BlockOut], tags=["blocks"])
+def my_blocks(request):
+    """Bloqueios ativos: validações que rejeitaram e o aluno PRECISA resolver.
+    O front faz polling aqui; se voltar com itens, exibe modal bloqueante."""
+    return [blocks_svc.to_dict(b) for b in blocks_svc.get_active_blocks(request.auth)]
+
+
+@api.post("/me/blocks/{block_external_id}/resolve", response=BlockOut, tags=["blocks"])
+def resolve_block(request, block_external_id: str):
+    """Resolve manualmente um bloco (ex.: usuário descartou a rejeição, ou coordenador aprovou
+    externamente). Em geral o bloco resolve sozinho no re-upload — esse endpoint é o fallback."""
+    try:
+        block_id = int(block_external_id)
+    except ValueError:
+        raise NotFound("Bloco não encontrado.", code="BLOCK_NOT_FOUND")
+    block = blocks_svc.resolve_by_id(user=request.auth, block_id=block_id)
+    if block is None:
+        raise NotFound("Bloco não encontrado.", code="BLOCK_NOT_FOUND")
+    return blocks_svc.to_dict(block)

@@ -15,22 +15,19 @@ from datetime import datetime
 
 from ninja import Schema
 
-from api.base import build_group
+from api.base import COMMON_ERROR_REGISTRY, build_group
 from core.net import require_internal_ip
 from users.exceptions import ValidationError
 from users.roles.lead import service as lead_iface
 from users.roles.lead.models import Lead
 
-_ERROR_REGISTRY = """
-### Códigos de erro (`{detail, code, …extra}`)
+_ERROR_REGISTRY = COMMON_ERROR_REGISTRY + """
+### Códigos específicos de tools (serviços externos)
 
 | code | quando | extras |
 |---|---|---|
 | `INVALID_STATUS` | `status` fora de pending/paid/failed (422) | — |
 | `DATE_INVALID` | `created_after` não é ISO-8601 (422) | — |
-| `MISSING_FIELD` | mensagem vazia ou nenhum destino no envio (422) | — |
-| `USER_NOT_FOUND` | `user_external_id` sem cadastro (404) | — |
-| `VALIDATION_ERROR` | body/query fora do schema (422) | `detail` = lista do pydantic |
 """
 
 api = build_group(

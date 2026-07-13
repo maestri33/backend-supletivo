@@ -16,7 +16,7 @@ from ninja import Field, File, Form, Router, Schema
 from ninja.files import UploadedFile
 
 from api.auth import require_roles
-from api.base import add_auth_refresh, add_funnel_login, build_group
+from api.base import COMMON_ERROR_REGISTRY, add_auth_refresh, add_funnel_login, build_group
 from api.schemas import CheckIn, CheckOut
 from core.net import source_ip
 from users.auth import service as auth_iface
@@ -29,18 +29,17 @@ from users.roles.training import service as training_iface
 
 # Registry de `code` de erro (plan/15 A1, espelha o clients): TODO 4xx sai `{detail, code, …extra}` — o
 # front roteia por `switch(code)`, nunca parseando `detail`. Vai na descrição do grupo → OpenAPI.
-_ERROR_REGISTRY = """
-### Códigos de erro (`{detail, code, …extra}`)
+_ERROR_REGISTRY = COMMON_ERROR_REGISTRY + """
+### Códigos específicos do colaborador (promotor)
 
 | code | quando | extras |
 |---|---|---|
 | `WRONG_STATUS` | ação fora da etapa do wizard (409) | `expected_status` (etapa a abrir) |
-| `VALIDATION_ERROR` | body/query fora do schema (422) | `detail` = lista do pydantic |
 | `NO_HUB` | nenhum polo disponível pro cadastro (422) | — |
 | `INVALID_DOC_TYPE` | tipo de documento ≠ rg/cnh (422) | — |
 | `PIX_INVALID` | chave Pix inválida ou não é do titular (422) | `reason` |
 | `PROFILE_CPF_MISSING` | perfil sem CPF (refazer cadastro) (422) | — |
-| `MATERIAL_NOT_FOUND` / `TRAINEE_NOT_FOUND` / `CANDIDATE_NOT_FOUND` / `PROMOTER_NOT_FOUND` / `USER_NOT_FOUND` | recurso não existe (404) | — |
+| `MATERIAL_NOT_FOUND` / `TRAINEE_NOT_FOUND` / `CANDIDATE_NOT_FOUND` / `PROMOTER_NOT_FOUND` | recurso não existe (404) | — |
 | `MATERIAL_INACTIVE` | submissão em matéria desativada (422) | — |
 | `ALREADY_GRADING` | já há uma resposta em correção (409) | — |
 | `INVALID_AUDIO_TYPE` | áudio fora de mp3/m4a/aac/ogg/webm/wav (422) | — |
@@ -49,10 +48,6 @@ _ERROR_REGISTRY = """
 | `NOT_HUB_COORDINATOR` | coordenador não é do polo (403) | — |
 | `CPF_EXISTS` / `PHONE_EXISTS` / `EMAIL_EXISTS` | cadastro duplicado (409) | — |
 | `CPF_INVALID` / `PHONE_INVALID` / `CPF_NOT_FOUND` | dado rejeitado na validação (422) | — |
-| `UNAUTHORIZED` / `SESSION_EXPIRED` | sem token ou token vencido (401) | — |
-| `FORBIDDEN_ROLE` / `NOT_IN_FUNNEL` | papel sem acesso à rota (403) | — |
-| `RATE_LIMITED` | espera do OTP (429) | `retry_after_s` |
-| `ERROR` | fallback (erro sem code próprio) | — |
 """
 
 api = build_group(

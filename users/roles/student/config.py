@@ -243,30 +243,3 @@ def doc_type_hint(doc_type: str) -> str:
     return _DOC_TYPE_HINT.get(
         doc_type, _DOC_DESC.get(doc_type, "o documento solicitado")
     )
-
-
-def validation_prompt(
-    doc_type: str, *, holder_name: str | None = None, holder_birth: str | None = None
-) -> str:
-    """Prompt LEGADO de validação em 1 chamada (mantido para compatibilidade; o pipeline novo
-    usa `users.roles.student._document_ai`).
-
-    Se vier o titular esperado (nome/nascimento que o CPFHub deu no cadastro), a IA confere se o
-    documento é DAQUELA pessoa e REPROVA se o nome for de outro (Victor 2026-06-05: 'comparar com
-    os dados do CPFHub; se não bater, reprova de imediato')."""
-    desc = _DOC_DESC.get(doc_type, "o documento solicitado")
-    prompt = (
-        "Você valida o documento de um aluno. Responda em português começando OBRIGATORIAMENTE "
-        f"com a palavra APROVADO ou REPROVADO, seguida de uma justificativa curta. "
-        f"Aprove só se a imagem for legível e claramente {desc}."
-    )
-    if holder_name:
-        ident = f" Este documento deve pertencer a {holder_name}"
-        if holder_birth:
-            ident += f" (nascido(a) em {holder_birth})"
-        ident += (
-            ". Leia o NOME DO TITULAR impresso na imagem: se for de OUTRA pessoa "
-            "(diferente do nome informado), responda REPROVADO."
-        )
-        prompt += ident
-    return prompt

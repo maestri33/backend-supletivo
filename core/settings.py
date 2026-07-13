@@ -406,6 +406,10 @@ MINIMAX_TTS_MODEL = env("MINIMAX_TTS_MODEL", default="speech-2.8-hd")
 MINIMAX_VISION_MODEL = env("MINIMAX_VISION_MODEL", default="MiniMax-M3")
 MINIMAX_VOICE_FEMALE = env("MINIMAX_VOICE_FEMALE", default="Portuguese_SereneWoman")
 MINIMAX_VOICE_MALE = env("MINIMAX_VOICE_MALE", default="Portuguese_GentleTeacher")
+# MiniMax DIRETO (fallback sem gateway) — o MiniMaxClient(direct=True) lê estes; sem eles o "direto"
+# desabava no MINIMAX_BASE_URL (o gateway), anulando o "zero single-point-of-failure" do .env.
+MINIMAX_DIRECT_API_KEY = env("MINIMAX_DIRECT_API_KEY", default="")
+MINIMAX_DIRECT_BASE_URL = env("MINIMAX_DIRECT_BASE_URL", default="https://api.minimax.io")
 
 # Gemini também serve a cadeia LLM (fallback) via endpoint OpenAI-compatible do Google — REUSA a
 # GEMINI_API_KEY (sem duplicar key no .env). Entra como provider "gemini" quando está na cadeia.

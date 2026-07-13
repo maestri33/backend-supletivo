@@ -110,6 +110,14 @@ _MESSAGES: dict[str, str] = {
         "{name}, o RG de uma matrícula precisa da sua análise: {detail} "
         "Aprove ou reprove no painel, {name}."
     ),
+    "enrollment.address_proof_rejected": (
+        "{name}, o comprovante de endereço precisa de ajuste: {detail} "
+        "Reenvie pelo app, {name}. 📄"
+    ),
+    "training.submission_rejected": (
+        "{name}, sua resposta precisa de ajuste: {detail} "
+        "Refaça pelo app quando puder. 📝"
+    ),
     "enrollment.rg_approved": (
         "Tudo certo, {name}! ✅ Seu RG foi aprovado e sua matrícula segue em frente. "
         "Continue o preenchimento, {name}."

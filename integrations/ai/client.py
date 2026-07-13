@@ -95,6 +95,10 @@ class LLMClient:
         payload: dict = {
             "model": model,
             "messages": messages,
+            # o app SEMPRE aguarda a resposta inteira (nunca consome stream); alguns gateways
+            # OpenAI-compatible (OmniRoute) fazem streaming por default e o `resp.json()` quebra
+            # com "Expecting value" — desligar aqui é o correto pra todas as chamadas.
+            "stream": False,
             "temperature": (
                 temperature if temperature is not None else self._default_temperature
             ),

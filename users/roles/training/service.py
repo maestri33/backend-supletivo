@@ -23,6 +23,7 @@ import structlog
 from django.db import transaction
 from django.utils import timezone
 
+from users.blocks import service as blocks
 from users.exceptions import Conflict, DomainError, Forbidden, NotFound
 from users.roles import interface as roles
 from users.roles.training.config import pass_score
@@ -389,6 +390,8 @@ def submit(
     sub = Submission.objects.create(
         user=user, material=material, answer=answer, status=Submission.Status.PENDING
     )
+    # ponytail: re-submissão resolve o bloco imediatamente
+    blocks.resolve_for_source(user=user, source_type=f"training_{material.id}")
     _queue_grade(sub)
     logger.info("training.submitted", external_id=str(sub.external_id))
     return sub
@@ -481,6 +484,24 @@ def apply_grade(submission_id: int, grade_value, justification: str) -> None:
     )
     if sub.status == Submission.Status.APPROVED:
         _mark_assignment_approved(sub.user, sub.material)
+    else:
+        # ponytail: signal post_save do Submission cria o bloco automaticamente.
+        # Notify explícito no WhatsApp — fail-open (signal não cobre notify).
+        try:
+            from notify.interface.events import send_event
+
+            send_event(
+                "training.submission_rejected",
+                profile=sub.user,
+                subject=f"Atividade rejeitada: {sub.material.title}",
+                body_md_override=(justification or "")[:400],
+            )
+        except Exception:  # noqa: BLE001
+            logger.warning(
+                "training.notify_failed",
+                submission=str(sub.external_id),
+                material=str(sub.material.external_id),
+            )
 
 
 # ── aprovar matéria EM ABERTO (coordenador, grupo leadership) ───────────────

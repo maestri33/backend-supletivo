@@ -32,3 +32,15 @@ class UsersConfig(AppConfig):
 
         core_hooks.register("fee.paid", on_fee_paid)
         core_hooks.register("fee.problem", on_fee_problem)
+
+        # ValidationBlock signals: ouvem post_save em TODO model com validation_status/selfie_status.
+        from django.db.models.signals import post_save
+
+        from users.blocks.signals import _on_validation_change
+        from users.documents.models import RG, CNH, AddressProof
+        from users.roles.enrollment.models import Enrollment
+        from users.roles.student.models import StudentDocument
+        from users.roles.training.models import Submission
+
+        for model in (RG, CNH, AddressProof, StudentDocument, Enrollment, Submission):
+            post_save.connect(_on_validation_change, sender=model)

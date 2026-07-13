@@ -277,6 +277,28 @@ def list_all_leads(request, hub: str | None = None, status: str | None = None):
     return [lead_iface.lead_to_dict(lead) for lead in leads]
 
 
+# ── resgate de lead sem pagamento ────────────────────────────────────────────────
+@api.post("/leads/{external_id}/mark-paid", tags=["staff"])
+def mark_lead_paid(request, external_id: str):
+    """Staff força o pagamento de um lead (webhook perdido, pagamento manual, etc.).
+    Promove lead→enrollment como se o webhook tivesse chegado."""
+    require_superuser(request.auth)
+    from users.roles.lead import service as lead_iface
+
+    lead = lead_iface.get_by_external_id(external_id)
+    if lead is None:
+        raise NotFound("Lead não encontrado.", code="LEAD_NOT_FOUND")
+    if not lead.payment_id:  # ponytail: sem checkout = sem pagamento pra marcar
+        raise Conflict(
+            "Lead não tem checkout de pagamento.", code="NO_CHECKOUT"
+        )
+    lead_iface.mark_paid(
+        provider=lead.payment.provider,
+        provider_payment_id=lead.payment_id,
+    )
+    return {"detail": "Pagamento confirmado. Lead promovido a enrollment."}
+
+
 # ── purge de lead/candidato (staff apaga registro de teste por completo — Victor 2026-07-04) ──
 @api.delete("/funnel-user", tags=["staff"])
 def purge_funnel_user(

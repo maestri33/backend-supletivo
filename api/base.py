@@ -119,6 +119,22 @@ def build_group(name: str, description: str, auth_override=None) -> NinjaAPI:
     return api
 
 
+# ── registro de erros compartilhado (audit 2026-07-13; era duplicado 4×) ───────
+# Códigos comuns a TODO grupo — concatenados com os específicos de cada api.
+COMMON_ERROR_REGISTRY = """
+### Códigos de erro (`{detail, code, …extra}`)
+
+| code | quando | extras |
+|---|---|---|
+| `VALIDATION_ERROR` | body/query fora do schema (422) | `detail` = lista do pydantic |
+| `MISSING_FIELD` | campo obrigatório vazio no body (422) | — |
+| `USER_NOT_FOUND` / `ENROLLMENT_NOT_FOUND` / `LEAD_NOT_FOUND` / `STUDENT_NOT_FOUND` / `ADDRESS_NOT_FOUND` | recurso não existe (404) | — |
+| `UNAUTHORIZED` / `SESSION_EXPIRED` | sem token ou token vencido (401) | — |
+| `FORBIDDEN_ROLE` / `NOT_IN_FUNNEL` | papel sem acesso à rota (403) | — |
+| `RATE_LIMITED` | espera do OTP (429) | `retry_after_s` |
+| `ERROR` | fallback (erro sem code próprio) | — |
+"""
+
 # ── helpers compartilhados entre grupos (dedup da auditoria 2026-06-17) ───────
 RG_PHOTO_SLOTS = {"front": "rg_front", "back": "rg_back", "full": "rg_full"}
 

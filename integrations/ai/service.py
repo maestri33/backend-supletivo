@@ -410,6 +410,30 @@ def _media_chain(operation: str, caller: str, attempts):
     raise last_exc or RuntimeError(f"cadeia de mídia {operation} vazia")
 
 
+_VISION_MAX_SIDE = 2048
+
+
+def _prep_for_vision(image_bytes: bytes, mime_type: str) -> tuple[bytes, str]:
+    """Reduz a imagem antes da visão. Foto de celular (4–5 MB) estoura o limite de payload do gateway
+    multimodal (HTTP 400) e o modelo não ganha nada acima de ~2k px. Só reencoda se precisar (imagem
+    já pequena passa intacta). Fail-open: Pillow não abriu → manda o original (o pipeline decide)."""
+    from io import BytesIO
+
+    from PIL import Image
+
+    try:
+        img = Image.open(BytesIO(image_bytes))
+        if max(img.size) <= _VISION_MAX_SIDE and len(image_bytes) <= 1_500_000:
+            return image_bytes, mime_type
+        img = img.convert("RGB")
+        img.thumbnail((_VISION_MAX_SIDE, _VISION_MAX_SIDE))
+        out = BytesIO()
+        img.save(out, format="JPEG", quality=85)
+        return out.getvalue(), "image/jpeg"
+    except Exception:  # noqa: BLE001 — imagem ilegível vira problema do pipeline, não daqui
+        return image_bytes, mime_type
+
+
 def describe_image(
     image_bytes: bytes,
     *,
@@ -427,6 +451,7 @@ def describe_image(
 
     from .minimax import MiniMaxClient
 
+    image_bytes, mime_type = _prep_for_vision(image_bytes, mime_type)
     instruction = prompt or "Descreva esta imagem."
     attempts: list[tuple[str, str, object]] = []
 

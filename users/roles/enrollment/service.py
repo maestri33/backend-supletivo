@@ -17,6 +17,7 @@ from django.conf import settings
 from django.db import transaction
 
 from users.address import interface as address_iface
+from users.blocks import service as blocks
 from users.documents import service as documents_iface
 from users.exceptions import Conflict, DomainError, NotFound
 from users.profiles import interface as profiles
@@ -245,13 +246,13 @@ def me_dict(enr: Enrollment) -> dict:
         **to_dict(enr),
         "profile": profile,
         "address_complete": address_iface.is_complete(address),
-        # blocos COMPLETOS de address e selfie (proposta #3): o /me vira a resposta canônica única —
-        # toda mutação devolve este shape e o front nunca re-fetcha pra rotear.
         "address": _address_dict(user_ext),
         "address_proof": _address_proof.section_dict(user_ext),
         "selfie": _selfie_dict(enr),
         "rg": rg,
         "education": education,
+        # ponytail: lista de flags ativas — o front mostra modais p/ cada uma.
+        "blocks": [blocks.to_dict(b) for b in blocks.get_active_blocks(enr.user)],
     }
 
 
@@ -285,7 +286,6 @@ def _advance_to(enr: Enrollment, target: str) -> None:
         if (
             status == _S.ADDRESS
             and address_iface.is_complete(address_iface.get_by_external_id(user_ext))
-            and _address_proof.is_approved(user_ext)
         ):
             status = _S.EDUCATION
             continue
@@ -293,7 +293,15 @@ def _advance_to(enr: Enrollment, target: str) -> None:
             status = _S.SELFIE
             continue
         break
+    from_status = enr.status  # ponytail: rastrear transições do wizard (anti-preso log)
     _set_status(enr, status)
+    if from_status != status:
+        logger.info(
+            "enrollment.advanced",
+            enrollment=str(enr.external_id),
+            from_status=from_status,
+            to_status=status,
+        )
 
 
 # ── seção ENDEREÇO (plan/13): POST só com CEP · PATCH corrige/sobrescreve · GET ────────
@@ -348,15 +356,12 @@ def set_address_data(*, user_external_id: str, **fields) -> dict:
 
 
 def _advance_address(enr: Enrollment, user_external_id: str) -> None:
-    """Endereço completo E comprovante aprovado por IA (F1) → EDUCATION (ordem plan/13), com chain-skip."""
-    from users.roles import _address_proof
-
+    """Endereço completo → EDUCATION. Comprovante validado em background (rejeição = ValidationBlock)."""
     if (
         enr.status == _S.ADDRESS
         and address_iface.is_complete(
             address_iface.get_by_external_id(user_external_id)
         )
-        and _address_proof.is_approved(user_external_id)
     ):
         _advance_to(enr, _S.EDUCATION)
 
@@ -368,6 +373,8 @@ def upload_address_proof(*, user_external_id: str, upload) -> dict:
 
     enr = _require(user_external_id, _S.ADDRESS)
     documents_iface.upload_photo(user_external_id, "address_proof_photo", upload)
+    # ponytail: re-upload resolve o bloco imediatamente; análise roda em background
+    blocks.resolve_for_source(user=enr.user, source_type="address_proof")
     ap = documents_iface.get_address_proof(user_external_id)
     if ap is not None:
         ap.validation_status = "pending"
@@ -562,14 +569,13 @@ def selfie_ack(enr: Enrollment) -> dict:
 
 
 def _advance_rg(enr: Enrollment, user_external_id: str) -> None:
-    """Avança RG→ADDRESS (ordem plan/13) quando a seção fecha: validação IA APROVADA (frente+verso
-    OU inteira) + `number` presente (extraído pelo OCR ou digitado no PATCH). Com chain-skip."""
-    from users.roles import _document_ai as doc_ai
-
+    """Avança RG→ADDRESS quando `number` preenchido + foto presente. A validação da IA roda em
+    background e rejeições viram ValidationBlock — o usuário NÃO fica parado esperando."""
     if enr.status != _S.RG:
         return
     rg = documents_iface.get_rg(user_external_id)
-    if rg is not None and rg.validation_status == doc_ai.APPROVED and rg.number:
+    # ponytail: sem gate de validação — usuário avança na hora. Block na rejeição.
+    if rg is not None and rg.number and (rg.front_photo or rg.full_photo):
         _advance_to(enr, _S.ADDRESS)
 
 
@@ -613,6 +619,8 @@ def _reset_rg_validation(user_external_id: str, slot: str) -> None:
     rg.validation_result = result
     rg.validated_at = None
     rg.save(update_fields=["validation_status", "validation_result", "validated_at"])
+    # ponytail: re-upload resolve o bloco imediatamente — nova análise roda em background
+    blocks.resolve_for_source(user=rg.document.user, source_type="rg_photo")
 
 
 def run_rg_validation(enrollment_id: int, slot: str) -> None:
@@ -824,6 +832,7 @@ def _finish_rg(
     )
     if status == doc_ai.REJECTED:
         _notify_rg_rejected(enr, reason)
+        # ponytail: signal post_save do RG cria o bloco automaticamente — não precisa criar aqui.
     elif status == doc_ai.REVIEW:
         _notify_rg_review(enr, reason)
 
@@ -1299,6 +1308,8 @@ def set_selfie(
     enr = _require(user_external_id, _S.SELFIE)
     _require_rg_ready_for_selfie(enr)  # gates #9/#10: rosto do doc + perfil completo
     enr.selfie_image = _save_selfie(enr, image_bytes, content_type)
+    # ponytail: re-upload resolve o bloco imediatamente; análise roda em background
+    blocks.resolve_for_source(user=enr.user, source_type="selfie")
     enr.selfie_taken_at = timezone.now()
     enr.selfie_status = _selfie.SelfieStatus.PENDING
     enr.selfie_verified = False
@@ -1318,20 +1329,10 @@ def set_selfie(
 
 
 def _require_rg_ready_for_selfie(enr: Enrollment) -> None:
-    """Gates da selfie (propostas #9/#10), 409 `WRONG_STATUS` + `expected_status:"rg"`:
-
-    - **#9**: a biometria compara a selfie com o ROSTO do documento → exige frente OU inteira
-      APROVADA (o wizard normalmente garante; o buraco é a aprovação HUMANA com só o verso).
-    - **#10**: a matrícula não pode fechar sem estado civil/nacionalidade (campos que o RG não
-      traz) → exige `missing_fields` vazio; o front roteia de volta pro PATCH rg."""
-    from users.roles import _document_ai as doc_ai
-
+    """Gates mínimos: foto presente + missing_fields vazio. Com accept-first, a IA rodando em
+    background gera ValidationBlock quando reprovada — não bloqueia o wizard aqui."""
     rg = documents_iface.get_rg(str(enr.user.external_id))
-    if (
-        rg is None
-        or rg.validation_status != doc_ai.APPROVED
-        or not (rg.front_photo or rg.full_photo)
-    ):
+    if rg is None or not (rg.front_photo or rg.full_photo):
         raise Conflict(
             "Envie a frente do RG antes da selfie.",
             code="WRONG_STATUS",
@@ -1433,12 +1434,11 @@ def _resolve_selfie(enr: Enrollment) -> None:
     from users.roles import _selfie
 
     if enr.selfie_status == _selfie.APPROVED:
-        _notify_selfie_approved(enr)  # notify também no aprovado (plan/13)
+        _notify_selfie_approved(enr)
         _advance_to_release(enr)
     elif enr.selfie_status == _selfie.REJECTED:
         _notify_selfie_rejected(enr)
-        # F2: 5ª reprovação → sobe a flag nível-pessoa (não bloqueia) e SEGUE liberando — o encontro
-        # presencial fica pro fim do curso (gate em `student._maybe_release_exam`).
+        # ponytail: signal post_save da Enrollment (selfie_status) cria bloco automaticamente.
         if enr.selfie_reject_count >= _selfie.MAX_REJECTS_BEFORE_MEETING:
             from users.profiles import interface as profiles
 
@@ -1449,24 +1449,10 @@ def _resolve_selfie(enr: Enrollment) -> None:
 
 
 def _advance_to_release(enr: Enrollment) -> None:
-    """Selfie aprovada → AWAITING_RELEASE + avisa o coordenador. Idempotente (só sai de SELFIE).
-
-    Gate #10: com `missing_fields` do RG/perfil pendentes (ex.: selfie aprovada pelo COORDENADOR
-    enquanto faltava nacionalidade) a matrícula NÃO fecha — fica em SELFIE com a selfie aprovada;
-    o `patch_rg_section` destrava quando o aluno completar."""
+    """Selfie enviada → AWAITING_RELEASE. Validação/biometria rodam em background."""
     if enr.status != _S.SELFIE:
         return
-    missing = _rg_section_dict(enr)["missing_fields"]
-    if missing:
-        logger.info(
-            "enrollment.release_blocked_missing_fields",
-            enrollment=str(enr.external_id),
-            missing=missing,
-        )
-        return
     _set_status(enr, _S.AWAITING_RELEASE)
-    # bot matriculador (mock) via signal: um dia faz a matrícula no SIGA automaticamente; hoje é
-    # no-op (cai no coordenador). O notify abaixo é o fallback (Victor 2026-06-23). 1º signal do repo.
     from users.roles.enrollment.signals import enrollment_ready_for_matricula
 
     enrollment_ready_for_matricula.send(sender=Enrollment, enrollment=enr)

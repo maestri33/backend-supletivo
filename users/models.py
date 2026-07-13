@@ -8,7 +8,8 @@ Os models vivem nos sub-módulos (auth/profiles/roles/otp) pra ficar tudo "MUITO
 from users.address.models import Address
 from users.auth.models import User, UserManager
 from users.auth.otp.models import OtpCode, OtpRateLimit
-from users.documents.models import CNH, RG, Certificate, Document, Military
+from users.blocks.models import ValidationBlock
+from users.documents.models import CNH, RG, AddressProof, Certificate, Document, Military
 from users.profiles.models import Profile
 from users.roles.candidate.models import Candidate
 from users.roles.enrollment.models import EducationalData, Enrollment
@@ -37,6 +38,7 @@ __all__ = [
     "CNH",
     "Certificate",
     "Military",
+    "AddressProof",
     "Lead",
     "Checkout",
     "Enrollment",
@@ -51,4 +53,5 @@ __all__ = [
     "StudentExam",
     "StudentDiploma",
     "StudentPendency",
+    "ValidationBlock",
 ]
