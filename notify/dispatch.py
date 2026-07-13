@@ -273,7 +273,10 @@ def _send_tts(notif: Notification) -> None:
         )
         notif.tts_audio_path = rel_path
         base = settings.MEDIA_LAN_BASE or settings.EXTERNAL_URL
-        audio_url = f"{base}{settings.MEDIA_URL}{rel_path}"
+        # ponytail: urljoin evita "//" quando base termina em "/" (EXTERNAL_URL comum em prod)
+        from urllib.parse import urljoin
+
+        audio_url = urljoin(base + "/", settings.MEDIA_URL + rel_path)
 
         async def _run():
             async with get_whatsapp_client() as wa:

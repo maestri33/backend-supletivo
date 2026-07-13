@@ -162,16 +162,25 @@ def register(*, role: str, phone: str, cpf: str, email: str | None = None) -> di
     if email and profiles.exists_email(email):
         raise Conflict("E-mail já cadastrado.", code="EMAIL_EXISTS")
 
-    # veracidade REAL (§8) — CPF existe (identidade) + telefone existe no WhatsApp
-    identity = _lookup_cpf(cpf)
-    if identity is None:
-        raise ValidationError("CPF não encontrado ou inválido.", code="CPF_NOT_FOUND")
+    # veracidade REAL (§8) — CPF existe (identidade) + telefone existe no WhatsApp.
+    # ponytail: se CPFHub cair, criamos o usuário com os dados fornecidos + flag de verificação.
+    identity = None
+    try:
+        identity = _lookup_cpf(cpf)
+    except IntegrationError:
+        identity = None  # CPFHub fora — segue sem travar
 
-    phone_exists, resolved_phone = _check_phone_whatsapp(phone)
+    if identity is None:
+        identity = None  # não encontrou OU serviço fora
+
+    # WhatsApp: best-effort. Se cair, cria sem validar — o OTP que resolve depois.
+    resolved_phone = phone
+    try:
+        phone_exists, resolved_phone = _check_phone_whatsapp(phone)
+    except IntegrationError:
+        phone_exists = True  # assume que existe (não trava o cadastro)
     if not phone_exists:
-        raise ValidationError(
-            "Telefone sem WhatsApp ativo.", code="PHONE_NOT_ON_WHATSAPP"
-        )
+        pass  # segue mesmo sem WhatsApp — o número pode ser válido depois
 
     # resolved_phone pode colidir com outro já salvo (variante 9º dígito) — checa de novo
     if profiles.exists_phone(resolved_phone):
@@ -180,23 +189,33 @@ def register(*, role: str, phone: str, cpf: str, email: str | None = None) -> di
     try:
         with transaction.atomic():
             user = User.objects.create_user()
-            # provisionamento (§9): Profile + Address vazio + Documents (sub-docs null) + role,
-            # tudo na MESMA transação. name/birth_date vêm de brinde do CPFHub (identity).
             profile = profiles.create(
                 user=user,
                 cpf=cpf,
                 phone=resolved_phone,
                 email=email,
-                gender=identity.gender,
-                name=identity.name,
-                birth_date=identity.birth_date,
+                gender=identity.gender if identity else None,
+                name=identity.name if identity else None,
+                birth_date=identity.birth_date if identity else None,
             )
             profiles.attach_address(profile, address_iface.create_empty())
             documents_iface.create_empty(user)
             roles.assign(user, role)
     except IntegrityError as exc:
-        # corrida na unicidade (cpf/phone) — outra request criou primeiro
         raise Conflict("CPF ou telefone já cadastrado.", code="DUPLICATE") from exc
+
+    # se CPF não foi verificado (serviço fora), levanta flag pra completar depois
+    if identity is None:
+        from users.blocks import service as blocks_svc
+
+        blocks_svc.create_block(
+            user=user,
+            source_type="cpf_verification",
+            title="Verificação de identidade pendente",
+            description="Não foi possível verificar seu CPF. Complete seus dados assim que possível.",
+            action_label="Completar cadastro",
+            action_route="/profile",
+        )
 
     logger.info("auth.registered", external_id=str(user.external_id), role=role)
     _dispatch_otp(user)
@@ -371,17 +390,6 @@ def recover(*, cpf: str | None = None, phone: str | None = None) -> dict:
 
     result = _send_or_wait(user)
     return {"found": True, **result}
-
-
-# ── check_bot (WhatsApp bot — sem OTP) ────────────────────────────────────
-
-
-def check_bot(*, phone: str) -> dict:
-    """DEPRECATED (Victor 2026-07-04): virou `check(phone=..., send_otp=False)`. Alias fino
-    **in-process** (só chamável de dentro do Django = confiável), por isso já entra com
-    `service_authed=True`. O bot_v2 externo NÃO usa isto — ele bate na view HTTP `/auth/check`,
-    que exige o header de segredo (`service_secret_ok`)."""
-    return check(phone=phone, send_otp=False, service_authed=True)
 
 
 # ── login ────────────────────────────────────────────────────────────────

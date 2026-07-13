@@ -15,6 +15,7 @@ from hub import interface as hub_iface
 from users.address import interface as address_iface
 from users.auth import service as auth_iface
 from users.auth.models import User
+from users.blocks import service as blocks
 from users.documents import service as documents_iface
 from users.exceptions import Conflict, DomainError, Forbidden, NotFound
 from users.profiles import interface as profiles
@@ -170,6 +171,7 @@ def me_dict(cand: Candidate) -> dict:
         "address_proof": _address_proof.section_dict(user_ext),
         "documents": documents_iface.get_by_external_id(user_ext),
         "selfie": selfie,
+        "blocks": [blocks.to_dict(b) for b in blocks.get_active_blocks(cand.user)],
     }
 
 
@@ -233,16 +235,9 @@ def set_address_data(*, user_external_id, **fields) -> dict:
 
 
 def _advance_address(cand: Candidate, user_external_id) -> None:
-    """Avança PROFILE→ADDRESS quando o endereço fica completo E o comprovante está aprovado (F1).
-    O comprovante é validado por IA (endereço + titular) — sem ele aprovado, o wizard não passa."""
-    from users.roles import _address_proof
-
-    if (
-        cand.status == _S.PROFILE
-        and address_iface.is_complete(
-            address_iface.get_by_external_id(user_external_id)
-        )
-        and _address_proof.is_approved(user_external_id)
+    """Endereço completo → ADDRESS. Comprovante validado em background (rejeição = ValidationBlock)."""
+    if cand.status == _S.PROFILE and address_iface.is_complete(
+        address_iface.get_by_external_id(user_external_id)
     ):
         _set_status(cand, _S.ADDRESS)
 
@@ -609,17 +604,15 @@ def _reset_doc_validation(user_external_id: str, doc_type: str, slot: str) -> No
 
 
 def _advance_documents(cand: Candidate, user_external_id: str) -> None:
-    """Avança DOCUMENTS→PIX (ordem plan/15) quando: validação IA APROVADA (frente+verso OU inteira
-    do tipo escolhido) + `number` presente (extraído pelo OCR ou digitado no PATCH)."""
-    from users.roles import _document_ai as doc_ai
-
+    """Avança DOCUMENTS→PIX quando `number` presente + foto enviada. Validação roda em background."""
     if cand.status != _S.DOCUMENTS or not cand.doc_type:
         return
     sub = documents_iface.get_doc_sub(user_external_id, cand.doc_type)
+    # ponytail: sem gate de validação — usuário avança na hora; rejeição = ValidationBlock
     if (
         sub is not None
-        and sub.validation_status == doc_ai.APPROVED
         and getattr(sub, "number", None)
+        and (getattr(sub, "front_photo", None) or getattr(sub, "full_photo", None))
     ):
         _set_status(cand, _S.PIX)
 

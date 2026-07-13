@@ -344,9 +344,6 @@ for _ia_item in env.list("IA_FALLBACK_CHAIN", default=[]):
 IA_DEFAULT_TEMPERATURE = env.float("IA_DEFAULT_TEMPERATURE", default=0.3)
 IA_MAX_TOKENS = env.int("IA_MAX_TOKENS", default=0)
 IA_TIMEOUT = env.float("IA_TIMEOUT", default=60.0)
-# Teto da classificação SÍNCRONA de documento (roda DENTRO do request web, ao contrário do
-# resto da visão que é task async) — curto de propósito; é fail-open (palpite de UI).
-IA_CLASSIFY_TIMEOUT = env.float("IA_CLASSIFY_TIMEOUT", default=8.0)
 # Modelo multimodal do gateway OmniRoute para VISÃO (describe_image via /v1/chat/completions). Vazio
 # => o primário OmniRoute é pulado e a visão vai direto pro MiniMax-M3 (fallback sempre presente).
 IA_OMNIROUTE_VISION_MODEL = env("IA_OMNIROUTE_VISION_MODEL", default="")
@@ -413,6 +410,12 @@ MINIMAX_TTS_MODEL = env("MINIMAX_TTS_MODEL", default="speech-2.8-hd")
 MINIMAX_VISION_MODEL = env("MINIMAX_VISION_MODEL", default="MiniMax-M3")
 MINIMAX_VOICE_FEMALE = env("MINIMAX_VOICE_FEMALE", default="Portuguese_SereneWoman")
 MINIMAX_VOICE_MALE = env("MINIMAX_VOICE_MALE", default="Portuguese_GentleTeacher")
+# MiniMax DIRETO (fallback sem gateway) — o MiniMaxClient(direct=True) lê estes; sem eles o "direto"
+# desabava no MINIMAX_BASE_URL (o gateway), anulando o "zero single-point-of-failure" do .env.
+MINIMAX_DIRECT_API_KEY = env("MINIMAX_DIRECT_API_KEY", default="")
+MINIMAX_DIRECT_BASE_URL = env(
+    "MINIMAX_DIRECT_BASE_URL", default="https://api.minimax.io"
+)
 
 # Gemini também serve a cadeia LLM (fallback) via endpoint OpenAI-compatible do Google — REUSA a
 # GEMINI_API_KEY (sem duplicar key no .env). Entra como provider "gemini" quando está na cadeia.
@@ -648,9 +651,21 @@ DEFAULT_STAFF_PIX = env("DEFAULT_STAFF_PIX", default="")
 # ponytail: structlog já está no pyproject.toml. Config mínima: console em dev, JSON em prod.
 import structlog  # noqa: E402 — import perto da sua config (deliberado), não no topo
 
+
+def _scrub_pii(_, __, event_dict: dict) -> dict:
+    """Defesa em profundidade: mascara cpf/phone em event_dict (exception paths podem escapar
+    da truncagem manual). Fail-open — nunca trava o log."""
+    for k in ("cpf", "phone", "phone_resolved", "recipient_phone", "recipient_email"):
+        if k in event_dict and event_dict[k]:
+            v = str(event_dict[k])
+            event_dict[k] = f"***{v[-2:]}" if len(v) >= 2 else "***"
+    return event_dict
+
+
 _structlog_processors = [
     structlog.stdlib.add_log_level,
     structlog.processors.TimeStamper(fmt="iso"),
+    _scrub_pii,  # mascara PII antes do renderer
 ]
 if DEBUG:
     _structlog_processors.append(structlog.dev.ConsoleRenderer())

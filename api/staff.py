@@ -23,6 +23,7 @@ from hub import interface as hub_iface
 from integrations import status as integ_status
 from integrations.bank.asaas import onboarding as asaas_onboarding
 from users.auth import service as auth_iface
+from users.exceptions import Conflict, NotFound
 from users.profiles import interface as profiles
 from users.roles import interface as roles
 from users.roles.enrollment import service as enrollment_iface
@@ -275,6 +276,26 @@ def list_all_leads(request, hub: str | None = None, status: str | None = None):
             raise HttpError(404, "hub_not_found")
     leads = lead_iface.list_leads(hub=hub_obj, status=status)
     return [lead_iface.lead_to_dict(lead) for lead in leads]
+
+
+# ── resgate de lead sem pagamento ────────────────────────────────────────────────
+@api.post("/leads/{external_id}/mark-paid", tags=["staff"])
+def mark_lead_paid(request, external_id: str):
+    """Staff força o pagamento de um lead (webhook perdido, pagamento manual, etc.).
+    Promove lead→enrollment como se o webhook tivesse chegado."""
+    require_superuser(request.auth)
+    from users.roles.lead import service as lead_iface
+
+    lead = lead_iface.get_by_external_id(external_id)
+    if lead is None:
+        raise NotFound("Lead não encontrado.", code="LEAD_NOT_FOUND")
+    if not lead.payment_id:  # ponytail: sem checkout = sem pagamento pra marcar
+        raise Conflict("Lead não tem checkout de pagamento.", code="NO_CHECKOUT")
+    lead_iface.mark_paid(
+        provider=lead.payment.provider,
+        provider_payment_id=lead.payment_id,
+    )
+    return {"detail": "Pagamento confirmado. Lead promovido a enrollment."}
 
 
 # ── purge de lead/candidato (staff apaga registro de teste por completo — Victor 2026-07-04) ──

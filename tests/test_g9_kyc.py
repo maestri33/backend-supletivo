@@ -1,7 +1,9 @@
-"""G9 — bypass de KYC: o chain-skip de ADDRESS pulava a etapa checando só `is_complete`, sem exigir
-o comprovante de residência APROVADO (que a transição normal `_advance_address` exige). Como o
-Address é compartilhado por external_id entre funis, um endereço preenchido em outro funil fazia o
-aluno pular a validação do comprovante.
+"""G9 — avanço de ADDRESS (accept-first, Victor 2026-07-13).
+
+ANTES (gate): endereço completo SÓ avançava pra EDUCATION com o comprovante APROVADO por IA.
+Isso deixava o aluno PRESO esperando a IA. AGORA (accept-first): endereço completo → EDUCATION na
+hora. A validação do comprovante roda em background; rejeição vira ValidationBlock (modal no app),
+não trava o wizard. O KYC continua garantido — só mudou de "gate síncrono" pra "flag assíncrona".
 """
 
 from unittest.mock import patch
@@ -16,16 +18,16 @@ class _Enr:
         external_id = "u1"
 
     status = None
+    external_id = "e1"
 
 
-def _run_advance_to_address(*, is_approved: bool) -> str:
+def _run_advance_to_address() -> str:
     from users.roles.enrollment import service as es
 
     captured = {}
     with (
         patch.object(es.address_iface, "is_complete", return_value=True),
         patch.object(es.address_iface, "get_by_external_id", return_value=object()),
-        patch("users.roles._address_proof.is_approved", return_value=is_approved),
         patch.object(es, "_has_education", return_value=False),
         patch.object(
             es, "_set_status", side_effect=lambda enr, st: captured.update(st=st)
@@ -35,15 +37,10 @@ def _run_advance_to_address(*, is_approved: bool) -> str:
     return captured["st"]
 
 
-def test_g9_nao_pula_address_sem_comprovante_aprovado():
-    """Endereço completo mas comprovante NÃO aprovado → PARA em ADDRESS (não pula o gate KYC)."""
+def test_g9_endereco_completo_avança_pro_comprovante_aprovado_ou_nao():
+    """accept-first: endereço completo avança pra EDUCATION independentemente do comprovante.
+    O comprovante é validado em background (rejeição = ValidationBlock, não gate)."""
     from users.roles.enrollment import service as es
 
-    assert _run_advance_to_address(is_approved=False) == es._S.ADDRESS
-
-
-def test_g9_pula_address_com_comprovante_aprovado():
-    """Não-regressão: com comprovante aprovado, o chain-skip pula ADDRESS normalmente."""
-    from users.roles.enrollment import service as es
-
-    assert _run_advance_to_address(is_approved=True) == es._S.EDUCATION
+    # is_approved não é mais consultado em _advance_to — endereço completo basta.
+    assert _run_advance_to_address() == es._S.EDUCATION

@@ -12,6 +12,7 @@ from decimal import Decimal
 import structlog
 from django.conf import settings
 
+from users.blocks import service as blocks
 from users.exceptions import Forbidden, NotFound
 from users.roles.promoter.models import Promoter
 from users.roles.promoter.rules import BOLSA_ENROLL_THRESHOLD, paid_referrals
@@ -144,6 +145,7 @@ def to_dict(promoter: Promoter) -> dict:
         "ref_url": ref_url(promoter.user),
         "locked": training_iface.is_locked(promoter.user),
         "pending_materials": training_iface.pending_materials(promoter.user),
+        "blocks": [blocks.to_dict(b) for b in blocks.get_active_blocks(promoter.user)],
     }
 
 

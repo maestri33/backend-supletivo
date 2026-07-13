@@ -20,7 +20,12 @@ from ninja import Field, File, Router, Schema
 from ninja.files import UploadedFile
 
 from api.auth import require_roles
-from api.base import add_auth_refresh, build_group, resolve_rg_slot
+from api.base import (
+    COMMON_ERROR_REGISTRY,
+    add_auth_refresh,
+    build_group,
+    resolve_rg_slot,
+)
 from core.net import source_ip
 from api.schemas import TokenOut
 from users.auth import service as auth_iface
@@ -34,39 +39,34 @@ from users.roles.promoter import service as promoter_iface
 from users.roles.student import service as student_iface
 from users.roles.training import service as training_iface
 
-_ERROR_REGISTRY = """
-### Códigos de erro (`{detail, code, …extra}`)
+_ERROR_REGISTRY = (
+    COMMON_ERROR_REGISTRY
+    + """
+### Códigos específicos do coordenador (leadership)
 
-Todo erro 4xx/5xx sai nesse envelope; o front faz `switch(code)`, nunca parseia `detail`.
-
-| code | quando | status | extras |
-|---|---|---|---|
-| `NOT_HUB_COORDINATOR` | loga como coordenador mas não coordena nenhum polo | 403 | — |
-| `FORBIDDEN_ROLE` | sem a role coordinator | 403 | — |
-| `UNAUTHORIZED` | sem/expirou token | 401 | — |
-| `WRONG_STATUS` | ação fora da etapa esperada | 409 | `expected_status` |
-| `FEES_INCOMPLETE` | tentou concluir sem as 2 parcelas da taxa | 409 | — |
-| `FEE_ALREADY_PAID` / `FEE_ALREADY_SCHEDULED` | taxa repetida | 409 | — |
-| `FEE_QR_INVALID` / `FEE_QR_NO_DUE_DATE` | QR PIX inválido na taxa | 422 | — |
-| `RG_NOT_IN_REVIEW` / `DOC_NOT_IN_REVIEW` / `SELFIE_NOT_IN_REVIEW` | decide análise que não está em revisão | 422 | `*_validation_status` |
-| `ALREADY_APPROVED` / `ALREADY_GRADING` | submeteu algo já decidido | 409 | — |
-| `EDUCATION_LEVEL_INVALID` / `EDUCATION_GRADE_OUT_OF_RANGE` | escolaridade fora da faixa | 422 | `min`/`max` |
-| `DOC_TYPE_LOCKED` / `DOC_TYPE_NOT_SET` / `INVALID_DOC_TYPE` | troca de tipo de doc travada | 422 | — |
-| `MILITARY_MALE_ONLY` | doc militar só p/ masculino | 422 | — |
-| `SLOT_INVALID` / `INVALID_KIND` / `INVALID_MATERIAL_KIND` / `INVALID_BLOOD_TYPE` / `INVALID_SCHEDULED_AT` | parâmetro inválido | 422 | — |
-| `MATERIAL_NOT_FOUND` / `MATERIAL_NOT_ASSIGNED` / `MATERIAL_INACTIVE` / `MATERIAL_NOT_TRANSITORY` / `MATERIAL_NOT_EPHEMERAL` | material LMS | 404/422 | — |
-| `OPEN_PENDENCIES` / `PENDENCY_NOT_FOUND` | pendência do aluno | 409/404 | — |
-| `NO_PENDING_EXAM` / `DIPLOMA_NOT_ISSUED` | exame/diploma fora de ordem | 409 | — |
-| `DESCRIPTION_REQUIRED` / `SUBJECT_REQUIRED` / `NO_FIELDS` / `PROFILE_CPF_MISSING` | campo obrigatório faltando | 422 | — |
-| `NO_HUB` / `COMMISSION_PAYEE_INVALID` / `PIX_INVALID` | comissão/pix | 422 | — |
-| `ENROLLMENT_NOT_FOUND` / `LEAD_NOT_FOUND` / `CANDIDATE_NOT_FOUND` / `STUDENT_NOT_FOUND` / `USER_NOT_FOUND` / `PROMOTER_NOT_FOUND` / `DOCUMENT_NOT_FOUND` | recurso não existe (404 sem vazar existência entre polos) | 404 | — |
-| `RATE_LIMITED` | espera do OTP | 429 | `retry_after_s` |
-| `ERROR` | fallback sem code próprio | — | — |
+| code | quando | extras |
+|---|---|---|
+| `WRONG_STATUS` | ação fora da etapa esperada | `expected_status` |
+| `FEES_INCOMPLETE` | tentou concluir sem as 2 parcelas da taxa (409) | — |
+| `FEE_ALREADY_PAID` / `FEE_ALREADY_SCHEDULED` | taxa repetida (409) | — |
+| `FEE_QR_INVALID` / `FEE_QR_NO_DUE_DATE` | QR PIX inválido na taxa (422) | — |
+| `RG_NOT_IN_REVIEW` / `DOC_NOT_IN_REVIEW` / `SELFIE_NOT_IN_REVIEW` | decide análise que não está em revisão (422) | `*_validation_status` |
+| `ALREADY_APPROVED` | submeteu algo já decidido (409) | — |
+| `EDUCATION_LEVEL_INVALID` / `EDUCATION_GRADE_OUT_OF_RANGE` | escolaridade fora da faixa (422) | `min`/`max` |
+| `DOC_TYPE_LOCKED` / `DOC_TYPE_NOT_SET` | troca de tipo de doc travada (422) | — |
+| `MILITARY_MALE_ONLY` | doc militar só p/ masculino (422) | — |
+| `SLOT_INVALID` / `INVALID_KIND` / `INVALID_MATERIAL_KIND` | parâmetro inválido (422) | — |
+| `MATERIAL_NOT_FOUND` / `MATERIAL_NOT_ASSIGNED` / `MATERIAL_INACTIVE` | material LMS (404/422) | — |
+| `OPEN_PENDENCIES` / `PENDENCY_NOT_FOUND` | pendência do aluno (409/404) | — |
+| `NO_PENDING_EXAM` / `DIPLOMA_NOT_ISSUED` | exame/diploma fora de ordem (409) | — |
+| `NO_HUB` / `COMMISSION_PAYEE_INVALID` / `PIX_INVALID` | comissão/pix (422) | — |
+| `NOT_HUB_COORDINATOR` | loga como coordenador mas não coordena nenhum polo (403) | — |
 
 ### Paginação
-`GET /students` usa `limit`/`offset` e devolve `{items, total, limit, offset}` (`PaginatedOut`). Demais
-listas (leads/enrollments/candidates/promoters) são arrays diretos (sem `total` por ora).
+`GET /students` usa `limit`/`offset` e devolve `{items, total, limit, offset}` (`PaginatedOut`).
+Demais listas são arrays diretos.
 """
+)
 
 api = build_group(
     "leadership",

@@ -410,6 +410,30 @@ def _media_chain(operation: str, caller: str, attempts):
     raise last_exc or RuntimeError(f"cadeia de mídia {operation} vazia")
 
 
+_VISION_MAX_SIDE = 2048
+
+
+def _prep_for_vision(image_bytes: bytes, mime_type: str) -> tuple[bytes, str]:
+    """Reduz a imagem antes da visão. Foto de celular (4–5 MB) estoura o limite de payload do gateway
+    multimodal (HTTP 400) e o modelo não ganha nada acima de ~2k px. Só reencoda se precisar (imagem
+    já pequena passa intacta). Fail-open: Pillow não abriu → manda o original (o pipeline decide)."""
+    from io import BytesIO
+
+    from PIL import Image
+
+    try:
+        img = Image.open(BytesIO(image_bytes))
+        if max(img.size) <= _VISION_MAX_SIDE and len(image_bytes) <= 1_500_000:
+            return image_bytes, mime_type
+        img = img.convert("RGB")
+        img.thumbnail((_VISION_MAX_SIDE, _VISION_MAX_SIDE))
+        out = BytesIO()
+        img.save(out, format="JPEG", quality=85)
+        return out.getvalue(), "image/jpeg"
+    except Exception:  # noqa: BLE001 — imagem ilegível vira problema do pipeline, não daqui
+        return image_bytes, mime_type
+
+
 def describe_image(
     image_bytes: bytes,
     *,
@@ -424,15 +448,12 @@ def describe_image(
     Wave 4 — IA centralizada: OmniRoute (gateway OpenAI-compatible, /v1/chat/completions com model
     multimodal) é o primário QUANDO configurado; em falha cai pro MiniMax-M3 direto. Grava 1 AiCall
     por tentativa, pelo provider REAL que serviu.
-
-    `timeout`/`fallback`: chamadas SÍNCRONAS no request web (ex.: classify) precisam de teto
-    curto e sem cadeia — a cadeia completa (2 providers × IA_TIMEOUT) segura um worker gunicorn
-    por ~2min no pior caso. Default preserva o comportamento das tasks async.
     """
     import base64
 
     from .minimax import MiniMaxClient
 
+    image_bytes, mime_type = _prep_for_vision(image_bytes, mime_type)
     instruction = prompt or "Descreva esta imagem."
     attempts: list[tuple[str, str, object]] = []
 
@@ -450,7 +471,7 @@ def describe_image(
             api_key=omni["api_key"],
             temperature=settings.IA_DEFAULT_TEMPERATURE,
             max_tokens=settings.IA_MAX_TOKENS,
-            timeout=timeout or settings.IA_TIMEOUT,
+            timeout=settings.IA_TIMEOUT,
         )
         data_url = f"data:{mime_type};base64,{base64.b64encode(image_bytes).decode()}"
         messages = [
@@ -469,15 +490,13 @@ def describe_image(
 
         attempts.append(("omniroute", vision_model, gateway_call))
 
-    # fallback MiniMax-M3 direto — presente por padrão; chamadas síncronas com `fallback=False`
-    # pulam a cadeia (mas se o OmniRoute não está configurado, ele é a ÚNICA tentativa e fica).
-    if fallback or not attempts:
-        mm = MiniMaxClient(direct=True)
+    # fallback (SEMPRE presente): MiniMax-M3 direto — chave própria, sem depender do OmniRoute.
+    mm = MiniMaxClient(direct=True)
 
-        async def direct_call():
-            return await mm.describe(image_bytes, mime_type=mime_type, prompt=prompt)
+    async def direct_call():
+        return await mm.describe(image_bytes, mime_type=mime_type, prompt=prompt)
 
-        attempts.append(("minimax", settings.MINIMAX_VISION_MODEL, direct_call))
+    attempts.append(("minimax", settings.MINIMAX_VISION_MODEL, direct_call))
 
     return _media_chain(AiCall.Operation.VISION, caller, attempts)
 
@@ -519,21 +538,9 @@ def classify_document(
 ) -> dict:
     """RÁPIDA: `{is_document, doc_type, completeness, confidence}`. is_document=None quando a IA não
     deu um JSON utilizável (o front então confirma o tipo com a pessoa). Nunca levanta por parse."""
-    # Síncrona no request web → teto curto e SEM fallback (antes usava a cadeia completa,
-    # 2 × IA_TIMEOUT, e podia segurar um worker gunicorn por ~2min por upload). Fail-open
-    # TOTAL: timeout/erro de provider = is_document=None (o front confirma o tipo com a
-    # pessoa) — nunca 500 por causa de um palpite de UI.
-    try:
-        raw = describe_image(
-            image_bytes,
-            caller=caller,
-            mime_type=mime_type,
-            prompt=_CLASSIFY_PROMPT,
-            timeout=settings.IA_CLASSIFY_TIMEOUT,
-            fallback=False,
-        )
-    except Exception:  # noqa: BLE001 — classify é palpite de UI, nunca derruba o request
-        raw = None
+    raw = describe_image(
+        image_bytes, caller=caller, mime_type=mime_type, prompt=_CLASSIFY_PROMPT
+    )
     data = _extract_json(raw) if isinstance(raw, str) else None
     if not data or not isinstance(data.get("is_document"), bool):
         return {

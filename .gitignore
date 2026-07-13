@@ -19,3 +19,7 @@ data/
 # claude/ponytail: nunca versionar backups de env
 .env.bak.*
 *.bak
+
+# credenciais de produção — nunca commitar
+.env.prod
+.env.prod.*

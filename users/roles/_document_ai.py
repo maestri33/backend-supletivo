@@ -122,13 +122,26 @@ def check_photo(
     from integrations.ai import service as ai
 
     doc_hint = _DOC_TYPE_HINT[doc_type]
+    # Regra do lado (Victor 2026-07-11): a FRENTE do RG antigo NÃO TEM dados textuais (só foto+digital+
+    # assinatura) — os dados moram no VERSO. Por isso a frente NUNCA reprova por "faltam dados"; só
+    # reprova se não for o documento. A ausência de dados no lado errado NÃO é defeito. Os dados só são
+    # exigidos na EXTRAÇÃO (full ou frente+verso juntos), não nesta checagem de lado.
+    is_side = side in ("front", "back")
+    legibility_rule = (
+        "(b) a imagem estiver tão desfocada/escura que nem dá pra ver que é este documento. "
+        "ATENÇÃO: NÃO reprove porque 'faltam os dados do titular' — cada lado tem o que tem "
+        "(a frente do RG antigo é só foto/digital/assinatura; os dados textuais ficam no verso). "
+        "Ausência de dados NÃO é defeito nesta etapa."
+        if is_side
+        else "(b) os dados estiverem genuinamente ilegíveis (muito desfocado/escuro ou cortado "
+        "escondendo informação)."
+    )
     prompt = (
         f"Esta imagem deve mostrar {_SIDE_DESC[side]} de {doc_hint} "
         "A imagem pode ter sido endireitada automaticamente; NÃO reprove por orientação/rotação. "
         "Documento plastificado costuma ter brilho/reflexo — só é problema se ESCONDER os dados. "
         f"Reprove APENAS se: (a) não for {doc_type.upper()} válido (outro documento, QR code, "
-        "selfie, outro papel) — ou (b) os dados estiverem genuinamente ilegíveis (muito "
-        "desfocado/escuro ou cortado escondendo informação). NÃO reprove só porque parece ser o "
+        f"selfie, outro papel) — ou {legibility_rule} NÃO reprove só porque parece ser o "
         "outro lado da carteira. Responda em português começando OBRIGATORIAMENTE com APROVADO "
         "ou REPROVADO, seguida de um motivo curto e claro."
     )

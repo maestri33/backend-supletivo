@@ -258,26 +258,24 @@ def test_aluno_funnel_end_to_end(client, default_hub):
     assert body["status"] == "address"
     assert body["address"]["missing_fields"] == ["number"], body["address"]
 
-    # PATCH do número (HTTP) — endereço completo, mas ainda falta o comprovante APROVADO → fica em ADDRESS.
+    # PATCH do número (HTTP) — endereço completo → avança pra EDUCATION (accept-first: a IA
+    # do comprovante roda em background; rejeição vira ValidationBlock, não trava o wizard).
     r = _json(client, "patch", "/enrollment/address", {"number": "1000"}, token)
-    assert r.status_code == 200 and r.json()["status"] == "address", r.content
+    assert r.status_code == 200 and r.json()["status"] == "education", (
+        f"endereço completo não avançou pra EDUCATION: {r.content}"
+    )
 
-    # comprovante de residência — upload (HTTP) → fica pendente, NÃO avança sozinho.
+    # comprovante de residência — upload (HTTP) → enfileira validação async. O wizard já avançou;
+    # a rejeição (se houver) cria um ValidationBlock que aparece no /me e o front mostra modal.
     r = client.post(
         f"{BASE}/enrollment/address/proof",
         {"file": _png()},
         HTTP_AUTHORIZATION=f"Bearer {token}",
     )
     assert r.status_code == 200, f"upload proof: {r.status_code} {r.content}"
-    assert r.json()["status"] == "address", (
-        "avançou sem o comprovante aprovado (bypass KYC!)"
-    )
 
-    # aprovação do comprovante — interface-driven (IA/staff) → destrava ADDRESS→EDUCATION.
+    # aprovação do comprovante via interface (IA/staff) — best-effort; não afeta mais o avanço.
     _approve_address_proof(uid)
-    assert _me_status(client, token)["status"] == "education", (
-        "PRESO EM ADDRESS: comprovante aprovado não avançou pra EDUCATION"
-    )
 
     # 7) ESCOLARIDADE (HTTP) → SELFIE.
     r = _json(

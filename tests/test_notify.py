@@ -12,11 +12,11 @@ def test_tts_voice_cross_gender():
     valor (misconfigured), o teste passa — só checa que retorna alguma voz. Em prod elas devem
     ser DIFERENTES.
     """
-    from integrations.ai.tts_voice import resolve_voice
+    from integrations.ai.service import _voice_for_gender
     from django.conf import settings
 
-    v_m = resolve_voice("M", "elevenlabs")
-    v_f = resolve_voice("F", "elevenlabs")
+    v_m = _voice_for_gender("M")
+    v_f = _voice_for_gender("F")
     assert v_m  # truthy
     assert v_f
     # se o .env está bem configurado, M e F resolvem pra vozes diferentes (regra de marketing)
@@ -26,21 +26,21 @@ def test_tts_voice_cross_gender():
 
 def test_tts_voice_minimax_cross_gender():
     """Mesmo pra MiniMax — destinatário homem recebe voz feminina."""
-    from integrations.ai.tts_voice import resolve_voice
+    from integrations.ai.service import _minimax_voice_for_gender
     from django.conf import settings
 
-    v_m = resolve_voice("M", "minimax")
-    v_f = resolve_voice("F", "minimax")
+    v_m = _minimax_voice_for_gender("M")
+    v_f = _minimax_voice_for_gender("F")
     assert v_m and v_f
     if settings.MINIMAX_VOICE_FEMALE != settings.MINIMAX_VOICE_MALE:
         assert v_m != v_f
 
 
 def test_tts_voice_fallback_feminina():
-    """Sem gender → voz feminina (default)."""
-    from integrations.ai.tts_voice import resolve_voice
+    """Sem gender → voz feminina (default, semântica MiniMax)."""
+    from integrations.ai.service import _minimax_voice_for_gender
 
-    assert resolve_voice(None) == resolve_voice("M")
+    assert _minimax_voice_for_gender(None) == _minimax_voice_for_gender("M")
 
 
 def test_idempotency_key_unica():
