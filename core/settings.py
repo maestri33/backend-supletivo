@@ -460,9 +460,12 @@ TOOLS_ALLOWED_IPS = env.list(
 # e NUNCA decide acesso. Default 1 (um reverse-proxy). Ajuste se houver cadeia de proxies confiáveis.
 TRUSTED_PROXY_COUNT = env.int("TRUSTED_PROXY_COUNT", default=1)
 # Prefixos de mídia que exigem autorização (dono do recurso). O resto (training/IA) é público.
+# `audit`: recortes de rosto (selfie/RG) da auditoria da IA (enrollment/service.py) — PII de rosto;
+# são internos (nenhum front os consome), então sem dono resolvível caem em revisor-only (fail-closed).
+# ⚠ Se o .env de prod SOBRESCREVER esta lista, inclua `audit` lá também.
 MEDIA_PRIVATE_PREFIXES = env.list(
     "MEDIA_PRIVATE_PREFIXES",
-    default=["documents", "selfie", "diploma", "receipt", "student"],
+    default=["documents", "selfie", "diploma", "receipt", "student", "audit"],
 )
 # Rate-limit por TELEFONE em DB (sem Redis), espelha o OTP: janela curta (1 a cada WINDOW_S) +
 # janela horária (máx HOURLY_MAX/h). Anti-abuso de custo de IA/WhatsApp; alto p/ não trancar

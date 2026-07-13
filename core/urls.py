@@ -28,7 +28,7 @@ from api.collaborators import api as collaborators_api
 from api.leadership import api as leadership_api
 from api.staff import api as staff_api
 
-# Grupo extra `tools` (2026-07-04): ferramentas internas de integração — SEM auth (proteção externa).
+# Grupo extra `tools`: ferramentas internas de integração — auth por segredo de serviço + IP interno.
 from api.tools import api as tools_api
 from api.health import health_api
 from users.roles.lead.views import checkout_redirect

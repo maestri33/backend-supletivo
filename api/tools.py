@@ -1,9 +1,16 @@
 """Grupo `tools` — ferramentas internas de integração (radar de leads + gatilho de notificação).
 
-⚠️ **SEM AUTENTICAÇÃO** (decisão do Victor, 2026-07-04): as rotas de negócio passam `auth=None` —
-qualquer um com a URL lê nome/telefone dos leads e dispara WhatsApp/e-mail. A proteção assumida é
-EXTERNA (VPN/proxy/firewall); não exponha este grupo direto pra internet. `caller="tools.send"`
-fica auditável no histórico do notify.
+🔒 **AUTH DE SERVIÇO + IP** (hardening 2026-07-10): as rotas de negócio exigem DUAS provas,
+ambas fail-closed:
+
+1. `service_secret_auth` (callable Ninja → 401 se falhar): o mesmo segredo de serviço dos webhooks
+   (`core/webhook_auth.py::service_secret_ok`, header `settings.BOT_SERVICE_HEADER`). É a prova de
+   IDENTIDADE — sem ele, mesmo de um IP interno a rota 401a. `BOT_SERVICE_SECRET` vazio no .env =>
+   sempre 401 (fail-closed).
+2. `require_internal_ip` (403 se o IP não estiver na allowlist DMZ): defesa em profundidade de REDE.
+
+Antes só havia o gate de IP (`auth=None`) — qualquer host dentro da DMZ lia nome/telefone dos leads
+e disparava WhatsApp/e-mail. `caller="tools.send"` fica auditável no histórico do notify.
 
 Casca fina (CONVENTION §3): valida a borda e chama `lead`/`notify` in-process. Erros de domínio
 borbulham pro handler central da fábrica (`api/base.py`) → `{detail, code, …extra}`.
@@ -17,9 +24,19 @@ from ninja import Schema
 
 from api.base import COMMON_ERROR_REGISTRY, build_group
 from core.net import require_internal_ip
+from core.webhook_auth import service_secret_ok
 from users.exceptions import ValidationError
 from users.roles.lead import service as lead_iface
 from users.roles.lead.models import Lead
+
+def service_secret_auth(request):
+    """Auth callable do Ninja: exige o segredo de serviço interno (mesmo dos webhooks/bot login).
+
+    Truthy => vira `request.auth`; None => Ninja levanta `AuthenticationError` → 401 padronizado
+    (`api/base.py`). Fail-closed: `BOT_SERVICE_SECRET` vazio no .env => `service_secret_ok` False =>
+    401. É a auth REAL exigida ALÉM do gate de IP (`require_internal_ip`) nas rotas abaixo."""
+    return True if service_secret_ok(request) else None
+
 
 _ERROR_REGISTRY = (
     COMMON_ERROR_REGISTRY
@@ -28,6 +45,7 @@ _ERROR_REGISTRY = (
 
 | code | quando | extras |
 |---|---|---|
+| `UNAUTHORIZED` | sem o segredo de serviço no header (401) | — |
 | `INVALID_STATUS` | `status` fora de pending/paid/failed (422) | — |
 | `DATE_INVALID` | `created_after` não é ISO-8601 (422) | — |
 """
@@ -36,7 +54,8 @@ _ERROR_REGISTRY = (
 api = build_group(
     "tools",
     "Ferramentas internas de integração — radar de leads + disparo de notificação. "
-    "SEM auth nas rotas de negócio (proteção externa via rede).\n" + _ERROR_REGISTRY,
+    "Rotas de negócio exigem segredo de serviço (header) ALÉM de IP interno (DMZ).\n"
+    + _ERROR_REGISTRY,
 )
 
 _MAX_LIMIT = 500
@@ -55,7 +74,7 @@ class ToolLeadOut(Schema):
     created_at: str
 
 
-@api.get("/leads", response=list[ToolLeadOut], auth=None, tags=["tools"])
+@api.get("/leads", response=list[ToolLeadOut], auth=service_secret_auth, tags=["tools"])
 def tools_leads(
     request,
     status: str | None = None,
@@ -102,7 +121,12 @@ class ToolsNotifySentOut(Schema):
     external_id: str
 
 
-@api.post("/notifications/send", response=ToolsNotifySentOut, auth=None, tags=["tools"])
+@api.post(
+    "/notifications/send",
+    response=ToolsNotifySentOut,
+    auth=service_secret_auth,
+    tags=["tools"],
+)
 def tools_notifications_send(request, payload: ToolsNotifyIn):
     """Gatilho de disparo: envia WhatsApp e/ou e-mail a um USUÁRIO (`user_external_id`, herda
     phone/email do Profile) OU a um destino LIVRE (`phone`/`email`). `channels` opcional (default:
