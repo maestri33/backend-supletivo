@@ -674,8 +674,9 @@ def get_current_contract(request):
 @api.get("/candidate/selfie", response=CandidateSelfieOut, tags=["candidate"])
 def get_candidate_selfie(request):
     """GET da selfie/assinatura (plan/15 C): foto + `analysis_status`/`analysis_reason` (canônico)
-    + `expires_at` (TTL do `pending`). Aplica o TTL na leitura: pending estourado vira `review`
-    + notifica o coordenador. Espelha `GET /enrollment/selfie`."""
+    + `expires_at` (TTL do `pending`). LEITURA PURA: não muta status nem notifica — o TTL estourado
+    (pending→review + notify coord) roda no job `age_stale_selfies` (Django-Q), fora do GET.
+    Espelha `GET /enrollment/selfie`."""
     ext = _guard(request, "candidate")
     return candidate_iface.get_selfie(user_external_id=ext)
 

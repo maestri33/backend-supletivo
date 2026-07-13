@@ -29,6 +29,7 @@ from users.exceptions import ValidationError
 from users.roles.lead import service as lead_iface
 from users.roles.lead.models import Lead
 
+
 def service_secret_auth(request):
     """Auth callable do Ninja: exige o segredo de serviço interno (mesmo dos webhooks/bot login).
 

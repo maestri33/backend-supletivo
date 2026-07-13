@@ -125,23 +125,13 @@ def _rg_started_at(rg):
 
 
 def _reconcile_stale_analyses(enr: Enrollment) -> None:
-    """TTL guard (proposta #2): `pending` que estourou o prazo vira `review` — o aluno nunca fica
-    preso em "analisando…" se a task da IA morreu. Persiste o flip (cai na fila do coordenador) e
-    avisa, reusando os mesmos caminhos do review da IA. Idempotente; roda nas LEITURAS do funil."""
-    from users.roles import _analysis, _selfie
+    """TTL guard do RG (proposta #2): `pending` do DOCUMENTO que estourou o prazo vira `review` — o
+    aluno nunca fica preso em "analisando…" se a task da IA morreu. Idempotente; roda nas LEITURAS.
 
-    if _analysis.is_stale(enr.selfie_status, enr.selfie_taken_at):
-        enr.selfie_status = _selfie.REVIEW
-        enr.selfie_description = (
-            enr.selfie_description or ""
-        ).strip() or _analysis.stale_reason()
-        enr.save(update_fields=["selfie_status", "selfie_description", "updated_at"])
-        logger.info(
-            "enrollment.analysis_stale_flip",
-            enrollment=str(getattr(enr, "external_id", None)),
-            kind="selfie",
-        )
-        _notify_selfie_review(enr)
+    A selfie SAIU daqui: seu envelhecimento (pending→review+notify) roda no job agendado
+    `tasks.age_stale_selfies` (Django-Q), nunca numa leitura — um GET não pode mutar/notificar
+    (idempotência HTTP)."""
+    from users.roles import _analysis
 
     rg = documents_iface.get_rg(str(enr.user.external_id))
     if rg is not None and _analysis.is_stale(rg.validation_status, _rg_started_at(rg)):
@@ -157,6 +147,43 @@ def _reconcile_stale_analyses(enr: Enrollment) -> None:
             _analysis.stale_reason(),
             rg.validation_result or {},
         )
+
+
+def age_stale_selfies() -> int:
+    """Job agendado (Django-Q): selfies `pending` cujo TTL estourou → `review` + notifica coord.
+
+    Substitui o antigo reconcile-on-read do `GET /enrollment/selfie` (violava idempotência HTTP).
+    Idempotente: só age em quem AINDA está `pending` e estourou o prazo — a transição vira o status
+    p/ `review`, então a próxima passada não o pega de novo (sem notify duplicado)."""
+    from datetime import timedelta
+
+    from django.utils import timezone
+
+    from users.roles import _analysis, _selfie
+
+    cutoff = timezone.now() - timedelta(seconds=_analysis.ttl_seconds())
+    stale = Enrollment.objects.select_related("hub", "hub__coordinator").filter(
+        selfie_status=_selfie.SelfieStatus.PENDING, selfie_taken_at__lt=cutoff
+    )
+    aged = 0
+    for enr in stale:
+        _reconcile_selfie_stale(enr)
+        aged += 1
+    return aged
+
+
+def _reconcile_selfie_stale(enr: Enrollment) -> None:
+    """TTL do `pending` da selfie: estourou → `review` + avisa coordenador. Chamado SÓ pelo job
+    `age_stale_selfies` — nunca num GET. Re-checa `is_stale`, então é seguro rodar 2×."""
+    from users.roles import _analysis, _selfie
+
+    if _analysis.is_stale(enr.selfie_status, enr.selfie_taken_at):
+        enr.selfie_status = _selfie.REVIEW
+        enr.selfie_description = (
+            enr.selfie_description or ""
+        ).strip() or _analysis.stale_reason()
+        enr.save(update_fields=["selfie_status", "selfie_description", "updated_at"])
+        _notify_selfie_review(enr)
 
 
 def public_status(enr: Enrollment) -> str:
@@ -1291,9 +1318,11 @@ def _selfie_dict(enr: Enrollment) -> dict:
 
 def get_selfie(*, user_external_id: str) -> dict:
     """GET da selfie/ASSINATURA (plan/13): foto, quando foi enviada, status e os comentários da
-    IA/biometria (inclusive as instruções de como ser aprovada). `exists: false` = não enviada."""
+    IA/biometria (inclusive as instruções de como ser aprovada). `exists: false` = não enviada.
+
+    LEITURA PURA (idempotência HTTP): NÃO muta status nem notifica. O envelhecimento do `pending`
+    estourado → `review` + notify roda no job agendado `tasks.age_stale_selfies` (Django-Q)."""
     enr = _require(user_external_id)
-    _reconcile_stale_analyses(enr)  # TTL guard (proposta #2)
     return _selfie_dict(enr)
 
 
