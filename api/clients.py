@@ -519,6 +519,7 @@ class EnrollmentMeOut(EnrollmentOut):
     rg: RgOut | None = None
     education: EducationOut | None = None
     selfie: SelfieOut | None = None
+    blocks: list[dict] | None = None
 
 
 def _enr_guard(request) -> str:
@@ -868,7 +869,12 @@ def student_pendencies(request):
 def my_blocks(request):
     """Bloqueios ativos: validações que rejeitaram e o aluno PRECISA resolver.
     O front faz polling aqui; se voltar com itens, exibe modal bloqueante."""
-    return [blocks_svc.to_dict(b) for b in blocks_svc.get_active_blocks(request.auth)]
+    from users.auth.models import User
+
+    user = User.objects.filter(external_id=request.auth.external_id).first()
+    if user is None:
+        return []
+    return [blocks_svc.to_dict(b) for b in blocks_svc.get_active_blocks(user)]
 
 
 @api.post("/me/blocks/{block_external_id}/resolve", response=BlockOut, tags=["blocks"])
@@ -879,7 +885,12 @@ def resolve_block(request, block_external_id: str):
         block_id = int(block_external_id)
     except ValueError:
         raise NotFound("Bloco não encontrado.", code="BLOCK_NOT_FOUND")
-    block = blocks_svc.resolve_by_id(user=request.auth, block_id=block_id)
+    from users.auth.models import User
+
+    user = User.objects.filter(external_id=request.auth.external_id).first()
+    if user is None:
+        raise NotFound("Bloco não encontrado.", code="BLOCK_NOT_FOUND")
+    block = blocks_svc.resolve_by_id(user=user, block_id=block_id)
     if block is None:
         raise NotFound("Bloco não encontrado.", code="BLOCK_NOT_FOUND")
     return blocks_svc.to_dict(block)

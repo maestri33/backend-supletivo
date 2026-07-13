@@ -242,6 +242,7 @@ class CandidateMeOut(Schema):
     address_proof: AddressProofSectionOut | None = None
     documents: CandidateDocumentsOut | None = None
     selfie: CandidateSelfieOut | None = None
+    blocks: list[dict] | None = None
 
 
 class CandidateDocumentSectionOut(Schema):
@@ -330,6 +331,7 @@ class PromoterMeOut(Schema):
     ref_url: str
     locked: bool
     pending_materials: list[dict] = []
+    blocks: list[dict] | None = None
 
 
 class PromoterLeadOut(Schema):
