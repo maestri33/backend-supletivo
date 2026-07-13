@@ -165,6 +165,10 @@ DATABASES = {
     # dev -> SQLite (default); prod -> PostgreSQL via DATABASE_URL no .env.
     "default": env.db("DATABASE_URL", default=f"sqlite:///{BASE_DIR / 'db.sqlite3'}"),
 }
+# Conexões persistentes: o poll do wizard (um GET a cada poucos segundos POR candidato) pagava
+# handshake+auth do Postgres em todo request. Health check evita reusar conexão morta (Django 5).
+DATABASES["default"]["CONN_MAX_AGE"] = env.int("DB_CONN_MAX_AGE", default=60)
+DATABASES["default"]["CONN_HEALTH_CHECKS"] = True
 
 
 # Password validation
@@ -340,6 +344,9 @@ for _ia_item in env.list("IA_FALLBACK_CHAIN", default=[]):
 IA_DEFAULT_TEMPERATURE = env.float("IA_DEFAULT_TEMPERATURE", default=0.3)
 IA_MAX_TOKENS = env.int("IA_MAX_TOKENS", default=0)
 IA_TIMEOUT = env.float("IA_TIMEOUT", default=60.0)
+# Teto da classificação SÍNCRONA de documento (roda DENTRO do request web, ao contrário do
+# resto da visão que é task async) — curto de propósito; é fail-open (palpite de UI).
+IA_CLASSIFY_TIMEOUT = env.float("IA_CLASSIFY_TIMEOUT", default=8.0)
 # Modelo multimodal do gateway OmniRoute para VISÃO (describe_image via /v1/chat/completions). Vazio
 # => o primário OmniRoute é pulado e a visão vai direto pro MiniMax-M3 (fallback sempre presente).
 IA_OMNIROUTE_VISION_MODEL = env("IA_OMNIROUTE_VISION_MODEL", default="")
@@ -489,8 +496,13 @@ MAIL_TIMEOUT = env.int("MAIL_TIMEOUT", default=30)
 Q_CLUSTER = {
     "name": "mvp",
     "orm": "default",
-    "timeout": 90,
-    "retry": 120,
+    # timeout precisa cobrir o PIOR caso real da task (cadeia de visão com fallback + OCR +
+    # extração passa fácil de 90s com provider lento) — senão o worker é morto no meio e a
+    # task re-entra; retry SEMPRE > timeout; max_attempts corta a task-veneno (sem ele o
+    # django-q2 re-entrega para sempre, queimando worker e crédito de IA).
+    "timeout": env.int("Q_TIMEOUT", default=240),
+    "retry": env.int("Q_RETRY", default=300),
+    "max_attempts": env.int("Q_MAX_ATTEMPTS", default=3),
     # `workers` baixo de propósito: cada worker carrega o modelo InsightFace (~300MB) no 1º uso de
     # biometria. O default do Django-Q (= nº de CPUs) sobe 14 workers e OOM-ava neste host (16GB,
     # ~1GB livre) durante o teste real (Victor 2026-06-16). Prod sobe via Q_WORKERS no .env.
