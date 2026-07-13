@@ -298,7 +298,7 @@ def _advance_to(enr: Enrollment, target: str) -> None:
     if from_status != status:
         logger.info(
             "enrollment.advanced",
-            enrollment=str(enr.external_id),
+            enrollment=str(getattr(enr, "external_id", None)),
             from_status=from_status,
             to_status=status,
         )
@@ -367,11 +367,12 @@ def _advance_address(enr: Enrollment, user_external_id: str) -> None:
 
 
 def upload_address_proof(*, user_external_id: str, upload) -> dict:
-    """Comprovante de residência (foto/PDF) — OBRIGATÓRIO + validado por IA (F1). Salva, marca
-    `pending` e enfileira a validação (endereço + titular). Aceito na etapa `address`."""
+    """Comprovante de residência (foto/PDF) — validado por IA em background. Aceito em qualquer
+    etapa pré-completion (accept-first: o aluno pode avançar e reenviar o comprovante depois;
+    rejeição vira ValidationBlock, não trava o wizard)."""
     from users.documents import service as documents_iface
 
-    enr = _require(user_external_id, _S.ADDRESS)
+    enr = _require(user_external_id)  # sem gate de status: aceita enquanto não concluída
     documents_iface.upload_photo(user_external_id, "address_proof_photo", upload)
     # ponytail: re-upload resolve o bloco imediatamente; análise roda em background
     blocks.resolve_for_source(user=enr.user, source_type="address_proof")
@@ -386,10 +387,11 @@ def upload_address_proof(*, user_external_id: str, upload) -> dict:
 
 
 def submit_address_proof_kinship(*, user_external_id: str, relation: str) -> dict:
-    """Titular do comprovante é outra pessoa (`needs_kinship`): explica o parentesco → libera."""
+    """Titular do comprovante é outra pessoa (`needs_kinship`): explica o parentesco → libera.
+    Aceito em qualquer etapa pré-completion (accept-first)."""
     from users.roles import _address_proof
 
-    enr = _require(user_external_id, _S.ADDRESS)
+    enr = _require(user_external_id)  # sem gate de status
     _address_proof.submit_kinship(user_external_id, relation)
     _advance_address(enr, user_external_id)
     return me_dict(enr)
@@ -550,7 +552,9 @@ def upload_rg_photo(*, user_external_id: str, slot: str, upload) -> dict:
     se reprovar) sai pelo `/enrollment/me`. Aluno: RG é obrigatório (Victor)."""
     from users.roles import _analysis
 
-    enr = _require(user_external_id, _S.RG)
+    # accept-first: RG aceito em qualquer etapa pré-completion (re-upload após rejeição funciona
+    # mesmo depois de avançar pro endereço/escolaridade).
+    enr = _require(user_external_id, _S.RG, _S.ADDRESS, _S.EDUCATION, _S.SELFIE)
     path = documents_iface.upload_photo(user_external_id, slot, upload)
     _reset_rg_validation(user_external_id, slot)
     from django_q.tasks import async_task
