@@ -1734,16 +1734,28 @@ def pay_fee(
     enr = _enrollment_for_coordinator(
         enrollment_external_id, coordinator, _S.AWAITING_RELEASE, _S.FEE_SCHEDULED
     )
+    # fast-path: repost óbvio (webhook já confirmou) — poupa a rede antes de decodificar o QR.
     if fee_facts(enr)["first_paid"]:
         raise Conflict("A 1ª parcela desta taxa já está paga.", code="FEE_ALREADY_PAID")
+    # decode do QR (REDE) FORA do atomic — não segura o lock de linha durante a chamada ao Asaas.
     plan = _plan_fee_qr(qr_code, amount)
-    pr = _queue_fee(
-        enr,
-        qr_code=qr_code,
-        amount=plan["amount"],
-        scheduled_for=None,
-        ref=_fee_now_ref(enr),
-    )
+    with transaction.atomic():
+        # Lock de linha na matrícula: serializa o duplo-submit CONCORRENTE. O 2º POST fica esperando o
+        # 1º COMMITAR e só então re-checa/enfileira — aí já enxerga a fee na fila (ref determinística
+        # `_now`) e devolve idempotente, em vez de correr pro INSERT e bater no unique(external_reference).
+        # ponytail: a própria linha da matrícula é o mutex — sem tabela de idempotência nova.
+        enr = Enrollment.objects.select_for_update().get(pk=enr.pk)
+        if fee_facts(enr)["first_paid"]:
+            raise Conflict(
+                "A 1ª parcela desta taxa já está paga.", code="FEE_ALREADY_PAID"
+            )
+        pr = _queue_fee(
+            enr,
+            qr_code=qr_code,
+            amount=plan["amount"],
+            scheduled_for=None,
+            ref=_fee_now_ref(enr),
+        )
     logger.info(
         "enrollment.fee_pay_queued",
         external_id=str(enr.external_id),

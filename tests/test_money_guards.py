@@ -104,3 +104,72 @@ def test_g7_suspenso_pula_comissao_ativo_credita():
 
     assert run(suspenso=True) is False, "promotor suspenso recebeu comissão"
     assert run(suspenso=False) is True, "promotor ativo não recebeu comissão"
+
+
+# ─────────── G-fee: duplo-submit de fee/pay não paga a taxa 2× (lock de linha) ───────────
+def _enrollment_awaiting_release():
+    """Matrícula real em `awaiting_release` (pronta pra 1ª parcela) + o coordenador do hub dela."""
+    from hub.models import Hub
+    from users.address.models import Address
+    from users.auth.models import User
+    from users.roles.enrollment.models import Enrollment
+
+    coord = User.objects.create_user(external_id=uuid.uuid4())
+    promoter = User.objects.create_user(external_id=uuid.uuid4())
+    student = User.objects.create_user(external_id=uuid.uuid4())
+    addr = Address.objects.create(city="São Paulo", state="SP")
+    hub = Hub.objects.create(
+        address=addr, brand="test", coordinator=coord, is_default=True
+    )
+    enr = Enrollment.objects.create(
+        user=student,
+        promoter=promoter,
+        hub=hub,
+        status=Enrollment.Status.AWAITING_RELEASE,
+    )
+    return coord, enr
+
+
+# QR decode é REDE (Asaas); o fix sob teste é o LOCK, não o decode → planamos à vista R$50.
+_PLAN_A_VISTA = {"amount": "50.00", "scheduled_for": None, "due_date": None}
+
+
+def test_g_fee_pay_duplo_submit_enfileira_uma_vez(monkeypatch):
+    """Dois POSTs de fee/pay pra mesma matrícula (o 2º serializado atrás do lock) resultam em UM
+    único PaymentRequest — a ref determinística `_now` devolve o mesmo pedido, sem 2ª saída de R$."""
+    from finance.models import PaymentRequest
+    from users.roles.enrollment import service as es
+
+    coord, enr = _enrollment_awaiting_release()
+    monkeypatch.setattr(es, "_plan_fee_qr", lambda qr, amount=None: dict(_PLAN_A_VISTA))
+
+    ext = str(enr.external_id)
+    es.pay_fee(enrollment_external_id=ext, coordinator=coord, qr_code="qr")
+    es.pay_fee(enrollment_external_id=ext, coordinator=coord, qr_code="qr")
+
+    ref = f"fee_enr_{enr.external_id}_now"
+    assert PaymentRequest.objects.filter(external_reference=ref).count() == 1, (
+        "duplo-submit enfileirou a taxa 2×"
+    )
+
+
+def test_g_fee_pay_apos_confirmado_recusa_segundo(monkeypatch):
+    """Depois que o webhook confirma PAID, o 2º submit é barrado (Conflict FEE_ALREADY_PAID) sob o
+    lock — nunca uma 2ª fila. É o `first_paid` re-checado DENTRO do atomic."""
+    from finance.models import PaymentRequest
+    from users.exceptions import Conflict
+    from users.roles.enrollment import service as es
+
+    coord, enr = _enrollment_awaiting_release()
+    monkeypatch.setattr(es, "_plan_fee_qr", lambda qr, amount=None: dict(_PLAN_A_VISTA))
+
+    ext = str(enr.external_id)
+    es.pay_fee(enrollment_external_id=ext, coordinator=coord, qr_code="qr")
+    ref = f"fee_enr_{enr.external_id}_now"
+    PaymentRequest.objects.filter(external_reference=ref).update(
+        status=PaymentRequest.Status.PAID
+    )
+
+    with pytest.raises(Conflict):
+        es.pay_fee(enrollment_external_id=ext, coordinator=coord, qr_code="qr")
+    assert PaymentRequest.objects.filter(external_reference=ref).count() == 1
