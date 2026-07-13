@@ -118,6 +118,10 @@ _MESSAGES: dict[str, str] = {
         "{name}, sua resposta precisa de ajuste: {detail} "
         "Refaça pelo app quando puder. 📝"
     ),
+    "enrollment.concluded_referral": (
+        "{name}, um aluno que você indicou acabou de virar aluno. ✅ Bônus creditado. "
+        "Continue indicando! 🚀"
+    ),
     "enrollment.rg_approved": (
         "Tudo certo, {name}! ✅ Seu RG foi aprovado e sua matrícula segue em frente. "
         "Continue o preenchimento, {name}."

@@ -124,6 +124,7 @@ def _on_validation_change(sender, instance, **kwargs) -> None:
         except Exception as exc:  # noqa: BLE001
             logger.warning(
                 "block.signal_create_failed",
+                instance_id=getattr(instance, "id", None),
                 source_type=source_type,
                 user_id=user.id,
                 error=str(exc),
@@ -136,6 +137,7 @@ def _on_validation_change(sender, instance, **kwargs) -> None:
         except Exception as exc:  # noqa: BLE001
             logger.warning(
                 "block.signal_resolve_failed",
+                instance_id=getattr(instance, "id", None),
                 source_type=source_type,
                 user_id=user.id,
                 error=str(exc),

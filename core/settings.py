@@ -640,9 +640,21 @@ DEFAULT_STAFF_PIX = env("DEFAULT_STAFF_PIX", default="")
 # ponytail: structlog já está no pyproject.toml. Config mínima: console em dev, JSON em prod.
 import structlog  # noqa: E402 — import perto da sua config (deliberado), não no topo
 
+
+def _scrub_pii(_, __, event_dict: dict) -> dict:
+    """Defesa em profundidade: mascara cpf/phone em event_dict (exception paths podem escapar
+    da truncagem manual). Fail-open — nunca trava o log."""
+    for k in ("cpf", "phone", "phone_resolved", "recipient_phone", "recipient_email"):
+        if k in event_dict and event_dict[k]:
+            v = str(event_dict[k])
+            event_dict[k] = f"***{v[-2:]}" if len(v) >= 2 else "***"
+    return event_dict
+
+
 _structlog_processors = [
     structlog.stdlib.add_log_level,
     structlog.processors.TimeStamper(fmt="iso"),
+    _scrub_pii,  # mascara PII antes do renderer
 ]
 if DEBUG:
     _structlog_processors.append(structlog.dev.ConsoleRenderer())

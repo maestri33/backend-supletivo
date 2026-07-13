@@ -877,6 +877,19 @@ def my_blocks(request):
     return [blocks_svc.to_dict(b) for b in blocks_svc.get_active_blocks(user)]
 
 
+@api.get("/me/blocks/{block_id}", response=BlockOut, tags=["blocks"])
+def my_block(request, block_id: int):
+    """Busca 1 bloco por ID (deep-link do modal). 404 se não pertence ao user."""
+    from users.auth.models import User
+    from users.exceptions import NotFound
+
+    user = User.objects.filter(external_id=request.auth.external_id).first()
+    block = blocks_svc.get_by_id(user=user, block_id=block_id) if user else None
+    if block is None:
+        raise NotFound("Bloco não encontrado.", code="BLOCK_NOT_FOUND")
+    return blocks_svc.to_dict(block)
+
+
 @api.post("/me/blocks/{block_external_id}/resolve", response=BlockOut, tags=["blocks"])
 def resolve_block(request, block_external_id: str):
     """Resolve manualmente um bloco (ex.: usuário descartou a rejeição, ou coordenador aprovou

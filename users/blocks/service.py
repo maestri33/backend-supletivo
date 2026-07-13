@@ -78,6 +78,11 @@ def get_active_blocks(user) -> list[ValidationBlock]:
     )
 
 
+def get_by_id(*, user, block_id: int) -> ValidationBlock | None:
+    """Busca bloco por ID validando que pertence ao user (anti-enumeração)."""
+    return ValidationBlock.objects.filter(id=block_id, user=user).first()
+
+
 def resolve_by_id(*, user, block_id: int) -> ValidationBlock | None:
     """Resolve 1 bloco ativo por ID. Retorna o bloco resolvido ou None se não pertence ao user / já
     resolvido. Endpoint explícito do front (modal "dispensar") — em geral o bloco resolve no upload."""

@@ -44,3 +44,9 @@ class UsersConfig(AppConfig):
 
         for model in (RG, CNH, AddressProof, StudentDocument, Enrollment, Submission):
             post_save.connect(_on_validation_change, sender=model)
+
+        # Notify promoter quando um lead indicado vira aluno (Student criado).
+        from users.roles.student.models import Student
+        from users.roles.student.signals import on_student_created
+
+        post_save.connect(on_student_created, sender=Student)

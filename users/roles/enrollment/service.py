@@ -136,10 +136,20 @@ def _reconcile_stale_analyses(enr: Enrollment) -> None:
             enr.selfie_description or ""
         ).strip() or _analysis.stale_reason()
         enr.save(update_fields=["selfie_status", "selfie_description", "updated_at"])
+        logger.info(
+            "enrollment.analysis_stale_flip",
+            enrollment=str(getattr(enr, "external_id", None)),
+            kind="selfie",
+        )
         _notify_selfie_review(enr)
 
     rg = documents_iface.get_rg(str(enr.user.external_id))
     if rg is not None and _analysis.is_stale(rg.validation_status, _rg_started_at(rg)):
+        logger.info(
+            "enrollment.analysis_stale_flip",
+            enrollment=str(getattr(enr, "external_id", None)),
+            kind="rg",
+        )
         _finish_rg(
             enr,
             rg,
