@@ -173,3 +173,38 @@ def test_g_fee_pay_apos_confirmado_recusa_segundo(monkeypatch):
     with pytest.raises(Conflict):
         es.pay_fee(enrollment_external_id=ext, coordinator=coord, qr_code="qr")
     assert PaymentRequest.objects.filter(external_reference=ref).count() == 1
+
+
+# ── pagamento avulso do staff: Idempotency-Key não dispara 2º PIX ──
+def test_manual_payment_same_idempotency_key_dedups():
+    """Mesma Idempotency-Key duas vezes → UM só PaymentRequest (mesma external_reference). Um retry
+    do POST /finance/payments NÃO pode virar um 2º PIX de verdade."""
+    from finance.interface import manual as finance_manual
+    from finance.models import PaymentRequest
+
+    key = str(uuid.uuid4())
+    pr1 = finance_manual.request_pix_payment(
+        amount="100", pix_key="a@b.com", idempotency_key=key
+    )
+    pr2 = finance_manual.request_pix_payment(
+        amount="100", pix_key="a@b.com", idempotency_key=key
+    )
+    assert pr1.pk == pr2.pk, "retry criou um 2º pagamento"
+    assert (
+        PaymentRequest.objects.filter(external_reference=pr1.external_reference).count()
+        == 1
+    )
+
+
+def test_manual_payment_different_keys_create_two():
+    """Não-regressão: keys diferentes → dois pagamentos distintos."""
+    from finance.interface import manual as finance_manual
+    from finance.models import PaymentRequest
+
+    finance_manual.request_pix_payment(
+        amount="100", pix_key="a@b.com", idempotency_key=str(uuid.uuid4())
+    )
+    finance_manual.request_pix_payment(
+        amount="100", pix_key="a@b.com", idempotency_key=str(uuid.uuid4())
+    )
+    assert PaymentRequest.objects.filter(kind=PaymentRequest.Kind.MANUAL).count() == 2
