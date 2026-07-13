@@ -24,6 +24,7 @@ from integrations.tools.cpf.scripts import cpfhub
 from users.auth import validation
 from users.auth.models import User
 from users.auth.otp import service as otp_service
+from users.auth.otp.models import STATUS_SENT
 from users.auth.jwt import service as jwt_service
 from users.exceptions import (
     Conflict,
@@ -114,18 +115,24 @@ def _jitter() -> None:
     time.sleep(random.uniform(_JITTER_MIN, _JITTER_MAX))
 
 
-def _dispatch_otp(user) -> None:
-    """Dispara OTP best-effort — não quebra o fluxo do caller se falhar."""
+def _dispatch_otp(user) -> bool:
+    """Dispara OTP best-effort — não quebra o fluxo do caller se falhar.
+
+    Retorna se o OTP foi REALMENTE enviado (não mente): False em rate-limit, falha de dispatch
+    ou envio impossível (sem telefone). O caller (register) propaga isso como `otp_sent` — o
+    resultado precisa ser honesto mesmo quando o envio é best-effort (não derruba a criação)."""
     try:
-        otp_service.generate_and_send(user)
+        otp = otp_service.generate_and_send(user)
     except RateLimited:
-        pass  # logo após criar, raro; o front pode pedir reenvio depois
+        return False  # logo após criar, raro; o front pode pedir reenvio depois
     except Exception as exc:  # noqa: BLE001 — best-effort, só loga o tipo (sem PII)
         logger.warning(
             "auth.otp_dispatch_failed",
             external_id=str(user.external_id),
             error=type(exc).__name__,
         )
+        return False
+    return otp.status == STATUS_SENT
 
 
 # ── register ───────────────────────────────────────────────────────────────
@@ -218,8 +225,12 @@ def register(*, role: str, phone: str, cpf: str, email: str | None = None) -> di
         )
 
     logger.info("auth.registered", external_id=str(user.external_id), role=role)
-    _dispatch_otp(user)
-    return {"external_id": str(user.external_id)}
+    otp_sent = _dispatch_otp(user)
+    if not otp_sent:
+        logger.warning(
+            "auth.registered.otp_not_sent", external_id=str(user.external_id)
+        )
+    return {"external_id": str(user.external_id), "otp_sent": otp_sent}
 
 
 def change_phone(*, user_external_id: str, new_phone: str) -> dict:
@@ -273,12 +284,25 @@ def _find_user(
 
 
 def _send_or_wait(user) -> dict:
-    """Dispara OTP; se rate-limitado, devolve otp_wait. Usado por check/recover (achou usuário)."""
+    """Dispara OTP p/ um user CONHECIDO (check/recover/staff). Devolve o resultado REAL, não finge:
+
+    - `otp_sent True`  → foi mesmo pro WhatsApp.
+    - `otp_sent False` + `otp_wait` → rate-limitado; um código recente já saiu, peça reenvio depois.
+    - `otp_sent False` + `otp_wait=None` → falha real (sem telefone / dispatch). O caller interativo
+      (check) deve levantar OTP_NOT_SENT em vez de mentir que enviou.
+    """
     try:
-        otp_service.generate_and_send(user)
+        otp = otp_service.generate_and_send(user)
     except RateLimited as exc:
         return {"otp_sent": False, "otp_wait": exc.retry_after_s}
-    return {"otp_sent": True, "otp_wait": None}
+    except Exception as exc:  # noqa: BLE001 — falha de dispatch não pode virar sucesso silencioso
+        logger.warning(
+            "auth.otp_send_failed",
+            external_id=str(user.external_id),
+            error=type(exc).__name__,
+        )
+        return {"otp_sent": False, "otp_wait": None}
+    return {"otp_sent": otp.status == STATUS_SENT, "otp_wait": None}
 
 
 def check(
@@ -358,6 +382,13 @@ def check(
         }
 
     result = _send_or_wait(user)
+    # Fluxo interativo: o usuário ESPERA o código. Se não deu pra enviar (sem telefone / falha de
+    # dispatch, e NÃO rate-limit), não finge sucesso — devolve erro claro pro front (CONVENTION §5:
+    # existência já é vazada por design, então levantar aqui não vaza nada novo).
+    if not result["otp_sent"] and result["otp_wait"] is None:
+        raise IntegrationError(
+            "Não foi possível enviar o código OTP.", code="OTP_NOT_SENT"
+        )
     return {
         **result,
         "found": True,
