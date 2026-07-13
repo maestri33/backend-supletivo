@@ -817,12 +817,11 @@ def _apply_doc_extracted(cand: Candidate, sub, data: dict) -> None:
             if d:
                 sub.date_of_birth = d
                 sub_changed.append("date_of_birth")
-    # perfil do candidato (campos compartilhados com o RG)
-    if not sub.date_of_birth and cand.doc_type == "rg":
-        d = _date(data.get("birth_date"))
-        if d:
-            sub.date_of_birth = d
-            sub_changed.append("date_of_birth")
+    # OBS (fix 2026-07-12): o nascimento do RG NÃO fica no sub-doc — o modelo `RG` não tem
+    # `date_of_birth` (só a `CNH` tem). A data de nascimento é CENTRALIZADA no Profile logo
+    # abaixo via `profiles.fill_identity(birth_date=...)` (Victor 2026-06-16: identidade mora
+    # SÓ no Profile). O bloco antigo aqui acessava `sub.date_of_birth` p/ RG e quebrava a
+    # extração (AttributeError) assim que um RG passava na validação da foto.
     if sub_changed:
         sub.save(update_fields=sub_changed)
 

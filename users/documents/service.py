@@ -79,7 +79,9 @@ def create_empty(user) -> Document:
 def _get_document(external_id: str) -> Document:
     document = (
         Document.objects.filter(user__external_id=external_id)
-        .select_related("rg", "cnh", "certificate", "military", "address_proof")
+        # `user` no select_related: `as_dict` acessa document.user.external_id e sem isto
+        # dispara 1 query extra em TODA chamada — e este é o caminho do poll do wizard.
+        .select_related("user", "rg", "cnh", "certificate", "military", "address_proof")
         .first()
     )
     if document is None:

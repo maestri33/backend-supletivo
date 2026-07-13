@@ -165,6 +165,10 @@ DATABASES = {
     # dev -> SQLite (default); prod -> PostgreSQL via DATABASE_URL no .env.
     "default": env.db("DATABASE_URL", default=f"sqlite:///{BASE_DIR / 'db.sqlite3'}"),
 }
+# Conexões persistentes: o poll do wizard (um GET a cada poucos segundos POR candidato) pagava
+# handshake+auth do Postgres em todo request. Health check evita reusar conexão morta (Django 5).
+DATABASES["default"]["CONN_MAX_AGE"] = env.int("DB_CONN_MAX_AGE", default=60)
+DATABASES["default"]["CONN_HEALTH_CHECKS"] = True
 
 
 # Password validation
@@ -495,8 +499,13 @@ MAIL_TIMEOUT = env.int("MAIL_TIMEOUT", default=30)
 Q_CLUSTER = {
     "name": "mvp",
     "orm": "default",
-    "timeout": 90,
-    "retry": 120,
+    # timeout precisa cobrir o PIOR caso real da task (cadeia de visão com fallback + OCR +
+    # extração passa fácil de 90s com provider lento) — senão o worker é morto no meio e a
+    # task re-entra; retry SEMPRE > timeout; max_attempts corta a task-veneno (sem ele o
+    # django-q2 re-entrega para sempre, queimando worker e crédito de IA).
+    "timeout": env.int("Q_TIMEOUT", default=240),
+    "retry": env.int("Q_RETRY", default=300),
+    "max_attempts": env.int("Q_MAX_ATTEMPTS", default=3),
     # `workers` baixo de propósito: cada worker carrega o modelo InsightFace (~300MB) no 1º uso de
     # biometria. O default do Django-Q (= nº de CPUs) sobe 14 workers e OOM-ava neste host (16GB,
     # ~1GB livre) durante o teste real (Victor 2026-06-16). Prod sobe via Q_WORKERS no .env.
