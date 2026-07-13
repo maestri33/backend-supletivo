@@ -16,11 +16,11 @@ A fonte de verdade é o DB (`notify.Template`); o `notify/seed/templates.md` é 
 from __future__ import annotations
 
 from ninja import Router, Schema
-from ninja.errors import HttpError
 
 from api.auth import require_superuser
 from notify.interface import templates as _db_cache
 from notify.models import Notification, Template, Trigger
+from users.exceptions import DomainError, NotFound, ValidationError
 
 router = Router(tags=["notify"])
 
@@ -181,8 +181,9 @@ def _validate_channels(raw: str) -> str:
     parts = [p.strip() for p in (raw or "").split(",") if p.strip()]
     bad = [p for p in parts if p not in _VALID_CHANNELS]
     if bad:
-        raise HttpError(
-            422, f"canais inválidos: {bad} (válido: {sorted(_VALID_CHANNELS)})"
+        raise ValidationError(
+            f"canais inválidos: {bad} (válido: {sorted(_VALID_CHANNELS)})",
+            code="INVALID_CHANNELS",
         )
     return ",".join(parts) if parts else "whatsapp,email"
 
@@ -269,7 +270,7 @@ def get_template(request, event: str):
     require_superuser(request.auth)
     t = Template.objects.filter(event=event).first()
     if t is None:
-        raise HttpError(404, "template_not_found")
+        raise NotFound("Template não encontrado.", code="TEMPLATE_NOT_FOUND")
     return _template_out(t)
 
 
@@ -280,9 +281,12 @@ def upsert_template(request, event: str, payload: TemplateUpsertIn):
     use o Trigger (`PUT .../trigger` com `active=false`)."""
     require_superuser(request.auth)
     if not payload.body_md.strip():
-        raise HttpError(422, "body_md não pode ser vazio.")
+        raise ValidationError("body_md não pode ser vazio.", code="EMPTY_BODY")
     if payload.media_type and payload.media_type not in _VALID_MEDIA:
-        raise HttpError(422, f"media_type inválido (válido: {sorted(_VALID_MEDIA)})")
+        raise ValidationError(
+            f"media_type inválido (válido: {sorted(_VALID_MEDIA)})",
+            code="INVALID_MEDIA_TYPE",
+        )
     channels = _validate_channels(payload.channels)
 
     t, created = Template.objects.update_or_create(
@@ -312,7 +316,7 @@ def upsert_trigger(request, event: str, payload: TriggerUpsertIn):
     require_superuser(request.auth)
     t = Template.objects.filter(event=event).first()
     if t is None:
-        raise HttpError(404, "template_not_found")
+        raise NotFound("Template não encontrado.", code="TEMPLATE_NOT_FOUND")
     tr, _ = Trigger.objects.update_or_create(
         template=t,
         defaults=dict(
@@ -350,11 +354,14 @@ def patch_template(request, event: str, payload: TemplatePatchIn):
     require_superuser(request.auth)
     t = Template.objects.filter(event=event).first()
     if t is None:
-        raise HttpError(404, "template_not_found")
+        raise NotFound("Template não encontrado.", code="TEMPLATE_NOT_FOUND")
     if payload.body_md is not None and not payload.body_md.strip():
-        raise HttpError(422, "body_md não pode ser vazio.")
+        raise ValidationError("body_md não pode ser vazio.", code="EMPTY_BODY")
     if payload.media_type is not None and payload.media_type not in _VALID_MEDIA:
-        raise HttpError(422, f"media_type inválido (válido: {sorted(_VALID_MEDIA)})")
+        raise ValidationError(
+            f"media_type inválido (válido: {sorted(_VALID_MEDIA)})",
+            code="INVALID_MEDIA_TYPE",
+        )
     if payload.channels is not None:
         channels = _validate_channels(payload.channels)
     else:
@@ -385,7 +392,7 @@ def delete_template(request, event: str):
     require_superuser(request.auth)
     t = Template.objects.filter(event=event).first()
     if t is None:
-        raise HttpError(404, "template_not_found")
+        raise NotFound("Template não encontrado.", code="TEMPLATE_NOT_FOUND")
     t.delete()
     _db_cache.invalidate(event)
     return {"deleted": event}
@@ -477,7 +484,7 @@ def preview_template(request, event: str, payload: PreviewIn):
 
     data = _db_cache.get(event)
     if data is None:
-        raise HttpError(404, "template_not_found")
+        raise NotFound("Template não encontrado.", code="TEMPLATE_NOT_FOUND")
     ctx = {"nome": "tudo bem", "nome_completo": "tudo bem", "name": "tudo bem"}
     if payload.ctx:
         ctx.update(payload.ctx)
@@ -523,8 +530,9 @@ def test_template(request, event: str, payload: TestSendIn):
         run_sync=True,  # síncrono pra o staff ver o resultado AGORA
     )
     if ext is None:
-        raise HttpError(
-            404, f"evento '{event}' não existe (nem Template, nem catálogo in-memory)."
+        raise NotFound(
+            f"evento '{event}' não existe (nem Template, nem catálogo in-memory).",
+            code="EVENT_NOT_FOUND",
         )
     return {"external_id": ext}
 
@@ -540,11 +548,16 @@ def restore_from_seed(request, event: str):
 
     path = Path(__file__).resolve().parents[1] / "notify" / "seed" / "templates.md"
     if not path.exists():
-        raise HttpError(500, f"seed .md ausente: {path}")
+        # erro de deploy (seed ausente no servidor), não do cliente → 500 com code próprio.
+        err = DomainError(f"seed .md ausente: {path}", code="SEED_FILE_MISSING")
+        err.status = 500
+        raise err
     specs = {s.event: s for s in seed_io.parse(path.read_text(encoding="utf-8"))}
     spec = specs.get(event)
     if spec is None:
-        raise HttpError(404, f"evento '{event}' não está no seed .md")
+        raise NotFound(
+            f"evento '{event}' não está no seed .md", code="EVENT_NOT_IN_SEED"
+        )
     fields = dict(
         body_md=spec.body_md,
         is_tts=spec.is_tts,

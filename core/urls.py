@@ -64,9 +64,23 @@ urlpatterns = [
 # Host API-first: erro fora das rotas Ninja (404 de URL, 500 de view Django, bad request) responde
 # JSON curto — nunca a página de debug/URLconf (auditoria front 2026-06-11). Django só usa estes
 # handlers com DEBUG=False; o traceback completo continua indo pro log do server.
+# status → `code` do envelope (proposta API #5): o front faz `switch(code)`, nunca parseia `detail`.
+# Espelha os codes que os grupos Ninja emitem (build_group) para o erro de URL do Django bater igual.
+_STATUS_CODES = {
+    400: "BAD_REQUEST",
+    403: "FORBIDDEN",
+    404: "NOT_FOUND",
+    422: "VALIDATION_ERROR",
+    500: "INTERNAL",
+}
+
+
 def _json_error(status: int, detail: str):
     def handler(request, exception=None):
-        return JsonResponse({"detail": detail}, status=status)
+        return JsonResponse(
+            {"detail": detail, "code": _STATUS_CODES.get(status, "ERROR")},
+            status=status,
+        )
 
     return handler
 
@@ -77,4 +91,6 @@ handler404 = _json_error(404, "Não encontrado.")
 
 
 def handler500(request):  # assinatura do Django: sem `exception`
-    return JsonResponse({"detail": "Erro interno do servidor."}, status=500)
+    return JsonResponse(
+        {"detail": "Erro interno do servidor.", "code": _STATUS_CODES[500]}, status=500
+    )
