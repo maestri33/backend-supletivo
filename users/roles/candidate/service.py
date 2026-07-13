@@ -236,11 +236,8 @@ def set_address_data(*, user_external_id, **fields) -> dict:
 
 def _advance_address(cand: Candidate, user_external_id) -> None:
     """Endereço completo → ADDRESS. Comprovante validado em background (rejeição = ValidationBlock)."""
-    if (
-        cand.status == _S.PROFILE
-        and address_iface.is_complete(
-            address_iface.get_by_external_id(user_external_id)
-        )
+    if cand.status == _S.PROFILE and address_iface.is_complete(
+        address_iface.get_by_external_id(user_external_id)
     ):
         _set_status(cand, _S.ADDRESS)
 
@@ -612,8 +609,10 @@ def _advance_documents(cand: Candidate, user_external_id: str) -> None:
         return
     sub = documents_iface.get_doc_sub(user_external_id, cand.doc_type)
     # ponytail: sem gate de validação — usuário avança na hora; rejeição = ValidationBlock
-    if sub is not None and getattr(sub, "number", None) and (
-        getattr(sub, "front_photo", None) or getattr(sub, "full_photo", None)
+    if (
+        sub is not None
+        and getattr(sub, "number", None)
+        and (getattr(sub, "front_photo", None) or getattr(sub, "full_photo", None))
     ):
         _set_status(cand, _S.PIX)
 

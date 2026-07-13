@@ -16,7 +16,12 @@ from ninja import Field, File, Form, Router, Schema
 from ninja.files import UploadedFile
 
 from api.auth import require_roles
-from api.base import COMMON_ERROR_REGISTRY, add_auth_refresh, add_funnel_login, build_group
+from api.base import (
+    COMMON_ERROR_REGISTRY,
+    add_auth_refresh,
+    add_funnel_login,
+    build_group,
+)
 from api.schemas import CheckIn, CheckOut
 from core.net import source_ip
 from users.auth import service as auth_iface
@@ -29,7 +34,9 @@ from users.roles.training import service as training_iface
 
 # Registry de `code` de erro (plan/15 A1, espelha o clients): TODO 4xx sai `{detail, code, …extra}` — o
 # front roteia por `switch(code)`, nunca parseando `detail`. Vai na descrição do grupo → OpenAPI.
-_ERROR_REGISTRY = COMMON_ERROR_REGISTRY + """
+_ERROR_REGISTRY = (
+    COMMON_ERROR_REGISTRY
+    + """
 ### Códigos específicos do colaborador (promotor)
 
 | code | quando | extras |
@@ -49,6 +56,7 @@ _ERROR_REGISTRY = COMMON_ERROR_REGISTRY + """
 | `CPF_EXISTS` / `PHONE_EXISTS` / `EMAIL_EXISTS` | cadastro duplicado (409) | — |
 | `CPF_INVALID` / `PHONE_INVALID` / `CPF_NOT_FOUND` | dado rejeitado na validação (422) | — |
 """
+)
 
 api = build_group(
     "collaborators",

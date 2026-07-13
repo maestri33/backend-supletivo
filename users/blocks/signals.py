@@ -117,7 +117,8 @@ def _on_validation_change(sender, instance, **kwargs) -> None:
                 user=user,
                 source_type=source_type,
                 title=f"{title_prefix} reprovado",
-                description=(reason or "").strip() or "Reenvie o documento para continuar.",
+                description=(reason or "").strip()
+                or "Reenvie o documento para continuar.",
                 action_label="Corrigir",
                 action_route=_route_for(user, source_type),
             )

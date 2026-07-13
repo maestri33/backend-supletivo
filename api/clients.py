@@ -35,7 +35,9 @@ from users.roles.student import service as student_iface
 # Registry de `code` de erro (proposta API #5): TODO 4xx sai `{detail, code, …extra}` — o front
 # roteia por `switch(code)`, nunca parseando `detail`. Vai na descrição do grupo → OpenAPI.
 # ponytail: códigos comuns ficaram em `api.base.COMMON_ERROR_REGISTRY` (era duplicado 4×).
-_ERROR_REGISTRY = COMMON_ERROR_REGISTRY + """
+_ERROR_REGISTRY = (
+    COMMON_ERROR_REGISTRY
+    + """
 ### Códigos específicos do aluno (clients)
 
 | code | quando | extras |
@@ -49,6 +51,7 @@ _ERROR_REGISTRY = COMMON_ERROR_REGISTRY + """
 | `CHECKOUT_NOT_FOUND` / `STUDENT_NOT_FOUND` / `ENROLLMENT_NOT_FOUND` | recurso específico do aluno (404) | — |
 | `BLOCK_NOT_FOUND` | bloco inválido/expirado (404) | — |
 """
+)
 
 api = build_group(
     "clients",

@@ -21,7 +21,9 @@ from users.exceptions import ValidationError
 from users.roles.lead import service as lead_iface
 from users.roles.lead.models import Lead
 
-_ERROR_REGISTRY = COMMON_ERROR_REGISTRY + """
+_ERROR_REGISTRY = (
+    COMMON_ERROR_REGISTRY
+    + """
 ### Códigos específicos de tools (serviços externos)
 
 | code | quando | extras |
@@ -29,6 +31,7 @@ _ERROR_REGISTRY = COMMON_ERROR_REGISTRY + """
 | `INVALID_STATUS` | `status` fora de pending/paid/failed (422) | — |
 | `DATE_INVALID` | `created_after` não é ISO-8601 (422) | — |
 """
+)
 
 api = build_group(
     "tools",

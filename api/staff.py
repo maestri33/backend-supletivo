@@ -23,6 +23,7 @@ from hub import interface as hub_iface
 from integrations import status as integ_status
 from integrations.bank.asaas import onboarding as asaas_onboarding
 from users.auth import service as auth_iface
+from users.exceptions import Conflict, NotFound
 from users.profiles import interface as profiles
 from users.roles import interface as roles
 from users.roles.enrollment import service as enrollment_iface
@@ -289,9 +290,7 @@ def mark_lead_paid(request, external_id: str):
     if lead is None:
         raise NotFound("Lead não encontrado.", code="LEAD_NOT_FOUND")
     if not lead.payment_id:  # ponytail: sem checkout = sem pagamento pra marcar
-        raise Conflict(
-            "Lead não tem checkout de pagamento.", code="NO_CHECKOUT"
-        )
+        raise Conflict("Lead não tem checkout de pagamento.", code="NO_CHECKOUT")
     lead_iface.mark_paid(
         provider=lead.payment.provider,
         provider_payment_id=lead.payment_id,

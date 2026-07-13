@@ -72,9 +72,9 @@ def resolve_for_source(*, user, source_type: str) -> None:
 def get_active_blocks(user) -> list[ValidationBlock]:
     """Blocos NÃO resolvidos do usuário (ordem: mais recente primeiro)."""
     return list(
-        ValidationBlock.objects.filter(
-            user=user, resolved_at__isnull=True
-        ).order_by("-created_at")
+        ValidationBlock.objects.filter(user=user, resolved_at__isnull=True).order_by(
+            "-created_at"
+        )
     )
 
 
@@ -86,10 +86,9 @@ def get_by_id(*, user, block_id: int) -> ValidationBlock | None:
 def resolve_by_id(*, user, block_id: int) -> ValidationBlock | None:
     """Resolve 1 bloco ativo por ID. Retorna o bloco resolvido ou None se não pertence ao user / já
     resolvido. Endpoint explícito do front (modal "dispensar") — em geral o bloco resolve no upload."""
-    block = (
-        ValidationBlock.objects.filter(id=block_id, user=user, resolved_at__isnull=True)
-        .first()
-    )
+    block = ValidationBlock.objects.filter(
+        id=block_id, user=user, resolved_at__isnull=True
+    ).first()
     if block is None:
         return None
     from django.utils import timezone
@@ -102,7 +101,9 @@ def resolve_by_id(*, user, block_id: int) -> ValidationBlock | None:
 
 def to_dict(block: ValidationBlock) -> dict:
     return {
-        "external_id": str(block.id),  # ponytail: pk como external_id; model não herda ExternalIdModel
+        "external_id": str(
+            block.id
+        ),  # ponytail: pk como external_id; model não herda ExternalIdModel
         "source_type": block.source_type,
         "title": block.title,
         "description": block.description,

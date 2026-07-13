@@ -284,7 +284,6 @@ def _has_education(enr: Enrollment) -> bool:
 
 def _advance_to(enr: Enrollment, target: str) -> None:
     """Avança pra `target` PULANDO seções já completas (chain-skip, plan/13)."""
-    from users.roles import _address_proof
 
     user_ext = str(enr.user.external_id)
     status = target
@@ -293,9 +292,8 @@ def _advance_to(enr: Enrollment, target: str) -> None:
         # completo E comprovante de residência APROVADO. Antes checava só is_complete — e como o
         # Address é compartilhado por external_id entre funis (candidate/promotor), um endereço já
         # preenchido em OUTRO funil fazia o chain-skip pular o gate KYC do comprovante (bypass).
-        if (
-            status == _S.ADDRESS
-            and address_iface.is_complete(address_iface.get_by_external_id(user_ext))
+        if status == _S.ADDRESS and address_iface.is_complete(
+            address_iface.get_by_external_id(user_ext)
         ):
             status = _S.EDUCATION
             continue
@@ -367,11 +365,8 @@ def set_address_data(*, user_external_id: str, **fields) -> dict:
 
 def _advance_address(enr: Enrollment, user_external_id: str) -> None:
     """Endereço completo → EDUCATION. Comprovante validado em background (rejeição = ValidationBlock)."""
-    if (
-        enr.status == _S.ADDRESS
-        and address_iface.is_complete(
-            address_iface.get_by_external_id(user_external_id)
-        )
+    if enr.status == _S.ADDRESS and address_iface.is_complete(
+        address_iface.get_by_external_id(user_external_id)
     ):
         _advance_to(enr, _S.EDUCATION)
 
@@ -382,7 +377,9 @@ def upload_address_proof(*, user_external_id: str, upload) -> dict:
     rejeição vira ValidationBlock, não trava o wizard)."""
     from users.documents import service as documents_iface
 
-    enr = _require(user_external_id)  # sem gate de status: aceita enquanto não concluída
+    enr = _require(
+        user_external_id
+    )  # sem gate de status: aceita enquanto não concluída
     documents_iface.upload_photo(user_external_id, "address_proof_photo", upload)
     # ponytail: re-upload resolve o bloco imediatamente; análise roda em background
     blocks.resolve_for_source(user=enr.user, source_type="address_proof")

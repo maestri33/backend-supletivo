@@ -23,7 +23,10 @@ def _wrap(task_name: str, fn, *args, **kwargs) -> None:
         logger.info("candidate.task_ok", task=task_name, args=str(args)[:200])
     except Exception as exc:  # noqa: BLE001 — Django-Q silenciaria
         logger.exception(
-            "candidate.task_failed", task=task_name, args=str(args)[:200], error=str(exc)
+            "candidate.task_failed",
+            task=task_name,
+            args=str(args)[:200],
+            error=str(exc),
         )
 
 

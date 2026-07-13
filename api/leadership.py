@@ -20,7 +20,12 @@ from ninja import Field, File, Router, Schema
 from ninja.files import UploadedFile
 
 from api.auth import require_roles
-from api.base import COMMON_ERROR_REGISTRY, add_auth_refresh, build_group, resolve_rg_slot
+from api.base import (
+    COMMON_ERROR_REGISTRY,
+    add_auth_refresh,
+    build_group,
+    resolve_rg_slot,
+)
 from core.net import source_ip
 from api.schemas import TokenOut
 from users.auth import service as auth_iface
@@ -34,7 +39,9 @@ from users.roles.promoter import service as promoter_iface
 from users.roles.student import service as student_iface
 from users.roles.training import service as training_iface
 
-_ERROR_REGISTRY = COMMON_ERROR_REGISTRY + """
+_ERROR_REGISTRY = (
+    COMMON_ERROR_REGISTRY
+    + """
 ### Códigos específicos do coordenador (leadership)
 
 | code | quando | extras |
@@ -59,6 +66,7 @@ _ERROR_REGISTRY = COMMON_ERROR_REGISTRY + """
 `GET /students` usa `limit`/`offset` e devolve `{items, total, limit, offset}` (`PaginatedOut`).
 Demais listas são arrays diretos.
 """
+)
 
 api = build_group(
     "leadership",

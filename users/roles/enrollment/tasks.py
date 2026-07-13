@@ -20,10 +20,13 @@ logger = structlog.get_logger()
 def _wrap(task_name: str, fn, *args, **kwargs) -> None:
     try:
         fn(*args, **kwargs)
-        logger.info(f"enrollment.task_ok", task=task_name, args=str(args)[:200])
+        logger.info("enrollment.task_ok", task=task_name, args=str(args)[:200])
     except Exception as exc:  # noqa: BLE001 — Django-Q silenciaria
         logger.exception(
-            "enrollment.task_failed", task=task_name, args=str(args)[:200], error=str(exc)
+            "enrollment.task_failed",
+            task=task_name,
+            args=str(args)[:200],
+            error=str(exc),
         )
 
 
