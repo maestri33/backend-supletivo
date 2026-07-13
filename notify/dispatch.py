@@ -178,10 +178,12 @@ def _to_lan(url: str) -> str:
 
 
 def _whatsapp_body(notif: Notification) -> str:
-    """Texto do WhatsApp: título em negrito + corpo (sem título, só o corpo)."""
+    """Texto do WhatsApp: título em negrito + corpo, com o markdown do body convertido p/ a
+    marcação nativa do WhatsApp (o body é escrito em md — no e-mail vira HTML via md_to_html)."""
+    body = sanitize.for_whatsapp(notif.text)
     if notif.title:
-        return f"*{notif.title}*\n\n{notif.text}"
-    return notif.text
+        return f"*{notif.title}*\n\n{body}"
+    return body
 
 
 def _send_whatsapp_text(notif: Notification) -> None:

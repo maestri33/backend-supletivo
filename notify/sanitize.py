@@ -32,6 +32,36 @@ _EMOJI = re.compile(
 )
 _MULTISPACE = re.compile(r"[ \t]{2,}")
 
+# --- WhatsApp: markdown → marcação nativa do WhatsApp ---------------------------------
+# O WhatsApp usa `*x*` p/ negrito e `_x_` p/ itálico, e não renderiza `[t](u)` nem headings.
+# `**x**`/`__x__` (negrito md) → `*x*`; `*x*` (itálico md) → `_x_`; `[t](u)` → `t (u)`.
+_WA_LINK = re.compile(r"\[([^\]]+)\]\(([^)\s]+)\)")
+_WA_BOLD_STAR = re.compile(r"\*\*(.+?)\*\*")
+_WA_BOLD_UNDER = re.compile(r"__(.+?)__")
+_WA_ITALIC = re.compile(r"\*([^*\n]+?)\*")
+_WA_HEADING = re.compile(r"(?m)^[ \t]{0,3}#{1,6}[ \t]*")
+_WA_QUOTE = re.compile(r"(?m)^[ \t]{0,3}>[ \t]?")
+_BOLD_TOKEN = "\x00"  # placeholder p/ negrito, evita colidir com a troca do itálico
+
+
+def for_whatsapp(md: str | None) -> str:
+    """Converte markdown (o mesmo body do e-mail) para a marcação NATIVA do WhatsApp.
+
+    `**x**`/`__x__` → `*x*` (negrito); `*x*` → `_x_` (itálico); `[t](u)` → `t (u)`; remove
+    `#`/`>` de heading/citação. Preserva emojis e quebras de linha. Entrada vazia → "".
+    """
+    if not md:
+        return ""
+    out = _WA_LINK.sub(r"\1 (\2)", md)
+    # negrito primeiro, tokenizado, senão o `*` resultante seria pego pela troca do itálico.
+    out = _WA_BOLD_STAR.sub(rf"{_BOLD_TOKEN}\1{_BOLD_TOKEN}", out)
+    out = _WA_BOLD_UNDER.sub(rf"{_BOLD_TOKEN}\1{_BOLD_TOKEN}", out)
+    out = _WA_ITALIC.sub(r"_\1_", out)
+    out = out.replace(_BOLD_TOKEN, "*")
+    out = _WA_HEADING.sub("", out)
+    out = _WA_QUOTE.sub("", out)
+    return out
+
 
 def for_tts(text: str | None, *, link_word: str = "o link") -> str:
     """Limpa `text` para leitura em voz (TTS). Devolve a string pronta pro provider de TTS.
