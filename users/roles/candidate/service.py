@@ -662,6 +662,11 @@ def run_document_validation(candidate_id: int, slot: str) -> None:
         sub.refresh_from_db()
         if sub.validation_status != doc_ai.PENDING:
             return
+        # G11: a foto deste slot trocou no meio tempo (re-upload) → o veredito é da foto velha,
+        # descarta. `path` foi capturado no início; comparar com o atual identifica a troca (o
+        # check de status sozinho não pega um re-upload que re-arma PENDING).
+        if getattr(sub, field, None) != path:
+            return
         result = sub.validation_result or {}
         photos = dict(result.get("photos") or {})
         photos[slot] = {"status": status, "reason": reason}
@@ -733,6 +738,12 @@ def _doc_extract_and_finish(cand: Candidate, sub, result: dict, images: list) ->
             "IA indisponível na extração dos dados — enviado para revisão manual do coordenador.",
             result,
         )
+        return
+    # guard do worker-zumbi: o OCR + extração acima levam ~15s; se NESSE meio o sweep do TTL
+    # (worker lento) ou o coordenador já decidiu, NÃO sobrescrever a decisão. Mesma régua que a
+    # visão aplica no re-check acima — aqui fecha a janela do estágio de extração.
+    sub.refresh_from_db()
+    if sub.validation_status != doc_ai.PENDING:
         return
     result["extracted"] = data
     match = str(data.get("name_match") or "").strip().lower()
