@@ -1,8 +1,9 @@
 """Signals centralizados de ValidationBlock — UM ponto que ouve rejeição/resolução de TODOS os
-models com `validation_status`: RG, CNH, AddressProof, StudentDocument.
+models com status de validação: RG, CNH, AddressProof, StudentDocument (`validation_status`),
+Enrollment e Candidate (`selfie_status`), Submission (`status` do treino).
 
-Quando `validation_status` vira `rejected` → cria/atualiza bloco no User.
-Quando vira `pending` (re-upload) → resolve o bloco daquela fonte.
+Quando o status vira `rejected` → cria/atualiza bloco no User.
+Quando vira `pending` (re-upload) ou `approved` → resolve o bloco daquela fonte.
 Best-effort: erro no signal nunca quebra o save do model.
 
 Conexão em `users/apps.py:UsersConfig.ready()`.
