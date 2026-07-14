@@ -58,41 +58,29 @@ def _read_status(instance) -> str | None:
     )
 
 
-def _route_for(user, source_type: str) -> str:
-    """Rota do frontend conforme a role ATIVA do usuário (a primeira que casar)."""
-    from users.roles import interface as roles
-
-    active = roles.active_roles(user)
-
-    if "enrollment" in active:
-        return _ENROLLMENT_ROUTES.get(source_type, "/enrollment")
-    if "candidate" in active:
-        return _CANDIDATE_ROUTES.get(source_type, "/candidate")
-    if "student" in active:
-        return _STUDENT_ROUTES.get(source_type, "/student")
-    # fallback genérico
-    return "/enrollment"
-
-
 _ENROLLMENT_ROUTES = {
     "rg": "/enrollment/documents/rg",
     "cnh": "/enrollment/documents",
     "address_proof": "/enrollment/address",
 }
-_CANDIDATE_ROUTES = {
-    "rg": "/candidate/document",
-    "cnh": "/candidate/document",
-    "address_proof": "/candidate/address",
-}
-_STUDENT_ROUTES = {
-    "military_service": "/student/documents",
-    "certificate": "/student/documents",
-    "transcript": "/student/documents",
-    "blood_type": "/student/documents",
-    "address_proof": "/student/documents",
-    "id_card": "/student/documents",
-    "birth_certificate": "/student/documents",
-}
+
+
+def _route_for(user, source_type: str) -> str:
+    """Rota do frontend conforme a role ATIVA do usuário (a primeira que casar)."""
+    from users.roles import interface as roles
+
+    active = roles.active_roles(user)
+    if "enrollment" in active:
+        return _ENROLLMENT_ROUTES.get(source_type, "/enrollment")
+    if "candidate" in active:
+        return (
+            "/candidate/address"
+            if source_type == "address_proof"
+            else "/candidate/document"
+        )
+    if "student" in active:
+        return "/student/documents"  # todo doc do student cai na mesma tela
+    return "/enrollment"
 
 
 def _on_validation_change(sender, instance, **kwargs) -> None:

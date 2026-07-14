@@ -170,15 +170,11 @@ def register(*, role: str, phone: str, cpf: str, email: str | None = None) -> di
         raise Conflict("E-mail já cadastrado.", code="EMAIL_EXISTS")
 
     # veracidade REAL (§8) — CPF existe (identidade) + telefone existe no WhatsApp.
-    # ponytail: se CPFHub cair, criamos o usuário com os dados fornecidos + flag de verificação.
-    identity = None
+    # ponytail: se CPFHub cair (ou não achar), criamos o usuário com os dados fornecidos + flag.
     try:
-        identity = _lookup_cpf(cpf)
+        identity = _lookup_cpf(cpf)  # None = não encontrado; exceção = serviço fora
     except IntegrationError:
-        identity = None  # CPFHub fora — segue sem travar
-
-    if identity is None:
-        identity = None  # não encontrou OU serviço fora
+        identity = None
 
     # WhatsApp: best-effort. Se cair, cria sem validar — o OTP que resolve depois.
     resolved_phone = phone
