@@ -23,6 +23,7 @@ logger = structlog.get_logger()
 def _resolve_context(instance) -> tuple | None:
     """Devolve (user, source_type, title_prefix) ou None se não mapeado."""
     from users.documents.models import RG, CNH, AddressProof
+    from users.roles.candidate.models import Candidate
     from users.roles.enrollment.models import Enrollment
     from users.roles.student.models import StudentDocument
     from users.roles.training.models import Submission
@@ -33,8 +34,8 @@ def _resolve_context(instance) -> tuple | None:
         return (instance.document.user, "cnh", "Documento CNH")
     if isinstance(instance, AddressProof):
         return (instance.document.user, "address_proof", "Comprovante de endereço")
-    if isinstance(instance, Enrollment):
-        # ponytail: a selfie mora no Enrollment.selfie_status — trata igual validation_status.
+    if isinstance(instance, (Enrollment, Candidate)):
+        # ponytail: a selfie mora no `selfie_status` (Enrollment e Candidate) — trata igual validation_status.
         return (instance.user, "selfie", "Selfie")
     if isinstance(instance, StudentDocument):
         return (
