@@ -38,6 +38,7 @@ desenho apenas **não fecha a porta** pra ele (ver Fase 3).
 | 4 | **Inbound:** o serviço vira o dono do webhook da Evolution (persiste o evento bruto), mas **relay por conta é fase 3** | o bot está morto; ninguém consome inbound hoje. O serviço só guarda; quando o bot renascer (fora do backend), pluga no relay |
 | 5 | **`external_id` gerado pelo CLIENTE** (SDK) e aceito pelo serviço | preserva o contrato de hoje: `send()` devolve o handle NA HORA e nunca bloqueia (§12) mesmo se o serviço estiver fora — o SDK enfileira retry local com o mesmo UUID |
 | 6 | **Validação de telefone vira endpoint** (`POST /v1/phone/check`) | o register (`users/auth/service.py`) usa `check_numbers` da Evolution; com o endpoint, o backend zera credencial de Evolution/SMTP/ElevenLabs no `.env` |
+| 7 | **TTS via omnirouter** (Victor 2026-07-17): o serviço chama o omnirouter (`10.1.30.35`, LAN/DMZ) direto — NÃO embute client de provider (ElevenLabs) | keys de provider moram no omnirouter; o notify gera → recebe o áudio → serve o mp3 do próprio MEDIA_ROOT (Evolution busca pela LAN). Demais funções de IA do backend (storytelling, bot, OCR): análise CASO A CASO, fora deste ciclo |
 
 ## Fase 1 — o serviço (repo novo, sem tocar o backend)
 
@@ -59,8 +60,9 @@ desenho apenas **não fecha a porta** pra ele (ver Fase 3).
   send_media/send_whatsapp_audio/check_numbers. Muda só a origem da config: `.env` → row do número.
 - `integrations/communication/mail` — client SMTP + templates HTML (`md_to_html`, `media_html`,
   wrappers). Config: `.env` → `MailIdentity` da conta.
-- `integrations/ai/elevenlabs.py` + `tts_voice.py` — SÓ o TTS (não a engine LLM). O mp3 é gerado
-  e servido pelo PRÓPRIO serviço (MEDIA_ROOT dele); a Evolution busca pela URL LAN do serviço.
+- TTS: client HTTP fino pro **omnirouter** (`10.1.30.35`, decisão 7) — contrato a confirmar com o
+  Victor. O mp3 é salvo e servido pelo PRÓPRIO serviço (MEDIA_ROOT dele); a Evolution busca pela
+  URL LAN do serviço. Nada de `integrations/ai` portado.
 - `notify/sanitize.py` (for_whatsapp/for_tts) e `notify/dispatch.py` — o claim em 3 fases
   (G16: CLAIM sob lock → envio fora da transação → resultado; recuperação por texto sem regenerar
   TTS) porta INTEIRO. É a parte mais valiosa e mais testada do app.
@@ -118,8 +120,10 @@ Onboarding de número (criar instância + QR + status de conexão) começa **pel
   retry no SDK; o OTP já tolera envio assíncrono.
 - **Duas filas** (Django-Q no backend p/ retry do SDK + Django-Q no serviço p/ dispatch). Aceito:
   cada lado cuida da própria resiliência.
-- **Segredo por conta no DB do serviço** (SMTP/ElevenLabs): avaliar criptografia at-rest simples
-  (Fernet com chave no `.env`) na implementação.
+- **Segredo por conta no DB do serviço** (SMTP): avaliar criptografia at-rest simples (Fernet com
+  chave no `.env`) na implementação.
+- **Omnirouter fora do ar** → o dispatch já tem o fallback certo: voice-note falhou → cai pra
+  TEXTO no WhatsApp (o marco nunca fica mudo). Comportamento portado como está.
 - **`idempotency_key` passa a ser única POR CONTA** (hoje é global) — sem impacto pro backend.
 - O serviço NÃO valida/renderiza teor: sanitização de TTS e conversão md→WhatsApp/HTML continuam
   nele (são de ENTREGA, não de teor).
