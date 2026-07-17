@@ -1,7 +1,8 @@
 # HANDOFF — desmembramento do notify (continuar em sessão local)
 
-> **Para a próxima sessão (local) do Victor.** Estado em 2026-07-17: **plano fechado e aprovado
-> nas decisões principais; ZERO código implementado.** A fonte de verdade do plano é
+> **Para a próxima sessão (local) do Victor.** Estado em 2026-07-17: **plano fechado e aprovado;
+> Fase 1 IMPLEMENTADA (scaffold + models + ports + API + TTS + deploy scripts).** Repo:
+> https://github.com/maestri33/notify-server. A fonte de verdade do plano é
 > [[wiki/notify/servico-multi-tenant]] (mesmo diretório) — leia ELE antes de codar; este handoff
 > é só o mapa de "onde paramos + o que fazer primeiro".
 > Branch: `claude/notify-multi-tenant-refactor-0q6if1` · PR draft: **#45** (só wiki; mergear
@@ -29,17 +30,25 @@ as MESMAS assinaturas de `send()`/`send_event()` (63 callsites intocados).
    UUID, nunca bloqueia o caller (§12).
 7. Infra confirmada: LXC nova (padrão `backend-v7m`), Postgres geral CT 2100, VPN-only.
 
-## ⚠️ Omnirouter — instrução do Victor pra implantação
-**Ao implantar o notify-server, CONFIGURAR O MCP DO OMNIROUTER** na sessão/projeto (ex.:
-`.mcp.json` do repo novo), para que os agentes consultem o contrato real dele. A sessão remota
-que escreveu este plano NÃO tinha o MCP (verificado 2026-07-17) e `10.1.30.35` é VPN — por isso o
-contrato de TTS ainda é suposição (OpenAI-compatible? devolve bytes?). **Primeiro passo local:
-plugar o MCP (ou bater direto na LAN) e cravar o contrato ANTES de codar o client de TTS.**
+## ✅ Omnirouter — contrato CRAVADO (2026-07-17, sessão local)
+
+Contrato confirmado via LAN (`10.1.30.35`):
+
+- **Endpoint:** `POST http://10.1.30.35/v1/audio/speech` (OpenAI-compatible)
+- **Body:** `{"model":"minimax/speech-2.8-hd","input":"texto","voice":"Portuguese_SereneWoman"}`
+- **Response:** bytes do mp3 (200 OK, Content-Type: audio/mpeg)
+- **Provider:** MiniMax via OmniRoute. ElevenLabs indisponível (pagamento pendente).
+- **Vozes:** `Portuguese_SereneWoman` (feminina), `Portuguese_GentleTeacher` (masculina)
+- **Regra cruzada:** homem recebe voz feminina, mulher recebe voz masculina (NÃO "corrigir")
+- **MCP:** disponível em `http://10.1.30.35/api/mcp/stream` (omniroute v3.8.48)
+- **Auth:** não necessária para TTS (MiniMax rota direta). ElevenLabs precisa resolver pagamento.
+
+Client implementado em `tts/client.py` do notify-server.
 
 ## Pendências que destravam código (perguntar/verificar primeiro)
-1. **Contrato TTS do omnirouter** (endpoint, auth, bytes vs URL) — via MCP/LAN, ver acima.
+1. ~~**Contrato TTS do omnirouter**~~ ✅ CRAVADO (ver acima)
 2. **Licença do evolution-go** (preço/termos; aceitamos heartbeat externo em prod?).
-3. **Nome do repo** — sugestão em aberto: `notify-server`.
+3. ~~**Nome do repo**~~ ✅ `notify-server` — https://github.com/maestri33/notify-server
 
 ## Ordem de trabalho sugerida (Fase 1 — detalhes no plano)
 1. Cravar contrato do omnirouter (pendência 1).
