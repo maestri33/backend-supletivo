@@ -23,9 +23,9 @@ as MESMAS assinaturas de `send()`/`send_event()` (63 callsites intocados).
    passa `voice` pronto; regra CRUZADA M/F preservada: homem recebe voz feminina — NÃO "corrigir").
 4. Demais funções de IA (storytelling, bot, OCR): caso a caso — no corte, storytelling fica no
    backend via `body_md_override`.
-5. Evolution: interface `WhatsAppDriver` abstraída; corte na **v2 atual**; **evolution-go** como
-   driver pra números novos QUANDO a licença destravar (PTT via `/send/media` type audio e check
-   via `/user/check` já confirmados na doc; detalhes na avaliação dentro do plano).
+5. Evolution: **v2 DEFINITIVA para todos os números** — **evolution-go DESCARTADO** (Victor
+   2026-07-17: "desista do evolution-go, fique no v2 mesmo"; licença + heartbeat não compensam).
+   A interface `WhatsAppDriver`, se já implementada, pode ficar — mas sem segundo driver planejado.
 6. `external_id` gerado pelo cliente (SDK) — `send()` devolve handle na hora, retry com o mesmo
    UUID, nunca bloqueia o caller (§12).
 7. Infra confirmada: LXC nova (padrão `backend-v7m`), Postgres geral CT 2100, VPN-only.
@@ -47,7 +47,8 @@ Client implementado em `tts/client.py` do notify-server.
 
 ## Pendências que destravam código (perguntar/verificar primeiro)
 1. ~~**Contrato TTS do omnirouter**~~ ✅ CRAVADO (ver acima)
-2. **Licença do evolution-go** (preço/termos; aceitamos heartbeat externo em prod?).
+2. ~~**Licença do evolution-go**~~ ✅ RESOLVIDA POR DESCARTE (Victor 2026-07-17): fica na
+   Evolution v2 mesmo — sem piloto, sem segundo driver.
 3. ~~**Nome do repo**~~ ✅ `notify-server` — https://github.com/maestri33/notify-server
 
 ## Ordem de trabalho sugerida (Fase 1 — detalhes no plano)
