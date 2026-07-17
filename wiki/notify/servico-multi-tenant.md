@@ -55,16 +55,19 @@ mídia com MinIO/S3 opcional, QR pairing, Docker/binário leve.
 - **Postgres:** sim — 2 connection-strings (`POSTGRES_AUTH_DB`, `POSTGRES_USERS_DB`), mensagens
   opcionais no DB. Cabe no Postgres geral (CT 2100) com databases `evogo_*`, e o binário cabe na
   MESMA LXC do notify (ok do Victor).
-- **NÃO é drop-in da Evolution v2:** paths (`POST /message/sendText` sem instância no path,
-  `/instance/create`, `GET /instance/{name}/qrcode`), formato de resposta e payload de webhook
+- **NÃO é drop-in da Evolution v2:** paths (`/send/text`, `/send/media`, `/instance/create`,
+  `GET /instance/{name}/qrcode`), formato de resposta e payload de webhook
   (`instanceId`/`instanceToken`/`event`) todos DIFERENTES → client próprio, não o porte do atual.
-- **⚠️ Bloqueios pro nosso fluxo (hoje):** README não documenta **voice-note/PTT** (o modo TTS
-  precisa — na v2 é `sendWhatsAppAudio`) nem **check de número** (`whatsappNumbers` — o register
-  precisa). E **exige LICENÇA**: API responde 503 até ativar no Manager; heartbeat periódico ao
-  license-server = dependência externa de produção; preço não divulgado.
-- **Veredito:** viável como SEGUNDO driver, atrás de uma interface `WhatsAppDriver` no serviço
+- **Capacidades críticas CONFIRMADAS (2026-07-17, wiki `guias-api/`):** voice-note = `/send/media`
+  com `type: "audio"` — **converte automaticamente qualquer áudio pra Opus (PTT)** (a v2 usa o
+  `sendWhatsAppAudio` dedicado — "um pouco diferente", como o Victor ouviu); check de número =
+  `POST /user/check` → `IsInWhatsapp` por número (equivale ao `whatsappNumbers` da v2).
+- **⚠️ Bloqueio restante: LICENÇA** — API responde 503 até ativar no Manager; heartbeat periódico
+  ao license-server = dependência externa de produção; preço/termos não divulgados.
+- **Veredito:** viável como driver, atrás da interface `WhatsAppDriver` no serviço
   (send_text/send_media/send_audio/check_number/create_instance/qr — barato, já que o client será
-  portado mesmo). Piloto num número NOVO quando: licença esclarecida + PTT + check confirmados.
+  portado mesmo). Números NOVOS (ex.: conta default) podem já nascer nele quando a licença
+  destravar; o número do Supletivo (conectado na v2) migra por último, se valer.
 
 ## Fase 1 — o serviço (repo novo, sem tocar o backend)
 
@@ -155,8 +158,8 @@ painel é fase 3 — no v1 a única instância nova é a da conta default (núme
 1. **Contrato do omnirouter** — não há MCP dele nesta sessão (verificado 2026-07-17) e `10.1.30.35`
    é VPN (inalcançável daqui). Preciso: endpoint de TTS (OpenAI-compatible `POST /v1/audio/speech`?),
    auth, e se devolve BYTES do áudio (suposição do plano) ou URL.
-2. **evolution-go** — esclarecer a licença (preço/termos; aceitamos heartbeat externo em prod?) e
-   confirmar PTT + check de número (não documentados). Enquanto isso: driver v2 no corte.
+2. **evolution-go** — esclarecer a licença (preço/termos; aceitamos heartbeat externo em prod?).
+   PTT e check de número JÁ confirmados na doc (avaliação acima). Enquanto isso: driver v2 no corte.
 3. **Storytelling no serviço** (via omnirouter) ou permanece no backend com `body_md_override`?
    Plano assume backend no corte (fase 2 item 3).
 4. **Nome do repo** — `notify-server` ok, ou outro?
