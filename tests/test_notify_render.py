@@ -10,12 +10,17 @@ def test_placeholder_simples():
 
 def test_placeholder_hifen():
     """{nome-completo} funciona via alias hífen→underscore."""
-    assert render("Sr. {nome-completo}", {"nome_completo": "João Silva"}) == "Sr. João Silva"
+    assert (
+        render("Sr. {nome-completo}", {"nome_completo": "João Silva"})
+        == "Sr. João Silva"
+    )
 
 
 def test_placeholder_ausente_fica_literal():
     """Placeholder não-declarado no ctx fica como está (não quebra envio)."""
-    assert render("Oi {nome}, valor {valor}", {"nome": "João"}) == "Oi João, valor {valor}"
+    assert (
+        render("Oi {nome}, valor {valor}", {"nome": "João"}) == "Oi João, valor {valor}"
+    )
 
 
 def test_alias_nome_name():

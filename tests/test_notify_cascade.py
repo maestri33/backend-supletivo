@@ -13,7 +13,9 @@ def test_trigger_cascade_com_template():
     Trigger.objects.create(template=t, fires_on="teste")
     assert Trigger.objects.count() == 1
     t.delete()
-    assert Trigger.objects.count() == 0, "Trigger sobreviveu ao delete do Template (cascade quebrado)"
+    assert Trigger.objects.count() == 0, (
+        "Trigger sobreviveu ao delete do Template (cascade quebrado)"
+    )
 
 
 def test_template_sem_trigger_deleta_normal():
