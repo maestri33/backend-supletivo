@@ -1,11 +1,16 @@
 # notify → serviço independente multi-tenant (plano de desmembramento)
 
-> **ESTADO: PLANO** (nada implementado ainda). Decisões do Victor incorporadas em 2026-07-17;
-> pendências abertas na [última seção](#pendências-abertas-victor). Contexto: o notify hoje é um
-> app in-process do monólito ([[wiki/notify/notify]]); a decisão é desmembrá-lo em um **serviço
-> próprio, com servidor próprio**, onde cada cliente ("conta") tem **seu número de WhatsApp**, seu
-> e-mail (mailcow) e sua voz de TTS. O notify vira **universal** (todos os serviços do Victor,
-> dentro da VPN), **comandado pelo staff** — o backend Supletivo é só o primeiro cliente.
+> **ESTADO: FASE 1 E FASE 2 COMPLETAS** (cutover em produção 2026-07-18, `NOTIFY_MODE=remote`
+> no ar). Detalhes de implementação, decisões tomadas durante o cutover (implementação paralela
+> descartada, reconciliação de schema, migração do OTP em 2 passos) e pendências reais em
+> `wiki/notify/HANDOFF-fase1-implementada.md`. Este documento fica como registro histórico do
+> PLANO original — as seções abaixo descrevem a intenção de 2026-07-17, nem tudo é literal
+> (ex.: Fase 2 item 1 não usa `external_id` gerado pelo cliente como chave canônica — vira
+> `idempotency_key`; ver handoff). Contexto original: o notify era um app in-process do monólito
+> ([[wiki/notify/notify]]); a decisão foi desmembrá-lo em um **serviço próprio, com servidor
+> próprio**, onde cada cliente ("conta") tem **seu número de WhatsApp**, seu e-mail (mailcow) e
+> sua voz de TTS. O notify é **universal** (todos os serviços do Victor, dentro da VPN),
+> **comandado pelo staff** — o backend Supletivo é só o primeiro cliente.
 
 ## Visão
 

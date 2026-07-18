@@ -113,22 +113,69 @@ WhatsAppNumber.objects.create(
 curl http://localhost:8100/v1/health
 ```
 
-## O que falta pra Fase 2 (cutover do backend)
-NÃO iniciar sem validação real da Fase 1 aprovada pelo Victor.
+## Fase 2 — CUTOVER COMPLETO em 2026-07-18
 
-1. **SDK no monólito** — `notify/interface/send.py` vira HTTP client (mesma assinatura, 63 callsites intocados)
-2. **Seed dos templates** — migração one-time do backend pro serviço
-3. **OTP** — trocar FK por `notification_external_id` (CharField)
-4. **Painel staff** — front passa a falar com notify-server direto
-5. **Register** — trocar client Evolution por `POST /v1/phone/check`
-6. **Rollout com flag** — `NOTIFY_MODE=local|remote` no backend
+`NOTIFY_MODE=remote` no ar em produção (CT 30101 → CT 30114, conta `supletivo`). `send()`,
+`send_event()` (28 dos 36 callsites reais — lead/matrícula/candidato/hub/finance/OTP/bot/...),
+OTP, `phone/check` (register/change_phone/check) e o painel staff (`/api/v1/staff/notify/*`,
+dual-write local+servidor) todos passando pelo notify-server. Testado ao vivo pós-flip: WhatsApp,
+`send_event`, `phone/check` — `sent`/OK. Webhook da Evolution repontado de `10.1.30.34:8001`
+(CT 3034, morta — inbound estava se perdendo desde sempre) pra
+`http://notify.v7m.org/v1/webhook/evolution/default`, testado com payload sintético (`{"status":
+"ok"}`). Rollback a qualquer momento: `NOTIFY_MODE=local` no `.env` + `systemctl restart
+backend-web backend-qcluster`.
 
-## Fatos do monólito que a implementação NÃO pode esquecer
-- `users/auth/service.py:98` — register usa `resolve_br_number`+`check_numbers` → vira `/v1/phone/check`
-- `users/auth/otp/service.py:165` — OTP guarda FK pra Notification (Fase 2 troca por string)
-- `api/staff_notify.py` — painel staff atual: é o contrato a reproduzir no serviço
-- `bot/` — NÃO tocar: quebrado, sai depois; só não fechar porta do relay inbound
-- Django-Q re-executa task em erro: claim G16 preservado (recuperação por TEXTO sem regenerar TTS)
+### ⚠️ Implementação paralela descoberta e revertida no dia do cutover
+Enquanto a Fase 2 era feita numa sessão, OUTRA sessão Claude Code implementou (e o Victor mergeou,
+PR #46) uma versão própria e mais enxuta direto no branch de prod — sem `send_event`/painel staff
+no corte, e com um bug de contrato real no `phone/check` (`{"phone": ...}` em vez de `{"numbers":
+[...]}`, que teria dado 422 assim que ligasse o modo remote; nunca validada contra o servidor
+real). Foi substituída pela versão mais completa e testada ao vivo. **Nada foi perdido**: essa
+implementação inteira (3 commits) está preservada no branch `backup-fase2-parallela-pr46` em
+`/opt/backend-supletivo`, caso precise de referência.
 
-## Branch do monólito
-`claude/notify-multi-tenant-refactor-0q6if1` — PR #45 (só wiki). Mergear quando Victor aprovar o texto.
+### Reconciliação de schema no meio do deploy
+A migração da implementação paralela já tinha rodado fisicamente contra o Postgres de produção
+(`users_otp_code.notification_external_id` criado como `uuid`, 29/29 rows copiadas) antes de eu
+perceber o conflito. Em vez de reverter, o código foi ajustado pro tipo já existente (`UUIDField`
+em vez de `CharField(64)` — mais correto mesmo, já que `send()`/`send_event()` sempre devolvem
+`str(uuid.uuid4())`) e as migrações `0033`/`0034` foram aplicadas com `--fake` (schema físico já
+batia, sem reexecutar SQL).
+
+### Migração do OTP em 2 passos (achado do review adversarial)
+A migração original (FK→string) fazia `AddField+RunPython+RemoveField` num passo só — se o
+`migrate` rodasse antes do `restart`, o código antigo (ainda esperando a FK) quebrava em toda
+query de `OtpCode` até o restart completar. Corrigido: `0033` (aditiva) e `0034` (remove a FK),
+aplicadas nessa ordem com restart entre elas. **Qualquer migração futura de model que remova
+coluna ainda em uso pelo código atualmente rodando deve seguir esse padrão de 2 passos.**
+
+### Pendências conscientemente adiadas (não bloqueiam nada)
+1. **Histórico local antigo** (160 `Notification` rows, 2026-07-01→18, tabela `notify_notification`
+   em `backend-supletivo`) — NÃO migrado pra conta `supletivo` no notify-server. Não há endpoint
+   de bulk-import no servidor hoje; a tabela local não foi removida (nem vai ser), então nada se
+   perde — só fica congelada como histórico pré-corte, consultável se precisar. Construir a
+   migração one-time fica pra quando/se fizer falta.
+2. **Descomissionamento do `notify/` local** (models, dispatch, seed, `integrations/communication/
+   {whatsapp,mail}`, `WHATSAPP_*`/`MAIL_*`/`ELEVENLABS_*` do `.env`) — item 9 do plano original.
+   Só depois de um período de estabilização em `remote` (o modo `local` é o rollback; remover o
+   código junto o invalidaria).
+3. **Bug pré-existente em `dispatch.py`** (monólito E notify-server, de antes da Fase 2): `tts_pending`
+   é calculado mas não entra na condição de early-exit do dispatch — `tts=True` sem `whatsapp=True`
+   fica preso em `pending` pra sempre. Não é alcançável por nenhum caller real (todo `send_event`
+   com TTS já implica `whatsapp=True`); só apareceu num teste manual de CLI com flags incomuns.
+   Não corrigido (fora do escopo da Fase 2, código de produção não tocado).
+4. **`extra=` kwarg inválido** em `users/roles/student/signals.py:24` (`send_event(..., extra=...)`)
+   — bug pré-existente, TypeError latente, capturado por except genérico. Não corrigido.
+
+## Fatos do monólito (arquivados — já implementados)
+- `users/auth/service.py` — register/change_phone/check usam `POST /v1/phone/check` no modo remote.
+- `users/auth/otp/service.py` — OTP guarda `notification_external_id` (UUIDField).
+- `api/staff_notify.py` — dual-write local+servidor no modo remote; `/history` proxia o servidor.
+- `bot/` — não tocado (segue dormente); `bot/worker.py` usa `send()`, que já roteia pelos 2 modos.
+- Django-Q re-executa task em erro: claim G16 preservado (recuperação por TEXTO sem regenerar TTS).
+
+## Branches
+- `claude/wave1-security` (CT 30101, prod) — Fase 2 completa, sincronizado com `origin`.
+- `backup-fase2-parallela-pr46` (CT 30101) — a implementação paralela descartada, preservada.
+- `claude/notify-fase2` (GitHub, `maestri33/backend-supletivo`) — clone de trabalho, mesmo conteúdo.
+- `fase2-api-additions` (GitHub, `maestri33/notify-server`) — aditivos da API já deployados em prod.
