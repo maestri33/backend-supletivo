@@ -1,6 +1,9 @@
-# Fase 2 (notify cutover): reverso da 0012 — a FK OtpCode.notification volta a ser a coluna solta
-# notification_external_id (agora CharField, não UUIDField: guarda o id do notify-server como str).
-# Ordem: cria a coluna nova, copia o vínculo, só então remove a FK (não perde os logs de OTP).
+# Fase 2 (notify cutover) — passo 1/2: adiciona a coluna nova e copia o vínculo.
+#
+# A FK OtpCode.notification só é removida na migração seguinte (0034), depois do deploy
+# reiniciar os workers. Assim o código ANTIGO (que ainda declara a FK) continua rodando contra
+# um schema que ainda tem a coluna durante a janela migrate→restart, sem quebrar o login por OTP
+# no meio do deploy (achado do review adversarial: migração única quebrava OtpCode ali).
 
 from django.db import migrations, models
 
@@ -43,9 +46,5 @@ class Migration(migrations.Migration):
         ),
         migrations.RunPython(
             copy_otp_notification_external_id, restore_otp_notification
-        ),
-        migrations.RemoveField(
-            model_name="otpcode",
-            name="notification",
         ),
     ]
