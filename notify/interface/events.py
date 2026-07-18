@@ -92,12 +92,15 @@ def send_event(
       Útil quando o caller quer mandar SÓ um canal e não há Template cadastrado.
       `None` = usa `Template.channels` (ou default `whatsapp+email` sem row).
     """
-    # mesma tabela local nos 2 modos: fecha a duplicidade do flip local→remote (send.py).
-    hit = _send_iface.local_idempotent_hit(idempotency_key, caller=f"event:{event}")
-    if hit is not None:
-        return hit
-
     if settings.NOTIFY_MODE == "remote":
+        # só no ramo remote (achado do review: no local, Trigger.active PRECISA ser
+        # reavaliado a cada chamada — inclusive replay da mesma idempotency_key — e o
+        # pré-check aqui pularia essa checagem por completo, quebrando o kill-switch
+        # "sem código" pra qualquer caller com chave estável reusada). Mesma tabela local
+        # nos 2 modos: fecha a duplicidade do flip local→remote (send.py) sem tocar o local.
+        hit = _send_iface.local_idempotent_hit(idempotency_key, caller=f"event:{event}")
+        if hit is not None:
+            return hit
         return _send_event_remote(
             event,
             user=user,

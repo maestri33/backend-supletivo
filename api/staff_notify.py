@@ -531,9 +531,16 @@ def patch_template(request, event: str, payload: TemplatePatchIn):
 # ── DELETE (remove o Template + Trigger em cascata) ───────────────────────────
 @router.delete("/templates/{event}")
 def delete_template(request, event: str):
-    """APAGA o Template (e o Trigger em cascata — OneToOne). Próxima chamada do `send_event(event)`
-    cai no catálogo in-memory legado. Use com cuidado — o seed não vai recriar automaticamente
-    (use POST /restore-seed pra isso)."""
+    """APAGA o Template (e o Trigger em cascata — OneToOne). Use com cuidado — o seed não vai
+    recriar automaticamente (use POST /restore-seed pra isso).
+
+    NOTIFY_MODE=local: a próxima chamada de `send_event(event)` cai no catálogo in-memory
+    legado (`users.roles.notifications`). NOTIFY_MODE=remote: NÃO há esse fallback — o
+    notify-server não conhece o catálogo do monólito, então o evento simplesmente para de
+    disparar (404 tratado como no-op) até alguém restaurar o Template (review adversarial:
+    esse fallback só existe hoje pra 1 evento de baixo uso, `enrollment.concluded_referral`,
+    já quebrado por um bug pré-existente não relacionado — extra= inválido em
+    `student/signals.py`). Confirme os 2 lados (local + notify-server) antes de apagar em prod."""
     require_superuser(request.auth)
     t = Template.objects.filter(event=event).first()
     if t is None:
