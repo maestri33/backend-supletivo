@@ -2,7 +2,9 @@
 
 - Serviço: generate_and_send grava exatamente o retorno de send() em notification_external_id
   (funciona igual nos modos local e remote — send devolve str nos dois).
-- Migração 0033 (reverso da 0012): copia a FK notification -> string preservando a auditoria.
+- Migrações 0033+0034 (reverso da 0012, EM DOIS PASSOS): 0033 adiciona a coluna e copia a FK ->
+  string; 0034 remove a FK, só depois do restart (janela de deploy sem quebrar OTP — review
+  adversarial pegou a versão de passo único quebrando o login no meio do deploy).
 """
 
 import uuid
@@ -65,7 +67,11 @@ def test_otp_fluxo_real_aponta_pra_notification_local():
 
 @pytest.mark.django_db(transaction=True)
 def test_migracao_0033_copia_fk_para_string():
-    """Aplica a 0033 sobre uma row com FK preenchida e confere a cópia str(external_id)."""
+    """Aplica só a 0033 (AddField + RunPython copy) sobre uma row com FK preenchida.
+
+    A FK ainda existe nesse ponto (0034 — RemoveField — não rodou): é exatamente o estado em
+    que o código ANTIGO (ainda de pé até o restart) precisa continuar funcionando.
+    """
     executor = MigrationExecutor(connection)
     try:
         # volta pro estado pré-0033 (FK notification ainda existe)
@@ -81,13 +87,47 @@ def test_migracao_0033_copia_fk_para_string():
             user=user, code_hash="x" * 64, notification_id=notif.id
         )
 
-        # re-aplica a 0033 (AddField + RunPython copy + RemoveField) — grafo recarregado
+        # aplica SÓ a 0033 — a FK precisa sobreviver intacta (é o ponto de checagem do fix)
         executor = MigrationExecutor(connection)
-        new_state = executor.migrate(
-            [("users", "0033_otpcode_notification_external_id_and_more")]
+        mid_state = executor.migrate(
+            [("users", "0033_otpcode_notification_external_id")]
         )
-        saved = new_state.apps.get_model("users", "OtpCode").objects.get(id=otp.id)
+        saved = mid_state.apps.get_model("users", "OtpCode").objects.get(id=otp.id)
         assert saved.notification_external_id == str(notif.external_id)
+        assert saved.notification_id == notif.id  # FK ainda de pé (0034 não rodou)
+
+        # agora sim a 0034 remove a FK — nada além da coluna deve mudar
+        executor = MigrationExecutor(connection)
+        executor.migrate([("users", "0034_remove_otpcode_notification")])
     finally:
         # garante o schema final pros demais testes, mesmo se algo acima falhar
+        call_command("migrate", verbosity=0)
+
+
+@pytest.mark.django_db(transaction=True)
+def test_migracao_reversa_restaura_fk_com_dados_reais():
+    """Reverso ponta a ponta: do estado atual (head) até 0032, com uma row REAL preenchida.
+
+    Achado do review adversarial: o único teste que exercitava `restore_otp_notification` fazia
+    isso incidentalmente (setup migrando pra trás numa tabela ainda vazia). Este teste cria a row
+    no estado FINAL (só notification_external_id, sem FK) e confere que desmigrar restaura a FK.
+    """
+    # a suíte já está no head (pytest-django migra o DB de teste antes de qualquer teste rodar)
+    # — cria a row com os models REAIS, sem precisar de app registry histórico pra isso.
+    from notify.models import Notification
+
+    user = _user_com_phone("11999990013")
+    notif = Notification.objects.create(caller="users.auth.otp", text="codigo 654321")
+    otp = OtpCode.objects.create(
+        user=user, code_hash="y" * 64, notification_external_id=str(notif.external_id)
+    )
+
+    executor = MigrationExecutor(connection)
+    try:
+        # desmigra até 0032: passa por 0034 (reverso = re-adiciona a FK) e 0033 (reverso =
+        # restore_otp_notification, que precisa achar a Notification pela string e religar a FK)
+        old_state = executor.migrate([("users", "0032_validationblock")])
+        restored = old_state.apps.get_model("users", "OtpCode").objects.get(id=otp.id)
+        assert restored.notification_id == notif.id
+    finally:
         call_command("migrate", verbosity=0)
