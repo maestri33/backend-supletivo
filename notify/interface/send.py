@@ -43,6 +43,26 @@ def _guess_media_type(url: str) -> str:
     return "document"
 
 
+def local_idempotent_hit(idempotency_key: str | None, *, caller: str) -> str | None:
+    """Se `idempotency_key` já foi usada, devolve o external_id existente — senão None.
+
+    Chamado ANTES do branch de modo (local ou remote): a tabela local é a MESMA nos dois modos,
+    então isso fecha a duplicidade do flip local→remote (uma chave reenviada logo após o flip
+    acha o hit aqui em vez de criar Notification nova no servidor). Não cobre o sentido inverso
+    (remote→local, rollback): risco residual aceito — rollback é caminho de emergência, não
+    flip rotineiro; ver wiki/notify/servico-multi-tenant.md.
+    """
+    if not idempotency_key:
+        return None
+    existing = Notification.objects.filter(idempotency_key=idempotency_key).first()
+    if existing is None:
+        return None
+    logger.info(
+        "notify.idempotent_hit", external_id=str(existing.external_id), caller=caller
+    )
+    return str(existing.external_id)
+
+
 def send(
     *,
     text: str,
@@ -69,6 +89,10 @@ def send(
     pela extensão se não vier. `gender` (M/F) escolhe a voz do TTS (resolvido no integrations.ai).
     `run_sync=True` roda o despacho inline (testes/commands); o default é assíncrono (Django-Q).
     """
+    hit = local_idempotent_hit(idempotency_key, caller=caller)
+    if hit is not None:
+        return hit
+
     if settings.NOTIFY_MODE == "remote":
         return _send_remote(
             text=text,
@@ -87,16 +111,6 @@ def send(
             idempotency_key=idempotency_key,
             run_sync=run_sync,
         )
-
-    if idempotency_key:
-        existing = Notification.objects.filter(idempotency_key=idempotency_key).first()
-        if existing is not None:
-            logger.info(
-                "notify.idempotent_hit",
-                external_id=str(existing.external_id),
-                caller=caller,
-            )
-            return str(existing.external_id)
 
     if media_url and not media_type:
         media_type = _guess_media_type(media_url)
@@ -181,11 +195,13 @@ def _send_remote(
 ) -> str:
     """Modo remote (Fase 2): delega o envio ao notify-server via SDK, preservando o contrato.
 
-    Async: enfileira o POST no Django-Q só DEPOIS do commit (§12) e devolve NA HORA um uuid
-    gerado aqui; o servidor deduplica pela chave (`external_id` do payload = idempotency_key do
-    caller, ou o próprio uuid), então o retry do Q re-posta a MESMA chave sem duplicar. Com
-    idempotency_key repetida o retorno é um uuid novo "dangling" (aceito — callers com chave
-    ignoram o retorno, recon R4). Sync: POST inline; devolve o external_id REAL da resposta.
+    Chamado só quando `local_idempotent_hit` (acima) não achou nada local. Async: enfileira o
+    POST no Django-Q só DEPOIS do commit (§12) e devolve NA HORA um uuid gerado aqui; o servidor
+    deduplica pela chave (`external_id` do payload = idempotency_key do caller, ou o próprio
+    uuid), então o retry do Q re-posta a MESMA chave sem duplicar. Repetir uma chave que já foi
+    usada NO SERVIDOR (mas não existe localmente) ainda devolve um uuid novo "dangling" — aceito,
+    callers com chave ignoram o retorno (recon R4). Sync: POST inline; devolve o external_id REAL
+    da resposta.
     """
     client_uuid = str(uuid.uuid4())
     server_key = idempotency_key or client_uuid
