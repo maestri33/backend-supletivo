@@ -102,7 +102,20 @@ async def _wa_check(phone: str) -> tuple[bool, str]:
 
 
 def _check_phone_whatsapp(phone: str) -> tuple[bool, str]:
-    """WhatsApp: (existe_no_zap, número_resolvido). Erro real → IntegrationError."""
+    """WhatsApp: (existe_no_zap, número_resolvido). Erro real → IntegrationError.
+
+    NOTIFY_MODE=remote (Fase 2 do desmembramento): a validação vai pro notify-server
+    (`POST /v1/phone/check`) — o backend deixa de falar com a Evolution direto."""
+    from notify import remote
+
+    if remote.is_remote() and not getattr(settings, "TEST_MODE", False):
+        try:
+            return remote.phone_check(phone)
+        except Exception as exc:  # noqa: BLE001 — mesmo contrato de erro do caminho local
+            raise IntegrationError(
+                "Serviço de validação de telefone indisponível.",
+                code="PHONE_SERVICE_DOWN",
+            ) from exc
     try:
         return async_to_sync(_wa_check)(phone)
     except WhatsAppError as exc:

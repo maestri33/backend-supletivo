@@ -44,9 +44,9 @@ porta pra ele (Fase 3).
 | 6 | **Validação de telefone vira endpoint** (`POST /v1/phone/check`) | o register (`users/auth/service.py`) usa `check_numbers` da Evolution; com o endpoint, o backend zera credencial de Evolution/SMTP/TTS no `.env` |
 | 7 | **TTS via omnirouter** (`10.1.30.35`, LAN/DMZ): o serviço chama o omnirouter direto — NÃO embute client de provider. **Vozes: opção (a)** — o notify guarda os voice-ids POR CONTA (regra CRUZADA M/F preservada: homem recebe voz feminina e vice-versa — NÃO "corrigir") e passa `voice` pronto; o omnirouter só executa | keys de provider moram no omnirouter; o notify recebe o áudio e serve o mp3 do próprio MEDIA_ROOT (Evolution busca pela LAN). Demais funções de IA (storytelling, bot, OCR): CASO A CASO |
 | 8 | **E-mail por conta no mailcow**: cada conta com caixa/identidade SMTP própria; a default usa o e-mail padrão da casa | isola remetente e reputação por app |
-| 9 | **Evolution: driver abstraído; evolution-go como PILOTO, não como substituto no corte** (avaliação 2026-07-17 abaixo) | o corte de produção fica na Evolution v2 atual (número já conectado, PTT e check provados); evolution-go entra num número novo quando destravar |
+| 9 | **Evolution v2 DEFINITIVA; evolution-go DESCARTADO** (Victor 2026-07-17: "desista do evolution-go, fique no v2 mesmo") | motivo do descarte: licença obrigatória (503 até ativar + heartbeat pro license-server, preço não divulgado) e API não-compatível. A avaliação abaixo fica como registro histórico; a interface `WhatsAppDriver` do notify-server, se já existir, não custa manter — mas v2 é O driver, sem piloto planejado |
 
-### Avaliação evolution-go (2026-07-17, via Context7 + README)
+### Avaliação evolution-go (2026-07-17 — DESCARTADO; registro histórico)
 
 [github.com/evolution-foundation/evolution-go](https://github.com/evolution-foundation/evolution-go)
 — WhatsApp API em Go sobre **whatsmeow** (não Baileys), Swagger, WebSocket/Webhook/AMQP/NATS,
@@ -64,18 +64,16 @@ mídia com MinIO/S3 opcional, QR pairing, Docker/binário leve.
   `POST /user/check` → `IsInWhatsapp` por número (equivale ao `whatsappNumbers` da v2).
 - **⚠️ Bloqueio restante: LICENÇA** — API responde 503 até ativar no Manager; heartbeat periódico
   ao license-server = dependência externa de produção; preço/termos não divulgados.
-- **Veredito:** viável como driver, atrás da interface `WhatsAppDriver` no serviço
-  (send_text/send_media/send_audio/check_number/create_instance/qr — barato, já que o client será
-  portado mesmo). Números NOVOS (ex.: conta default) podem já nascer nele quando a licença
-  destravar; o número do Supletivo (conectado na v2) migra por último, se valer.
+- **Veredito final (Victor 2026-07-17): DESCARTADO** — a licença (custo desconhecido + heartbeat
+  externo em produção) não compensa; a casa fica na **Evolution v2** para todos os números.
 
 ## Fase 1 — o serviço (repo novo, sem tocar o backend)
 
 ### Models
 - `Account` — slug, nome, ativo. O tenant. Row `default` = conta padrão da casa (decisão 3).
 - `ApiKey` — FK conta, hash (sha256) da chave, label, ativo. Auth `Authorization: Bearer`.
-- `WhatsAppNumber` — FK conta, `instance_name`, driver (`evolution-v2` | futuro `evolution-go`),
-  slug, default flag, status de conexão. A instância atual do Supletivo é ADOTADA, não recriada.
+- `WhatsAppNumber` — FK conta, `instance_name` (Evolution v2), slug, default flag, status de
+  conexão. A instância atual do Supletivo é ADOTADA, não recriada.
 - `MailIdentity` — FK conta, SMTP host/port/user/senha (mailcow), from_name/from_email, timeout.
 - `TtsVoices` — FK conta, voice-ids M/F (regra cruzada — decisão 7). Keys de provider: omnirouter.
 - `Template` + `Trigger` — porte dos models atuais **+ FK conta** (`event` único POR CONTA).
@@ -116,19 +114,27 @@ painel é fase 3 — no v1 a única instância nova é a da conta default (núme
 
 ### Deploy e validação
 - LXC própria (padrão `backend-v7m`): Caddy interno/VPN → nginx → gunicorn + qcluster; database
-  própria no Postgres geral CT 2100; `.env` gitignored. (Se o piloto evolution-go destravar,
-  binário na mesma LXC + databases `evogo_*` no mesmo Postgres — decisão 9.)
+  própria no Postgres geral CT 2100; `.env` gitignored.
 - Validação REAL (§8): porte do `notify_send` + prova dos 3 canais no aparelho/e-mail do Victor
   (TTS via omnirouter!) + `send-event` com Template por conta + `phone/check` + idempotência,
   ANTES da fase 2.
 
 ## Fase 2 — conectar o backend (cutover)
 
-1. **SDK no lugar do miolo** — `notify/interface/send.py` e `events.py` mantêm as MESMAS
-   assinaturas (63 callsites intocados): `send()` → POST `/v1/send`; `send_event()` resolve o
-   Profile localmente (nome/phone/email/gender — domínio do backend) e → POST `/v1/send-event`.
-   UUID gerado no cliente; falha de rede → retry via Django-Q com o MESMO UUID; devolve o handle
-   na hora (§12). `run_sync=True` → POST síncrono.
+> **Estado 2026-07-18: itens 1, 4 e 6 IMPLEMENTADOS atrás da flag** (`NOTIFY_MODE`, default
+> `local` = zero mudança). Código: `notify/remote.py` (cliente HTTP + retry Django-Q),
+> `notify/interface/send.py` (`_send_remote`), checks `notify.E002/E003`, migração `users/0033`
+> (OTP FK→UUID, espelho reverso da 0012), register remoto em `users/auth/service.py`. Testes:
+> `tests/test_notify_remote.py`. **⚠️ Antes do corte: validar os nomes de campo do payload contra
+> o notify-server REAL** (o contrato aqui é o do plano; o repo notify-server é a fonte).
+
+1. **SDK no lugar do miolo** — `notify/interface/send.py` mantém as MESMAS assinaturas (63
+   callsites intocados): `send()` → POST `/v1/send` com UUID gerado no cliente; falha de rede →
+   retry via Django-Q com o MESMO UUID; devolve o handle na hora (§12). `run_sync=True` → POST
+   síncrono. **Transição (implementado): `send_event()` NÃO muda** — segue resolvendo teor
+   localmente (Template local + catálogo + storytelling) e desemboca no `send()`, que roteia pela
+   flag. O `POST /v1/send-event` (teor resolvido no server) ativa DEPOIS, junto com a migração do
+   painel — aí o corte de teor é um passo separado e reversível do corte de entrega.
 2. **Seed dos templates** — migração one-time: rows de `Template`/`Trigger` do backend (+ catálogo
    `users/roles/notifications.py` como fonte) viram os templates da CONTA supletivo no serviço.
    O catálogo permanece no backend só como origem histórica do seed.
@@ -150,19 +156,18 @@ painel é fase 3 — no v1 a única instância nova é a da conta default (núme
 
 ## Fase 3 — futuros (fora deste ciclo)
 - **Novo app cliente** = criar `Account` + api-key + e-mail no mailcow + número (instância via QR).
-- **Piloto evolution-go** num número novo (decisão 9), quando licença/PTT/check destravarem.
 - **Relay inbound por conta** (webhook-URL + HMAC): o novo lar do bot pluga aqui.
 - **Painel de onboarding** self-service (instância/QR), métricas, rate-limit por conta.
 
-## Pendências abertas (Victor)
-1. **Contrato do omnirouter** — não há MCP dele nesta sessão (verificado 2026-07-17) e `10.1.30.35`
-   é VPN (inalcançável daqui). Preciso: endpoint de TTS (OpenAI-compatible `POST /v1/audio/speech`?),
-   auth, e se devolve BYTES do áudio (suposição do plano) ou URL.
-2. **evolution-go** — esclarecer a licença (preço/termos; aceitamos heartbeat externo em prod?).
-   PTT e check de número JÁ confirmados na doc (avaliação acima). Enquanto isso: driver v2 no corte.
+## Pendências (estado 2026-07-17)
+1. ~~**Contrato do omnirouter**~~ ✅ CRAVADO pela sessão local — `POST http://10.1.30.35/v1/audio/
+   speech` (OpenAI-compatible), devolve bytes do mp3, MiniMax via OmniRoute, sem auth pro TTS.
+   Detalhes no [[wiki/notify/HANDOFF-desmembramento]].
+2. ~~**evolution-go**~~ ✅ **DESCARTADO** (Victor: "fique no v2 mesmo") — licença/heartbeat não
+   compensam. Evolution v2 definitiva (decisão 9).
 3. **Storytelling no serviço** (via omnirouter) ou permanece no backend com `body_md_override`?
-   Plano assume backend no corte (fase 2 item 3).
-4. **Nome do repo** — `notify-server` ok, ou outro?
+   Plano assume backend no corte (fase 2 item 3). ÚNICA pendência aberta.
+4. ~~**Nome do repo**~~ ✅ `notify-server` — https://github.com/maestri33/notify-server
 
 ## Riscos / pontos de atenção
 - **Um hop de rede a mais** no caminho do OTP (login). Mitigação: LAN + timeout curto + retry

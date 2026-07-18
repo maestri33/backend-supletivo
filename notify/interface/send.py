@@ -65,7 +65,32 @@ def send(
     mídia: WhatsApp busca pela LAN, e-mail embute pela URL pública; `media_type` é auto-detectado
     pela extensão se não vier. `gender` (M/F) escolhe a voz do TTS (resolvido no integrations.ai).
     `run_sync=True` roda o despacho inline (testes/commands); o default é assíncrono (Django-Q).
+
+    NOTIFY_MODE=remote (Fase 2 do desmembramento): a MESMA assinatura, mas o envio vai pro
+    notify-server via HTTP (`notify.remote`) com external_id gerado AQUI — devolve o handle na
+    hora e enfileira retry local em falha de rede (§12). O caminho local continua o default.
     """
+    from notify import remote
+
+    if remote.is_remote():
+        return _send_remote(
+            text=text,
+            caller=caller,
+            phone=phone,
+            email=email,
+            title=title,
+            subject=subject,
+            whatsapp=whatsapp,
+            email_channel=email_channel,
+            tts=tts,
+            media_url=media_url,
+            media_type=media_type,
+            gender=gender,
+            mail_template=mail_template,
+            idempotency_key=idempotency_key,
+            run_sync=run_sync,
+        )
+
     if idempotency_key:
         existing = Notification.objects.filter(idempotency_key=idempotency_key).first()
         if existing is not None:
@@ -139,11 +164,53 @@ def send(
     return str(notif.external_id)
 
 
+def _send_remote(**kwargs) -> str:
+    """Caminho remoto do send(): monta o payload do POST /v1/send com external_id do CLIENTE.
+
+    - TEST_MODE: dry-run — devolve o UUID sem tocar a rede (espelho do dry-run do dispatch local).
+    - `run_sync=True`: POST síncrono, erro PROPAGA (o caller pediu inline — testes/commands).
+    - default: best-effort — falha de rede enfileira retry no Django-Q com o MESMO external_id.
+    Nota (documentada no plano): com `idempotency_key` repetida, o server honra a PRIMEIRA
+    notificação; o UUID devolvido aqui pode não ser o dela. Nenhum caller usa retorno +
+    idempotency_key juntos hoje (OTP usa retorno e não passa key).
+    """
+    import uuid as _uuid
+
+    from django.conf import settings as _settings
+
+    from notify import remote
+
+    media_url = kwargs.get("media_url")
+    if media_url and not kwargs.get("media_type"):
+        kwargs["media_type"] = _guess_media_type(media_url)
+
+    external_id = str(_uuid.uuid4())
+    run_sync = kwargs.pop("run_sync", False)
+    payload = {"external_id": external_id, **kwargs}
+
+    logger.info(
+        "notify.queued_remote",
+        external_id=external_id,
+        caller=kwargs.get("caller"),
+        run_sync=run_sync,
+    )
+    if getattr(_settings, "TEST_MODE", False):
+        logger.info("notify.remote_dry_run", external_id=external_id)
+        return external_id
+    if run_sync:
+        payload["run_sync"] = True
+        remote.post_send(payload)
+    else:
+        remote.send_with_retry(payload)
+    return external_id
+
+
 def get_by_external_id(external_id) -> Notification | None:
     """Busca a Notification pelo external_id (o handle de borda devolvido por `send`). None se não achar.
 
     Permite que outro app guarde a relação por FK (em vez do external_id solto), respeitando §3 —
-    não fura o model do notify por fora.
+    não fura o model do notify por fora. NOTIFY_MODE=remote: a notificação não tem row local →
+    devolve None (auditoria mora no notify-server; consulte GET /v1/notifications/{id} lá).
     """
     if not external_id:
         return None
