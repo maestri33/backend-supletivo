@@ -6,6 +6,8 @@ cache de módulo (positivo E negativo, TTL 1h) e o mapeamento de erro que preser
 tratamentos por caller (register best-effort / change_phone estrito / TEST_MODE intocado).
 """
 
+import asyncio
+
 import httpx
 import pytest
 
@@ -130,6 +132,63 @@ def test_erro_nao_cacheia(remote_phone, sdk_mock):
     sdk_mock["responses"].append([{"number": "554396648750", "exists": True}])
     assert service._check_phone_whatsapp("5543996648750") == (True, "554396648750")
     assert len(sdk_mock["calls"]) == 2
+
+
+# ── SDK real transport (client.phone_check_async, um nível abaixo do fio) ───────
+#
+# Os testes acima mockam `notify.sdk.client.phone_check_async` — um nível ACIMA do fio real,
+# então um typo dentro do PRÓPRIO `phone_check_async` (path errado, body mal montado, header
+# ausente) passaria 100% verde ali. Este teste mocka só o transporte (`httpx.AsyncClient.request`,
+# o método que `_request_async` de fato chama) e exercita o corpo REAL de `phone_check_async`.
+
+
+def test_phone_check_async_corpo_real_da_requisicao(settings, monkeypatch):
+    """Mocka o transporte (httpx.AsyncClient.request) — path, body e header são os que o CÓDIGO
+    de phone_check_async/_request_async realmente monta, não o que o teste presume."""
+    from notify.sdk import client
+
+    settings.NOTIFY_SERVER_URL = "http://notify.test"
+    settings.NOTIFY_API_KEY = "super-secret-key"
+    settings.NOTIFY_TIMEOUT = 5.0
+
+    captured = {}
+
+    async def fake_request(self, method, url, *, json=None, params=None, **kwargs):
+        # `self` é o httpx.AsyncClient construído por `_request_async` (base_url/headers de lá);
+        # `url` é o `path` literal repassado por `phone_check_async` — sem merge (o método real
+        # de merge com base_url está sendo substituído por este fake).
+        captured["method"] = method
+        captured["path"] = str(url)
+        captured["base_url"] = str(self.base_url)
+        captured["json"] = json
+        captured["auth_header"] = self.headers.get("authorization")
+        return httpx.Response(
+            200,
+            json=[
+                {"number": "5543996648750", "exists": False},
+                {"number": "554396648750", "exists": True},
+            ],
+        )
+
+    monkeypatch.setattr(httpx.AsyncClient, "request", fake_request)
+
+    result = asyncio.run(client.phone_check_async(["5543996648750", "554396648750"]))
+
+    assert captured["method"] == "POST"
+    assert captured["path"] == "/v1/phone/check"  # path montado por phone_check_async
+    assert (
+        captured["base_url"] == "http://notify.test"
+    )  # base_url montada por _request_async
+    assert captured["json"] == {
+        "numbers": ["5543996648750", "554396648750"]
+    }  # body real montado por phone_check_async
+    assert (
+        captured["auth_header"] == "Bearer super-secret-key"
+    )  # header montado por _request_async
+    assert result == [
+        {"number": "5543996648750", "exists": False},
+        {"number": "554396648750", "exists": True},
+    ]
 
 
 def test_test_mode_curto_circuita_sem_sdk(settings, sdk_mock):
