@@ -121,11 +121,20 @@ painel é fase 3 — no v1 a única instância nova é a da conta default (núme
 
 ## Fase 2 — conectar o backend (cutover)
 
-1. **SDK no lugar do miolo** — `notify/interface/send.py` e `events.py` mantêm as MESMAS
-   assinaturas (63 callsites intocados): `send()` → POST `/v1/send`; `send_event()` resolve o
-   Profile localmente (nome/phone/email/gender — domínio do backend) e → POST `/v1/send-event`.
-   UUID gerado no cliente; falha de rede → retry via Django-Q com o MESMO UUID; devolve o handle
-   na hora (§12). `run_sync=True` → POST síncrono.
+> **Estado 2026-07-18: itens 1, 4 e 6 IMPLEMENTADOS atrás da flag** (`NOTIFY_MODE`, default
+> `local` = zero mudança). Código: `notify/remote.py` (cliente HTTP + retry Django-Q),
+> `notify/interface/send.py` (`_send_remote`), checks `notify.E002/E003`, migração `users/0033`
+> (OTP FK→UUID, espelho reverso da 0012), register remoto em `users/auth/service.py`. Testes:
+> `tests/test_notify_remote.py`. **⚠️ Antes do corte: validar os nomes de campo do payload contra
+> o notify-server REAL** (o contrato aqui é o do plano; o repo notify-server é a fonte).
+
+1. **SDK no lugar do miolo** — `notify/interface/send.py` mantém as MESMAS assinaturas (63
+   callsites intocados): `send()` → POST `/v1/send` com UUID gerado no cliente; falha de rede →
+   retry via Django-Q com o MESMO UUID; devolve o handle na hora (§12). `run_sync=True` → POST
+   síncrono. **Transição (implementado): `send_event()` NÃO muda** — segue resolvendo teor
+   localmente (Template local + catálogo + storytelling) e desemboca no `send()`, que roteia pela
+   flag. O `POST /v1/send-event` (teor resolvido no server) ativa DEPOIS, junto com a migração do
+   painel — aí o corte de teor é um passo separado e reversível do corte de entrega.
 2. **Seed dos templates** — migração one-time: rows de `Template`/`Trigger` do backend (+ catálogo
    `users/roles/notifications.py` como fonte) viram os templates da CONTA supletivo no serviço.
    O catálogo permanece no backend só como origem histórica do seed.

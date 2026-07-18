@@ -30,14 +30,10 @@ class OtpCode(models.Model):
     status = models.CharField(max_length=20, default=STATUS_GENERATED)
     attempts = models.PositiveIntegerField(default=0)
     failure_reason = models.CharField(max_length=20, null=True, blank=True)
-    # FK pra Notification do notify (rastreia o despacho). SET_NULL preserva o log se a notif sumir.
-    notification = models.ForeignKey(
-        "notify.Notification",
-        null=True,
-        blank=True,
-        on_delete=models.SET_NULL,
-        related_name="+",
-    )
+    # Handle (UUID) da Notification do notify (rastreia o despacho). Era FK; voltou a UUID solto
+    # na Fase 2 do desmembramento (wiki/notify/servico-multi-tenant.md): com NOTIFY_MODE=remote a
+    # auditoria mora no notify-server e não há row local pra FK apontar.
+    notification_external_id = models.UUIDField(null=True, blank=True)
     error_detail = models.TextField(null=True, blank=True)
     verified_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)

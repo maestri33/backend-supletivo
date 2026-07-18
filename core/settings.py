@@ -219,6 +219,16 @@ MEDIA_ROOT = BASE_DIR / "media"
 # aqui, não pela URL pública. Vazio => o notify cai no EXTERNAL_URL. Ex. dev: http://10.1.20.30
 MEDIA_LAN_BASE = env("MEDIA_LAN_BASE", default="")
 
+# ── notify remoto (Fase 2 do desmembramento — wiki/notify/servico-multi-tenant.md) ──
+# NOTIFY_MODE: "local" (default) = dispatcher in-process de sempre; "remote" = o send() vira
+# cliente HTTP do notify-server (VPN). O corte de produção é SÓ trocar esta flag (rollback idem).
+NOTIFY_MODE = env("NOTIFY_MODE", default="local")
+NOTIFY_SERVER_URL = env("NOTIFY_SERVER_URL", default="")  # ex.: http://10.1.30.40
+NOTIFY_API_KEY = os.environ.get("NOTIFY_API_KEY", "")  # api-key da conta supletivo
+NOTIFY_TIMEOUT = env.float(
+    "NOTIFY_TIMEOUT", default=5.0
+)  # LAN; curto pra não travar caller
+
 # Limite de upload de imagem dos documentos (users/documents) — config, não hardcoded (§10).
 MAX_UPLOAD_MB = env.int("MAX_UPLOAD_MB", default=10)
 

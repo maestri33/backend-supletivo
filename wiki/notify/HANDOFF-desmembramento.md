@@ -5,8 +5,12 @@
 > https://github.com/maestri33/notify-server. A fonte de verdade do plano é
 > [[wiki/notify/servico-multi-tenant]] (mesmo diretório) — leia ELE antes de codar; este handoff
 > é só o mapa de "onde paramos + o que fazer primeiro".
-> Branch: `claude/notify-multi-tenant-refactor-0q6if1` · PR draft: **#45** (só wiki; mergear
-> quando o Victor aprovar o texto).
+> Branch: `claude/notify-multi-tenant-refactor-0q6if1` · PR #45 (plano) MERGEADO; PR vivo: **#46**.
+> **Fase 2 do backend: preparada atrás da flag** (2026-07-18) — `NOTIFY_MODE=local|remote`
+> (default local), `notify/remote.py` (POST /v1/send + retry Django-Q com o mesmo UUID),
+> OTP FK→UUID (migração `users/0033`), register→`/v1/phone/check`. `send_event()` intocado na
+> transição (teor local → send() roteia). O corte = validar payload contra o notify-server real,
+> seed dos templates, histórico, e trocar a flag.
 
 ## Resumo em 5 linhas
 O app `notify` do monólito vira um **serviço independente multi-tenant** (`notify-server`, nome a
