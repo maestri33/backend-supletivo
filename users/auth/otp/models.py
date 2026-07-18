@@ -30,14 +30,9 @@ class OtpCode(models.Model):
     status = models.CharField(max_length=20, default=STATUS_GENERATED)
     attempts = models.PositiveIntegerField(default=0)
     failure_reason = models.CharField(max_length=20, null=True, blank=True)
-    # FK pra Notification do notify (rastreia o despacho). SET_NULL preserva o log se a notif sumir.
-    notification = models.ForeignKey(
-        "notify.Notification",
-        null=True,
-        blank=True,
-        on_delete=models.SET_NULL,
-        related_name="+",
-    )
+    # external_id (str) da notificação no notify (rastreia o despacho). String solta em vez de FK:
+    # no modo remote a Notification vive no notify-server, fora deste banco (Fase 2).
+    notification_external_id = models.CharField(max_length=64, null=True, blank=True)
     error_detail = models.TextField(null=True, blank=True)
     verified_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
