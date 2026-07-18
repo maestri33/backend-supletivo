@@ -30,11 +30,13 @@ def _user_com_phone(phone="11999990010"):
 
 
 def test_model_sem_fk_para_notify():
-    """A FK notification saiu do model; ficou a coluna solta CharField(64, null, blank)."""
+    """A FK notification saiu do model; ficou a coluna solta UUIDField(null, blank)."""
+    from django.db import models as dj_models
+
     fields = {f.name for f in OtpCode._meta.get_fields()}
     assert "notification" not in fields
     f = OtpCode._meta.get_field("notification_external_id")
-    assert f.max_length == 64
+    assert isinstance(f, dj_models.UUIDField)
     assert f.null is True
     assert f.blank is True
 
@@ -50,7 +52,8 @@ def test_otp_grava_string_devolvida_pelo_send(monkeypatch):
 
     assert otp.status == STATUS_SENT
     otp.refresh_from_db()
-    assert otp.notification_external_id == sentinel
+    # UUIDField lê de volta como objeto uuid.UUID (mesmo tendo sido atribuído como str no save).
+    assert str(otp.notification_external_id) == sentinel
 
 
 def test_otp_fluxo_real_aponta_pra_notification_local():
@@ -62,7 +65,7 @@ def test_otp_fluxo_real_aponta_pra_notification_local():
     assert otp.notification_external_id
     notif = Notification.objects.get(external_id=otp.notification_external_id)
     assert notif.caller == "users.auth.otp"
-    assert otp.notification_external_id == str(notif.external_id)
+    assert str(otp.notification_external_id) == str(notif.external_id)
 
 
 @pytest.mark.django_db(transaction=True)
@@ -93,7 +96,7 @@ def test_migracao_0033_copia_fk_para_string():
             [("users", "0033_otpcode_notification_external_id")]
         )
         saved = mid_state.apps.get_model("users", "OtpCode").objects.get(id=otp.id)
-        assert saved.notification_external_id == str(notif.external_id)
+        assert str(saved.notification_external_id) == str(notif.external_id)
         assert saved.notification_id == notif.id  # FK ainda de pé (0034 não rodou)
 
         # agora sim a 0034 remove a FK — nada além da coluna deve mudar
