@@ -4,23 +4,25 @@
 # reiniciar os workers. Assim o código ANTIGO (que ainda declara a FK) continua rodando contra
 # um schema que ainda tem a coluna durante a janela migrate→restart, sem quebrar o login por OTP
 # no meio do deploy (achado do review adversarial: migração única quebrava OtpCode ali).
+#
+# UUIDField (não CharField): send()/send_event() sempre devolvem str(uuid.uuid4()).
 
 from django.db import migrations, models
 
 
 def copy_otp_notification_external_id(apps, schema_editor):
-    """Copia a FK notification -> string notification_external_id (não perde auditoria de OTP)."""
+    """Copia a FK notification -> UUID notification_external_id (não perde auditoria de OTP)."""
     OtpCode = apps.get_model("users", "OtpCode")
     Notification = apps.get_model("notify", "Notification")
     for otp in OtpCode.objects.exclude(notification__isnull=True):
         notif = Notification.objects.filter(id=otp.notification_id).first()
         if notif is not None:
-            otp.notification_external_id = str(notif.external_id)
+            otp.notification_external_id = notif.external_id
             otp.save(update_fields=["notification_external_id"])
 
 
 def restore_otp_notification(apps, schema_editor):
-    """Reverso: reata a FK notification a partir da string notification_external_id."""
+    """Reverso: reata a FK notification a partir do UUID notification_external_id."""
     OtpCode = apps.get_model("users", "OtpCode")
     Notification = apps.get_model("notify", "Notification")
     for otp in OtpCode.objects.exclude(notification_external_id__isnull=True):
@@ -42,7 +44,7 @@ class Migration(migrations.Migration):
         migrations.AddField(
             model_name="otpcode",
             name="notification_external_id",
-            field=models.CharField(blank=True, max_length=64, null=True),
+            field=models.UUIDField(blank=True, null=True),
         ),
         migrations.RunPython(
             copy_otp_notification_external_id, restore_otp_notification
