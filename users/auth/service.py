@@ -151,11 +151,17 @@ def _dispatch_otp(user) -> bool:
 # ── register ───────────────────────────────────────────────────────────────
 
 
-def register(*, role: str, phone: str, cpf: str, email: str | None = None) -> dict:
+def register(
+    *, role: str, phone: str, cpf: str | None = None, email: str | None = None
+) -> dict:
     """Cria usuário (entry role) e provisiona Profile + role numa transação; dispara OTP. Retorna external_id.
 
     `email` (opcional, aditivo — Victor 2026-06-04 p/ o lead) é gravado no Profile. Continua opcional pra
     não quebrar os chamadores atuais (`users/auth/views.py`).
+
+    `cpf` OPCIONAL (funil do lead v2, protótipo 2026-07-18): a conta nasce no passo do TELEFONE, só
+    com o número; o CPF entra depois via `confirm_identity` (passo 3 do funil). Sem cpf → sem lookup
+    no CPFHub e sem o block de verificação (a pendência de identidade É a etapa seguinte do funil).
     """
     if not roles.is_entry_role(role):
         raise ValidationError(
@@ -163,10 +169,11 @@ def register(*, role: str, phone: str, cpf: str, email: str | None = None) -> di
             code="INVALID_ENTRY_ROLE",
         )
 
-    try:
-        cpf = validation.validate_cpf(cpf)
-    except ValueError as exc:
-        raise ValidationError(str(exc), code="CPF_INVALID") from exc
+    if cpf is not None:
+        try:
+            cpf = validation.validate_cpf(cpf)
+        except ValueError as exc:
+            raise ValidationError(str(exc), code="CPF_INVALID") from exc
     try:
         phone = validation.validate_phone(phone)
     except ValueError as exc:
@@ -175,7 +182,7 @@ def register(*, role: str, phone: str, cpf: str, email: str | None = None) -> di
         email = email.strip().lower() or None
 
     # unicidade local (barato) antes da chamada externa
-    if profiles.exists_cpf(cpf):
+    if cpf and profiles.exists_cpf(cpf):
         raise Conflict("CPF já cadastrado.", code="CPF_EXISTS")
     if profiles.exists_phone(phone):
         raise Conflict("Telefone já cadastrado.", code="PHONE_EXISTS")
@@ -184,10 +191,12 @@ def register(*, role: str, phone: str, cpf: str, email: str | None = None) -> di
 
     # veracidade REAL (§8) — CPF existe (identidade) + telefone existe no WhatsApp.
     # ponytail: se CPFHub cair (ou não achar), criamos o usuário com os dados fornecidos + flag.
-    try:
-        identity = _lookup_cpf(cpf)  # None = não encontrado; exceção = serviço fora
-    except IntegrationError:
-        identity = None
+    identity = None
+    if cpf is not None:
+        try:
+            identity = _lookup_cpf(cpf)  # None = não encontrado; exceção = serviço fora
+        except IntegrationError:
+            identity = None
 
     # WhatsApp: best-effort. Se cair, cria sem validar — o OTP que resolve depois.
     resolved_phone = phone
@@ -220,8 +229,9 @@ def register(*, role: str, phone: str, cpf: str, email: str | None = None) -> di
     except IntegrityError as exc:
         raise Conflict("CPF ou telefone já cadastrado.", code="DUPLICATE") from exc
 
-    # se CPF não foi verificado (serviço fora), levanta flag pra completar depois
-    if identity is None:
+    # se CPF FOI informado mas não verificado (serviço fora), levanta flag pra completar depois.
+    # Sem cpf (funil v2) NÃO há flag: a identidade É o próximo passo do funil (confirm_identity).
+    if cpf is not None and identity is None:
         from users.blocks import service as blocks_svc
 
         blocks_svc.create_block(
@@ -430,6 +440,166 @@ def recover(*, cpf: str | None = None, phone: str | None = None) -> dict:
 
     result = _send_or_wait(user)
     return {"found": True, **result}
+
+
+# ── identidade + e-mail (funil do lead v2 — protótipo 2026-07-18) ─────────
+# Caminho canônico da conta: [1] telefone (conta nasce) → [2] OTP → [3] CPF → [4] pergaminho
+# (identidade) → [5] e-mail → [6] checkout. Estes passos rodam AUTENTICADOS (a conta já existe).
+
+
+def _mask_phone_br(phone: str) -> str:
+    """`5543996648750` → `(43) 99664-8750` — legível na notificação de segurança."""
+    d = phone[2:] if phone.startswith("55") else phone
+    if len(d) == 11:
+        return f"({d[:2]}) {d[2:7]}-{d[7:]}"
+    if len(d) == 10:
+        return f"({d[:2]}) {d[2:6]}-{d[6:]}"
+    return phone
+
+
+def _notify_cpf_conflict(owner_profile, attempt_phone: str | None) -> None:
+    """Avisa o TITULAR real do CPF que alguém tentou usá-lo com outro número (contrato de segurança
+    do funil v2): data, horário e o número usado, orientando acionar o suporte. Best-effort (§12)."""
+    from django.utils import timezone
+
+    from notify.interface.send import send
+
+    when = timezone.localtime()
+    numero = _mask_phone_br(attempt_phone) if attempt_phone else "desconhecido"
+    text = (
+        "🔒 Alguém tentou usar o seu CPF para criar um cadastro no Supletivo Brasil "
+        f"em {when.strftime('%d/%m/%Y')} às {when.strftime('%H:%M')}, com o número {numero}. "
+        "O cadastro foi bloqueado e desfeito automaticamente. Se não foi você, fale com o nosso "
+        "suporte por este WhatsApp."
+    )
+    try:
+        send(
+            text=text,
+            caller="auth.cpf_conflict",
+            phone=owner_profile.phone,
+            whatsapp=True,
+        )
+    except Exception as exc:  # noqa: BLE001 — segurança avisada é best-effort, não muda o 409
+        logger.warning("auth.cpf_conflict_notify_failed", error=type(exc).__name__)
+
+
+def confirm_identity(*, user_external_id: str, cpf: str) -> dict:
+    """Passo 3 do funil v2: confirma o CPF do dono da conta recém-criada e devolve a identidade
+    (nome/nascimento/gênero) pro pergaminho do front. A API se molda ao protótipo (DOCUMENTACAO):
+
+    - CPF com DV inválido → 422 `CPF_INVALID` (bottom-sheet "Vamos conferir esse CPF?").
+    - CPF de OUTRA conta → **contrato de segurança `CPF_CONFLICT` (409)**: (1) NOTIFICA o titular
+      real (data/hora/número usado); (2) APAGA a conta/telefone recém-criada da tentativa (purge,
+      só se ainda é conta "nua" do funil — sem CPF); (3) responde SEM vazar dados do titular.
+    - CPFHub fora → 502 `CPF_SERVICE_DOWN`; CPF não encontrado → 422 `CPF_NOT_FOUND`.
+    - Idempotente: mesmo CPF já confirmado nesta conta → devolve a identidade gravada.
+
+    `photo` é sempre None por enquanto (o CPFHub não entrega foto; o front usa placeholder)."""
+    user = User.objects.filter(external_id=user_external_id).first()
+    if user is None:
+        raise NotFound("Usuário não encontrado.", code="USER_NOT_FOUND")
+    try:
+        cpf = validation.validate_cpf(cpf)
+    except ValueError as exc:
+        raise ValidationError(str(exc), code="CPF_INVALID") from exc
+    # DV antes do CPFHub (funil v2): dígito errado nem gasta chamada externa — o front já valida,
+    # aqui é a última linha (mesmo modal "Vamos conferir esse CPF?" no front via CPF_INVALID).
+    if not validation.cpf_check_digits_ok(cpf):
+        raise ValidationError(
+            "CPF inválido (dígito verificador).", code="CPF_INVALID"
+        )
+
+    own = profiles.get(user)
+    if own is not None and own.cpf == cpf:
+        return {  # re-confirmação (ex.: retry do front) — devolve o que já temos
+            "cpf": cpf,
+            "name": own.name,
+            "birth_date": own.birth_date.isoformat() if own.birth_date else None,
+            "sex": own.gender,
+            "photo": None,
+        }
+    if own is not None and own.cpf:
+        # conta JÁ tem identidade confirmada — não deixa trocar por aqui (suporte resolve).
+        raise Conflict("Esta conta já tem um CPF confirmado.", code="CPF_ALREADY_SET")
+
+    other = profiles.find_by_cpf(cpf)
+    if other is not None and other.user_id != user.id:
+        # contrato de segurança: notifica o titular ANTES de apagar a tentativa (precisa do phone
+        # da tentativa pra montar a mensagem) e purga a conta recém-criada — nesta ordem.
+        attempt_phone = own.phone if own else None
+        _notify_cpf_conflict(other, attempt_phone)
+        try:
+            roles.purge_funnel_user(user_external_id=str(user.external_id))
+            logger.info(
+                "auth.cpf_conflict_purged", external_id=str(user.external_id)
+            )
+        except Exception as exc:  # noqa: BLE001 — purge falhou (ex.: conta avançada): loga e segue
+            logger.warning(
+                "auth.cpf_conflict_purge_failed",
+                external_id=str(user.external_id),
+                error=type(exc).__name__,
+            )
+        logger.info("auth.cpf_conflict", external_id=str(user.external_id))
+        # SEM vazar nome/dados do titular (proteção de identidade do protótipo).
+        raise Conflict(
+            "Este CPF já está vinculado a outra conta.", code="CPF_CONFLICT"
+        )
+
+    identity = _lookup_cpf(cpf)  # IntegrationError (CPF_SERVICE_DOWN) sobe → 502
+    if identity is None:
+        raise ValidationError("CPF não encontrado.", code="CPF_NOT_FOUND")
+
+    profile = profiles.set_cpf_identity(
+        user,
+        cpf=cpf,
+        name=identity.name,
+        gender=identity.gender,
+        birth_date=identity.birth_date,
+    )
+    if profile is None:
+        raise NotFound("Perfil não encontrado.", code="PROFILE_NOT_FOUND")
+    logger.info("auth.identity_confirmed", external_id=str(user.external_id))
+    return {
+        "cpf": cpf,
+        "name": profile.name,
+        "birth_date": profile.birth_date.isoformat() if profile.birth_date else None,
+        "sex": profile.gender,
+        "photo": None,
+    }
+
+
+def set_email(*, user_external_id: str, email: str) -> dict:
+    """Passo 5 do funil v2: grava o e-mail de contato. Contrato do protótipo:
+
+    - formato inválido → 422 `EMAIL_INVALID` (o front já valida; aqui é a última linha).
+    - e-mail de OUTRA conta → 409 `EMAIL_CONFLICT` ("esse e-mail já tem dono").
+    - mesmo e-mail já na PRÓPRIA conta → segue (idempotente).
+    """
+    from django.core.exceptions import ValidationError as DjangoValidationError
+    from django.core.validators import validate_email as django_validate_email
+
+    user = User.objects.filter(external_id=user_external_id).first()
+    if user is None:
+        raise NotFound("Usuário não encontrado.", code="USER_NOT_FOUND")
+
+    email = (email or "").strip().lower()
+    try:
+        django_validate_email(email)
+    except DjangoValidationError as exc:
+        raise ValidationError("E-mail inválido.", code="EMAIL_INVALID") from exc
+
+    own = profiles.get(user)
+    if own is not None and own.email == email:
+        return {"email": email}  # idempotente
+    other_has = profiles.exists_email(email)
+    if other_has:
+        raise Conflict(
+            "Este e-mail já está vinculado a outra conta.", code="EMAIL_CONFLICT"
+        )
+    if profiles.set_email(user, email) is None:
+        raise NotFound("Perfil não encontrado.", code="PROFILE_NOT_FOUND")
+    logger.info("auth.email_set", external_id=str(user.external_id))
+    return {"email": email}
 
 
 # ── login ────────────────────────────────────────────────────────────────

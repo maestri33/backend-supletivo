@@ -1,0 +1,334 @@
+"""Funil do lead v2 (protótipo 2026-07-18) — a API se molda ao protótipo (DOCUMENTACAO).
+
+Caminho canônico SEM register: [1] telefone (o `check` CRIA a conta + Lead + OTP) → [2] OTP →
+[3] CPF (`/lead/identity`, identidade pro pergaminho) → [5] e-mail (`/lead/email`) →
+[6] checkout (`/lead/checkout`, criável e TROCÁVEL). Contratos de segurança testados:
+`CPF_CONFLICT` (notifica o titular + purga a conta da tentativa), `EMAIL_CONFLICT`,
+`PROFILE_INCOMPLETE` e `ALREADY_PAID`.
+
+In-process via Django test Client (stack HTTP real: URLs, middleware, handlers, JWT do Ninja).
+TEST_MODE: identidade sintética do CPFHub, WhatsApp sempre "existe", OTP fixo (000000).
+"""
+
+from __future__ import annotations
+
+import json
+import uuid
+
+import pytest
+
+pytestmark = pytest.mark.django_db
+
+BASE = "/api/v1/clients"
+OTP = "000000"  # TEST_MODE_OTP_CODE (users/auth/otp/service.py)
+
+
+def _valid_cpf(seed9: str) -> str:
+    """Gera um CPF VÁLIDO a partir dos 9 primeiros dígitos (mesmo DV do users/auth/validation)."""
+    assert len(seed9) == 9 and seed9.isdigit()
+
+    def dv(digits: str) -> str:
+        weights = range(len(digits) + 1, 1, -1)
+        total = sum(int(d) * w for d, w in zip(digits, weights))
+        rest = (total * 10) % 11
+        return "0" if rest == 10 else str(rest)
+
+    d1 = dv(seed9)
+    return seed9 + d1 + dv(seed9 + d1)
+
+
+def _json(client, method, path, body, token=None):
+    headers = {"HTTP_AUTHORIZATION": f"Bearer {token}"} if token else {}
+    return getattr(client, method)(
+        f"{BASE}{path}",
+        data=json.dumps(body),
+        content_type="application/json",
+        **headers,
+    )
+
+
+def _enter(client, phone: str, ref: str | None = None) -> str:
+    """Passos 1-2 do funil: check (cria a conta) + login por OTP. Devolve o access token."""
+    body: dict = {"phone": phone}
+    if ref:
+        body["ref"] = ref
+    r = _json(client, "post", "/auth/check", body)
+    assert r.status_code == 200, r.content
+    data = r.json()
+    assert data["created"] is True, data
+    r = _json(
+        client, "post", "/auth/login", {"external_id": data["external_id"], "otp": OTP}
+    )
+    assert r.status_code == 200, r.content
+    return r.json()["access_token"]
+
+
+@pytest.fixture
+def default_hub():
+    """Hub padrão + coordenador (fallback de captação: lead sem `ref` cai neste polo)."""
+    from hub.models import Hub
+    from users.address.models import Address
+    from users.auth.models import User
+
+    coord = User.objects.create_user(external_id=uuid.uuid4())
+    addr = Address.objects.create(city="São Paulo", state="SP")
+    Hub.objects.create(address=addr, brand="e2e", coordinator=coord, is_default=True)
+    return coord
+
+
+# ── [1] telefone: o check CRIA a conta (captura) ─────────────────────────────
+
+
+def test_check_cria_conta_lead_com_otp(client, default_hub):
+    """Número novo + WhatsApp ok → conta nasce no check: User+Profile(phone, SEM cpf)+role lead+
+    Lead (promotor padrão) + OTP no mesmo passo. `found` continua honesto (false) + `created`."""
+    from users.auth.models import User
+    from users.roles import interface as roles
+    from users.roles.lead.models import Lead
+
+    r = _json(client, "post", "/auth/check", {"phone": "11987650001"})
+    assert r.status_code == 200, r.content
+    data = r.json()
+    assert data["found"] is False
+    assert data["created"] is True
+    assert data["external_id"]
+    assert data["otp_sent"] is True
+    assert data["roles"] == ["lead"]
+
+    user = User.objects.get(external_id=data["external_id"])
+    assert roles.active_roles(user) == ["lead"]
+    assert user.profile.cpf is None  # CPF entra no passo 3
+    assert user.profile.phone == "5511987650001"
+    lead = Lead.objects.get(user=user)
+    assert lead.promoter == default_hub  # sem ref → promotor padrão
+    assert getattr(lead, "checkout", None) is None  # checkout SÓ no passo 6
+
+
+def test_check_de_conta_existente_nao_recria(client, default_hub):
+    """Segundo check do MESMO número → found:true (login normal), sem criar de novo."""
+    from users.auth.models import User
+
+    _json(client, "post", "/auth/check", {"phone": "11987650002"})
+    total = User.objects.count()
+    r = _json(client, "post", "/auth/check", {"phone": "11987650002"})
+    data = r.json()
+    assert data["found"] is True
+    assert data["created"] is False
+    assert User.objects.count() == total
+
+
+def test_check_sem_whatsapp_nao_cria(client, default_hub, monkeypatch):
+    """WhatsApp indisponível (serviço fora) → NÃO cria conta; `whatsapp:null` (front avisa)."""
+    from users.auth import service as auth_service
+    from users.auth.models import User
+    from users.exceptions import IntegrationError
+
+    def _down(phone):
+        raise IntegrationError("fora", code="PHONE_SERVICE_DOWN")
+
+    monkeypatch.setattr(auth_service, "_check_phone_whatsapp", _down)
+    total = User.objects.count()
+    r = _json(client, "post", "/auth/check", {"phone": "11987650003"})
+    assert r.status_code == 200
+    data = r.json()
+    assert data["created"] is False
+    assert data["found"] is False
+    assert data["whatsapp"] is None
+    assert User.objects.count() == total
+
+
+# ── [3] CPF: identidade (pergaminho) + contrato de segurança ─────────────────
+
+
+def test_identity_confirma_cpf_e_devolve_pergaminho(client, default_hub):
+    """CPF válido e novo → grava no profile e devolve nome/nascimento/sexo (pergaminho)."""
+    from users.profiles.models import Profile
+
+    token = _enter(client, "11987650010")
+    cpf = _valid_cpf("529982247")
+    r = _json(client, "post", "/lead/identity", {"cpf": cpf}, token)
+    assert r.status_code == 200, r.content
+    data = r.json()
+    assert data["cpf"] == cpf
+    assert data["name"]  # identidade sintética do TEST_MODE
+    assert data["sex"] in ("M", "F")
+    assert data["birth_date"]
+    assert data["photo"] is None
+    assert Profile.objects.get(phone="5511987650010").cpf == cpf
+
+    # idempotente: re-confirmar o MESMO cpf devolve a identidade gravada
+    r2 = _json(client, "post", "/lead/identity", {"cpf": cpf}, token)
+    assert r2.status_code == 200
+    assert r2.json()["cpf"] == cpf
+
+
+def test_identity_cpf_invalido_422(client, default_hub):
+    token = _enter(client, "11987650011")
+    r = _json(client, "post", "/lead/identity", {"cpf": "12345678900"}, token)
+    assert r.status_code == 422
+    assert r.json()["code"] == "CPF_INVALID"
+
+
+def test_identity_cpf_conflict_notifica_e_purga(client, default_hub):
+    """CPF de OUTRA conta → 409 CPF_CONFLICT sem vazar dados do titular; a conta recém-criada
+    da tentativa é APAGADA (libera o telefone) e o titular é notificado (data/hora/número)."""
+    from notify.models import Notification
+    from users.auth.models import User
+
+    cpf = _valid_cpf("111444777")
+    token_dono = _enter(client, "11987650012")
+    assert (
+        _json(client, "post", "/lead/identity", {"cpf": cpf}, token_dono).status_code
+        == 200
+    )
+
+    token_tentativa = _enter(client, "11987650013")
+    attempt = User.objects.get(profile__phone="5511987650013")
+    r = _json(client, "post", "/lead/identity", {"cpf": cpf}, token_tentativa)
+    assert r.status_code == 409, r.content
+    body = r.json()
+    assert body["code"] == "CPF_CONFLICT"
+    # sem vazar dados do titular (nem nome, nem telefone)
+    assert "name" not in body
+
+    # conta da tentativa purgada (cascade User → Profile/Lead/OTP) — telefone liberado
+    assert not User.objects.filter(pk=attempt.pk).exists()
+    # titular notificado com o número usado na tentativa
+    notif = Notification.objects.filter(caller="auth.cpf_conflict").first()
+    assert notif is not None
+    assert notif.recipient_phone == "5511987650012"
+    assert "9876-50013" in notif.text or "98765-0013" in notif.text
+
+
+def test_identity_nao_troca_cpf_ja_confirmado(client, default_hub):
+    """Conta que JÁ confirmou um CPF não troca por aqui (suporte resolve) → 409 CPF_ALREADY_SET."""
+    token = _enter(client, "11987650014")
+    assert (
+        _json(
+            client, "post", "/lead/identity", {"cpf": _valid_cpf("222333444")}, token
+        ).status_code
+        == 200
+    )
+    r = _json(client, "post", "/lead/identity", {"cpf": _valid_cpf("555666777")}, token)
+    assert r.status_code == 409
+    assert r.json()["code"] == "CPF_ALREADY_SET"
+
+
+# ── [5] e-mail ───────────────────────────────────────────────────────────────
+
+
+def test_email_grava_e_conflita(client, default_hub):
+    token_a = _enter(client, "11987650020")
+    r = _json(client, "post", "/lead/email", {"email": "Maria@Gmail.com"}, token_a)
+    assert r.status_code == 200, r.content
+    assert r.json()["email"] == "maria@gmail.com"  # normalizado
+
+    # o próprio e-mail de novo → idempotente
+    assert (
+        _json(client, "post", "/lead/email", {"email": "maria@gmail.com"}, token_a)
+        .status_code
+        == 200
+    )
+
+    # e-mail de OUTRA conta → 409 EMAIL_CONFLICT
+    token_b = _enter(client, "11987650021")
+    r = _json(client, "post", "/lead/email", {"email": "maria@gmail.com"}, token_b)
+    assert r.status_code == 409
+    assert r.json()["code"] == "EMAIL_CONFLICT"
+
+    # formato inválido → 422 EMAIL_INVALID
+    r = _json(client, "post", "/lead/email", {"email": "sem-arroba"}, token_b)
+    assert r.status_code == 422
+    assert r.json()["code"] == "EMAIL_INVALID"
+
+
+# ── [6] checkout: por último, criável e TROCÁVEL ─────────────────────────────
+
+
+def _complete_profile(client, token, cpf_seed: str, email: str) -> None:
+    assert (
+        _json(client, "post", "/lead/identity", {"cpf": _valid_cpf(cpf_seed)}, token)
+        .status_code
+        == 200
+    )
+    assert (
+        _json(client, "post", "/lead/email", {"email": email}, token).status_code == 200
+    )
+
+
+def test_checkout_exige_perfil_completo(client, default_hub):
+    """Pular identidade/e-mail e ir direto pro pagamento → 409 PROFILE_INCOMPLETE + missing."""
+    token = _enter(client, "11987650030")
+    r = _json(client, "post", "/lead/checkout", {"payment_method": "pix"}, token)
+    assert r.status_code == 409, r.content
+    body = r.json()
+    assert body["code"] == "PROFILE_INCOMPLETE"
+    assert set(body["missing_fields"]) == {"cpf", "email"}
+
+
+def test_checkout_cria_e_troca_forma(client, default_hub):
+    """PIX escolhido no passo 6 → checkout nasce; "Trocar" pro cartão → sessão RECRIADA
+    (token/linha novos, método novo) e o `GET /lead/me` reflete a forma vigente do painel."""
+    from users.roles.lead.models import Checkout
+
+    token = _enter(client, "11987650031")
+    _complete_profile(client, token, "333222111", "lead31@example.com")
+
+    r = _json(client, "post", "/lead/checkout", {"payment_method": "pix"}, token)
+    assert r.status_code == 200, r.content
+    pix = r.json()
+    assert pix["payment_method"] == "pix"
+    assert pix["is_paid"] is False
+    first = Checkout.objects.get(lead__user__profile__phone="5511987650031")
+    first_token = first.short_token
+
+    me = client.get(f"{BASE}/lead/me", HTTP_AUTHORIZATION=f"Bearer {token}").json()
+    assert me["checkout"]["payment_method"] == "pix"
+
+    # Trocar (painel → Planos → cartão): recria a sessão — método e token novos
+    r = _json(client, "post", "/lead/checkout", {"payment_method": "card"}, token)
+    assert r.status_code == 200, r.content
+    card = r.json()
+    assert card["payment_method"] == "credit_card"
+    rows = Checkout.objects.filter(lead__user__profile__phone="5511987650031")
+    assert rows.count() == 1  # a antiga morreu junto com a URL/link curto
+    assert rows.first().short_token != first_token
+
+    me = client.get(f"{BASE}/lead/me", HTTP_AUTHORIZATION=f"Bearer {token}").json()
+    assert me["checkout"]["payment_method"] == "credit_card"
+
+
+def test_checkout_pago_nao_troca(client, default_hub):
+    """Pagamento confirmado → trocar a forma é 409 ALREADY_PAID (pago não se mexe)."""
+    from users.roles.lead.models import Checkout, Lead
+
+    token = _enter(client, "11987650032")
+    _complete_profile(client, token, "444555666", "lead32@example.com")
+    assert (
+        _json(client, "post", "/lead/checkout", {"payment_method": "pix"}, token)
+        .status_code
+        == 200
+    )
+    lead = Lead.objects.get(user__profile__phone="5511987650032")
+    Checkout.objects.filter(lead=lead).update(is_paid=True)
+    lead.status = Lead.Status.PAID
+    lead.save(update_fields=["status"])
+
+    r = _json(client, "post", "/lead/checkout", {"payment_method": "card"}, token)
+    assert r.status_code == 409
+    assert r.json()["code"] == "ALREADY_PAID"
+
+
+def test_funil_v2_fim_a_fim(client, default_hub):
+    """O caminho canônico inteiro, na ordem do protótipo: telefone → OTP → CPF → e-mail →
+    checkout PIX. Cada etapa avança e o painel (`/lead/me`) fecha com o funil completo."""
+    token = _enter(client, "11987650040")
+    _complete_profile(client, token, "987654321", "fim.a.fim@example.com")
+    r = _json(client, "post", "/lead/checkout", {"payment_method": "pix"}, token)
+    assert r.status_code == 200, r.content
+
+    me = client.get(f"{BASE}/lead/me", HTTP_AUTHORIZATION=f"Bearer {token}").json()
+    assert me["status"] == "pending"
+    assert me["customer"]["cpf"] == _valid_cpf("987654321")
+    assert me["customer"]["email"] == "fim.a.fim@example.com"
+    assert me["checkout"]["payment_method"] == "pix"

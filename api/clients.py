@@ -45,6 +45,12 @@ _ERROR_REGISTRY = (
 | `WRONG_STATUS` | ação fora da etapa do wizard (409) | `expected_status` (etapa a abrir), `missing_fields` (se faltam campos do RG/perfil) |
 | `SLOT_INVALID` | slot de foto desconhecido (422) | — |
 | `CPF_EXISTS` / `PHONE_EXISTS` / `EMAIL_EXISTS` | cadastro duplicado (409) | — |
+| `CPF_CONFLICT` | CPF já é de OUTRA conta no passo 3 do funil v2 (409) — notifica o titular e APAGA a conta da tentativa | — |
+| `CPF_ALREADY_SET` | a conta já confirmou um CPF (409) — trocar é com o suporte | — |
+| `EMAIL_CONFLICT` | e-mail já é de outra conta no passo 5 (409) | — |
+| `EMAIL_INVALID` | e-mail malformado no passo 5 (422) | — |
+| `PROFILE_INCOMPLETE` | checkout sem cpf/e-mail confirmados (409) | `missing_fields` |
+| `ALREADY_PAID` | troca de pagamento após confirmação (409) | — |
 | `CPF_INVALID` / `PHONE_INVALID` / `CPF_NOT_FOUND` | dado rejeitado na validação (422) | — |
 | `CPF_SERVICE_DOWN` / `PHONE_SERVICE_DOWN` / `CEP_SERVICE_DOWN` | serviço externo fora (502) | — |
 | `CEP_NOT_FOUND` / `STATE_INVALID` | endereço inválido (422) | — |
@@ -264,7 +270,10 @@ lead_router = Router(tags=["lead"])
 @auth_router.post("/register", response={201: LeadOut}, auth=None)
 def register(request, payload: LeadCreateIn):
     """Cadastro do cliente: **TODO cliente entra OBRIGATORIAMENTE como `lead`.** Cria o lead (cpf/phone/
-    email + método) + o checkout e devolve o pagamento na hora."""
+    email + método) + o checkout e devolve o pagamento na hora.
+
+    **APOSENTADO no funil v2 (protótipo 2026-07-18):** a conta nasce no `POST /auth/check` (telefone)
+    e cpf/e-mail/checkout entram nos passos 3/5/6. Mantido por compatibilidade (bot/legado)."""
     result = lead_iface.create_lead(
         cpf=payload.cpf,
         phone=payload.phone,
@@ -278,18 +287,24 @@ def register(request, payload: LeadCreateIn):
 @auth_router.post("/check", response=CheckOut, auth=None)
 def check(request, payload: CheckIn):
     """**O check NORMAL: dispara OTP** por cpf/phone e **VAZA existência** (CONVENTION §5): devolve
-    `found`+`roles` honestos — o front decide cadastro novo × login e pra qual fase do funil mandar.
+    `found`+`roles` honestos — o front decide login × captura e pra qual fase do funil mandar.
+
+    **Funil v2 (protótipo 2026-07-18): o check também CRIA a conta.** Número novo + WhatsApp
+    confirmado → nasce User+Profile(phone)+role `lead`+Lead (promotor do `?ref=`) e o OTP sai no
+    mesmo passo — resposta ganha `created:true`+`external_id` (o front segue direto pro OTP).
+    WhatsApp negado/indisponível → NÃO cria (`whatsapp:false|null`, front bloqueia/avisa).
 
     `send_otp=false` = o antigo `/auth/check-bot` integrado aqui: mesma função SEM disparar OTP,
     devolvendo o `token` (JWT) direto — o canal do chamador é a prova de identidade."""
     from core.webhook_auth import service_secret_ok
 
-    return auth_iface.check(
+    return lead_iface.check_or_capture(
         cpf=payload.cpf,
         phone=payload.phone,
         external_id=payload.external_id,
         send_otp=payload.send_otp,
         service_authed=service_secret_ok(request),
+        ref=payload.ref,
     )
 
 
@@ -326,6 +341,73 @@ def lead_checkout_url(request):
     if url is None:
         raise NotFound("Checkout não encontrado.", code="CHECKOUT_NOT_FOUND")
     return {"url": url}
+
+
+# ── funil do lead v2 (protótipo 2026-07-18): CPF → e-mail → checkout, autenticados ──
+# Caminho canônico: [1] telefone (check cria a conta) → [2] OTP → [3] CPF (identidade →
+# pergaminho) → [4/5] e-mail → [6] escolha/troca do pagamento. Os passos 3-6 exigem a role
+# `lead` (quem já avançou no funil não refaz identidade/pagamento por aqui).
+
+
+class IdentityIn(Schema):
+    cpf: str
+
+
+class IdentityOut(Schema):
+    cpf: str
+    name: str | None = None
+    birth_date: str | None = Field(None, description="ISO YYYY-MM-DD — o front calcula a idade")
+    sex: str | None = Field(None, description='"M" | "F" — decide "matriculado/a" no pergaminho')
+    photo: str | None = Field(
+        None, description="Sempre null por ora (CPFHub não entrega foto; front usa placeholder)"
+    )
+
+
+class EmailIn(Schema):
+    email: str
+
+
+class EmailOut(Schema):
+    email: str
+
+
+class CheckoutSetIn(Schema):
+    payment_method: str = Field(description='"pix" | "card"')
+
+
+@lead_router.post("/identity", response=IdentityOut)
+def lead_identity(request, payload: IdentityIn):
+    """Passo 3 — confirma o CPF e devolve a identidade (pergaminho). DV inválido → 422
+    `CPF_INVALID`; CPF de outra conta → **409 `CPF_CONFLICT`** (notifica o titular + APAGA a
+    conta recém-criada desta tentativa — contrato de segurança do protótipo, sem vazar dados);
+    CPFHub fora → 502 `CPF_SERVICE_DOWN`."""
+    require_roles(request.auth, "lead")
+    return auth_iface.confirm_identity(
+        user_external_id=request.auth.external_id, cpf=payload.cpf
+    )
+
+
+@lead_router.post("/email", response=EmailOut)
+def lead_email(request, payload: EmailIn):
+    """Passo 5 — grava o e-mail. De outra conta → 409 `EMAIL_CONFLICT`; o próprio → segue
+    (idempotente); formato inválido → 422 `EMAIL_INVALID`."""
+    require_roles(request.auth, "lead")
+    return auth_iface.set_email(
+        user_external_id=request.auth.external_id, email=payload.email
+    )
+
+
+@lead_router.post("/checkout", response=CheckoutOut)
+def lead_set_checkout(request, payload: CheckoutSetIn):
+    """Passo 6 — define (ou TROCA) a forma de pagamento e cria o checkout. Trocar recria a
+    sessão: o link antigo morre (PIX antigo é cancelado no Asaas, best-effort) e nasce
+    URL/QR/token novos. Pago → 409 `ALREADY_PAID`; sem cpf/e-mail → 409 `PROFILE_INCOMPLETE`
+    (+`missing_fields`). A URL do gateway nasce async — o front acompanha por `GET /lead/me`."""
+    require_roles(request.auth, "lead")
+    return lead_iface.set_checkout(
+        user_external_id=request.auth.external_id,
+        payment_method=payload.payment_method,
+    )
 
 
 api.add_router("/auth", auth_router)

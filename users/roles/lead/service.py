@@ -43,6 +43,9 @@ def create_lead(
 
     Mínimo (Victor 2026-06-04): método (default cartão), cpf, phone, email. `ref` = external_id do
     promotor (landing); sem ref → promotor padrão (coordenador do hub padrão).
+
+    **Caminho LEGADO no funil v2** (protótipo 2026-07-18): o funil novo cria a conta no
+    `check_or_capture` (telefone) e o checkout no `set_checkout` (passo 6). Mantido pro bot/legado.
     """
     method = _API_METHODS.get((payment_method or "card").strip().lower())
     if method is None:
@@ -156,7 +159,9 @@ def _notify_checkout(lead: Lead, checkout: Checkout) -> None:
             event,
             profile=profile,
             ctx=ctx,
-            idempotency_key=f"lead_checkout_{lead.external_id}",
+            # por TOKEN (não por lead): trocar a forma de pagamento gera checkout novo → o link
+            # novo notifica de novo (funil v2); o mesmo checkout continua notificando UMA vez.
+            idempotency_key=f"lead_checkout_{lead.external_id}_{checkout.short_token}",
         )
     except Exception as exc:  # noqa: BLE001
         logger.warning(
@@ -264,7 +269,10 @@ def _fill_pix(checkout: Checkout, profile) -> None:
     from integrations.bank.asaas.qr import qr_url_for
 
     lead = checkout.lead
-    pid = f"lead_{lead.external_id.hex[:16]}"  # = externalReference que o webhook do asaas casa
+    # = externalReference que o webhook do asaas casa (mark_paid busca pelo pid GRAVADO na linha).
+    # Sufixo do checkout.pk (funil v2): o lead pode TROCAR a forma de pagamento → cada checkout
+    # gera uma cobrança nova no gateway (o pid do Asaas é único; reusar colidiria).
+    pid = f"lead_{lead.external_id.hex[:12]}_{checkout.pk}"
     payer = PayerData(
         name=profile.name or "Aluno",
         cpf_cnpj=profile.cpf,
@@ -338,6 +346,159 @@ def _checkout_dict(c: Checkout) -> dict:
         "qrcode_image": c.qrcode_image,
         "due_date": c.due_date.isoformat() if c.due_date else None,
     }
+
+
+# ── funil do lead v2 (protótipo 2026-07-18): telefone → OTP → CPF → e-mail → checkout ──
+# A API SE MOLDA AO PROTÓTIPO (DOCUMENTACAO, "martelo batido"): a conta nasce no passo do
+# TELEFONE (o /auth/register como criador de lead fica aposentado no funil) e a escolha de
+# pagamento vem POR ÚLTIMO — o Lead nasce SEM checkout; o checkout entra (e pode ser TROCADO)
+# no passo 6 via `set_checkout`.
+
+
+def check_or_capture(
+    *,
+    cpf: str | None = None,
+    phone: str | None = None,
+    external_id: str | None = None,
+    send_otp: bool = True,
+    service_authed: bool = False,
+    ref: str | None = None,
+) -> dict:
+    """`POST clients/auth/check` do funil v2: o check normal E a captura no mesmo passo.
+
+    - Usuário EXISTE → comporta igual ao `auth.check` (OTP + found + roles honestos; o front
+      roteia: sem role de cliente → portal da equipe; student/veteran → app do aluno).
+    - NÃO existe, veio `phone` e o WhatsApp CONFIRMOU o número → **cria a conta na hora**
+      (User+Profile(phone)+role lead+Lead ligado ao promotor do `?ref=`) e dispara o OTP —
+      resposta ganha `created: true` + `external_id` (o front segue direto pro OTP).
+    - NÃO existe e WhatsApp negou (`whatsapp:false`) ou está fora (`whatsapp:null`) → NÃO cria;
+      o front bloqueia/avisa (modais "número inválido"/"não consegui confirmar").
+
+    Rate-limit por IP fica no reverse proxy (mesma régua do check). O WhatsApp é consultado 2×
+    no caminho de captura (check + register) — aceito por ora: o register resolve o número
+    canônico (variante 9º dígito) e o custo é baixo; unificar é otimização futura."""
+    result = auth_iface.check(
+        cpf=cpf,
+        phone=phone,
+        external_id=external_id,
+        send_otp=send_otp,
+        service_authed=service_authed,
+    )
+    if result["found"] or not phone or not send_otp:
+        return {**result, "created": False}
+    if result.get("whatsapp") is not True:
+        return {**result, "created": False}
+
+    # A captura é best-effort NO ENDPOINT PÚBLICO: se não completar (seed sem promotor padrão,
+    # corrida de PHONE_EXISTS), o check degrada honesto pro resultado puro (`created:false`) em
+    # vez de 4xx/5xx — o front avisa e o usuário re-tenta. O erro fica alto no log.
+    try:
+        promoter = _resolve_promoter(ref)
+        reg = auth_iface.register(
+            role="lead", phone=phone
+        )  # cpf/e-mail entram nos passos 3/5
+        user = User.objects.get(external_id=reg["external_id"])
+        lead = Lead.objects.create(
+            user=user, promoter=promoter, status=Lead.Status.PENDING
+        )
+    except DomainError as exc:
+        logger.warning("lead.capture_on_check_failed", code=exc.code, error=exc.detail)
+        return {**result, "created": False}
+    logger.info(
+        "lead.captured_on_check",
+        external_id=str(lead.external_id),
+        promoter=str(promoter.external_id),
+    )
+    _notify_captured(lead)
+    _notify_promoter_new_lead(lead)
+    return {
+        "found": False,
+        "created": True,
+        "external_id": reg["external_id"],
+        "otp_sent": reg["otp_sent"],
+        "otp_wait": None,
+        "whatsapp": True,
+        "roles": ["lead"],
+        "token": None,
+    }
+
+
+def set_checkout(*, user_external_id: str, payment_method: str | None) -> dict:
+    """Passo 6 do funil v2: define (ou TROCA) a forma de pagamento do lead logado — cria o
+    checkout na hora e devolve o dict (URL nasce async/lazy, como no register legado).
+
+    Contrato do protótipo (painel "Pagamento já preparado" → "Trocar"): o lead pode trocar a
+    forma DEPOIS do checkout criado. Recriar = apagar a linha antiga (o link curto antigo morre
+    junto — `checkout_links.resolve` não acha mais o token) + cancelar a cobrança PIX antiga no
+    Asaas (best-effort; cartão InfinitePay não tem cancel — o link antigo apenas fica órfão) +
+    criar linha nova com token/pid novos.
+
+    Guardas: lead PAGO → 409 `ALREADY_PAID` (não mexe em pagamento concluído). Perfil sem
+    cpf/e-mail (pulou passos 3/5) → 409 `PROFILE_INCOMPLETE` + `missing_fields`."""
+    from users.exceptions import Conflict, NotFound
+
+    lead = get_for_user_external_id(user_external_id)
+    if lead is None:
+        raise NotFound("Lead não encontrado.", code="LEAD_NOT_FOUND")
+    method = _API_METHODS.get((payment_method or "").strip().lower())
+    if method is None:
+        raise LeadError("invalid_payment_method")
+    if lead.status == Lead.Status.PAID:
+        raise Conflict("Pagamento já confirmado.", code="ALREADY_PAID")
+
+    profile = profiles.get(lead.user)
+    missing = [
+        field
+        for field, value in (
+            ("cpf", profile.cpf if profile else None),
+            ("email", profile.email if profile else None),
+        )
+        if not value
+    ]
+    if profile is None or missing:
+        raise Conflict(
+            "Complete a identidade e o e-mail antes do pagamento.",
+            code="PROFILE_INCOMPLETE",
+            extra={"missing_fields": missing or ["cpf", "email"]},
+        )
+
+    old = getattr(lead, "checkout", None)
+    if old is not None:
+        if old.is_paid:
+            raise Conflict("Pagamento já confirmado.", code="ALREADY_PAID")
+        _cancel_provider_charge(old)
+        old.delete()
+        # refresh: a relação 1-1 fica cacheada no objeto — sem isso o create abaixo colide.
+        lead = Lead.objects.get(pk=lead.pk)
+        logger.info(
+            "lead.checkout_replaced",
+            external_id=str(lead.external_id),
+            new_method=method,
+        )
+
+    checkout = _create_checkout_row(lead, method)
+    _enqueue_provider_build(checkout)
+    return _checkout_dict(checkout)
+
+
+def _cancel_provider_charge(checkout: Checkout) -> None:
+    """Cancela a cobrança substituída no gateway (best-effort — a troca de método não pode
+    travar por instabilidade do provider; a linha local morre de qualquer jeito e o webhook de
+    um pagamento tardio no link antigo cai no fallback rastreável do mark_paid)."""
+    if not checkout.provider_payment_id:
+        return  # gateway nem respondeu ainda — nada a cancelar
+    if checkout.provider != Checkout.Provider.ASAAS:
+        return  # InfinitePay não expõe cancel de link — o checkout antigo fica órfão
+    try:
+        from integrations.bank.asaas import charge as asaas_charge
+
+        asaas_charge.cancel_charge(checkout.provider_payment_id)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "lead.checkout_cancel_failed",
+            external_id=str(checkout.lead.external_id),
+            error=type(exc).__name__,
+        )
 
 
 # ── self (o próprio cliente vê seu lead: GET /clients/lead/me) ───────────────
