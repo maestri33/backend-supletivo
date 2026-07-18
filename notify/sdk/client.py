@@ -128,6 +128,16 @@ def get_notifications(
     return _ok(resp, "GET", "/v1/notifications")
 
 
+def get_notification(external_id: str) -> dict | None:
+    """GET /v1/notifications/{external_id}. 404 → None (usado pelo CLI notify_send em modo remote,
+    onde não existe row local pra consultar — achado do review adversarial)."""
+    path = f"/v1/notifications/{external_id}"
+    resp = _request("GET", path)
+    if resp.status_code == 404:
+        return None
+    return _ok(resp, "GET", path)
+
+
 def phone_check(numbers: list[str]) -> list[dict]:
     """POST /v1/phone/check → [{number, exists}] (na ordem enviada, resolvida pela Evolution)."""
     resp = _request("POST", "/v1/phone/check", json={"numbers": numbers})

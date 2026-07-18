@@ -156,22 +156,50 @@ def test_history_local_intocado(client, staff_headers, no_http):
 
 _BODY = {"body_md": "Oi {nome}, chegou!", "is_tts": True, "channels": "whatsapp"}
 
+# valores distintos em TODOS os 11 campos que `_server_template_payload` monta — um typo em
+# qualquer chave do payload (ou um campo esquecido) quebra a igualdade exata abaixo.
+_BODY_FULL = {
+    "title": "Novo Template",
+    "subject": "Assunto novo",
+    "body_md": "Oi {nome}, chegou!",
+    "is_tts": True,
+    "storytelling": True,
+    "story_prompt": "conte uma historia de superacao",
+    "channels": "whatsapp",
+    "media_url": "http://x/img.png",
+    "media_type": "image",
+    "mail_template": "custom-template",
+    "notes": "nota interna do staff",
+}
+
 
 def test_put_template_remote_dual_write(client, staff_headers, remote, http):
-    """Escreve local E faz PUT full no servidor (conta NOTIFY_ACCOUNT_SLUG)."""
+    """Escreve local E faz PUT full no servidor (conta NOTIFY_ACCOUNT_SLUG) — TODOS os 11 campos
+    de `_server_template_payload` vão no payload, com valores distintos."""
     from notify.models import Template
 
     http["responses"].append(_FakeResp(200, {"event": "ev.x"}))
-    resp = _put(client, "/api/v1/staff/notify/templates/ev.x", _BODY, staff_headers)
+    resp = _put(
+        client, "/api/v1/staff/notify/templates/ev.x", _BODY_FULL, staff_headers
+    )
     assert resp.status_code == 200
     assert Template.objects.filter(event="ev.x").exists()
     call = http["calls"][0]
     assert call["method"] == "PUT"
     assert call["path"] == "/v1/staff/templates/supletivo/ev.x"
-    assert call["json"]["body_md"] == "Oi {nome}, chegou!"
-    assert call["json"]["is_tts"] is True
-    assert call["json"]["channels"] == "whatsapp"
-    assert call["json"]["mail_template"] == "default"
+    assert call["json"] == {
+        "title": "Novo Template",
+        "subject": "Assunto novo",
+        "body_md": "Oi {nome}, chegou!",
+        "is_tts": True,
+        "storytelling": True,
+        "story_prompt": "conte uma historia de superacao",
+        "channels": "whatsapp",
+        "media_url": "http://x/img.png",
+        "media_type": "image",
+        "mail_template": "custom-template",
+        "notes": "nota interna do staff",
+    }
 
 
 def test_put_template_remote_push_falha_rollback(client, staff_headers, remote, http):
@@ -242,7 +270,12 @@ def test_put_trigger_remote_dual_write(client, staff_headers, remote, http):
     resp = _put(
         client,
         "/api/v1/staff/notify/templates/ev.x/trigger",
-        {"fires_on": "lead.paid", "delay_minutes": -3, "active": False},
+        {
+            "fires_on": "lead.paid",
+            "source": "manual-staff",
+            "delay_minutes": -3,
+            "active": False,
+        },
         staff_headers,
     )
     assert resp.status_code == 200
@@ -250,6 +283,7 @@ def test_put_trigger_remote_dual_write(client, staff_headers, remote, http):
     assert call["method"] == "PUT"
     assert call["path"] == "/v1/staff/templates/supletivo/ev.x/trigger"
     assert call["json"]["fires_on"] == "lead.paid"
+    assert call["json"]["source"] == "manual-staff"  # nunca era asserido antes
     assert call["json"]["delay_minutes"] == 0  # clamp ≥0 vale nos dois lados
     assert call["json"]["active"] is False
     assert Trigger.objects.get(template__event="ev.x").active is False

@@ -112,7 +112,10 @@ async def _wa_check_remote(phone: str) -> tuple[bool, str]:
         value, ts = cached
         if time.monotonic() - ts < _REMOTE_CHECK_TTL_S:
             return (value is not None, value or phone)
-        del _remote_check_cache[phone]
+        # pop (não del): 2 threads podem expirar a MESMA entrada ao mesmo tempo — achado
+        # do review adversarial (del cru levantava KeyError não tratado, virando 500 em vez
+        # de PHONE_SERVICE_DOWN).
+        _remote_check_cache.pop(phone, None)
 
     variants = _br_phone_variants(phone)
     try:
