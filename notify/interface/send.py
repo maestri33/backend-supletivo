@@ -14,7 +14,10 @@ Django-Q e devolve o `external_id` na hora — NUNCA bloqueia o fluxo do caller 
 
 from __future__ import annotations
 
+import uuid
+
 import structlog
+from django.conf import settings
 from django.db import IntegrityError, transaction
 
 from notify.models import STATUS_PENDING, STATUS_SKIPPED, Notification
@@ -66,6 +69,25 @@ def send(
     pela extensão se não vier. `gender` (M/F) escolhe a voz do TTS (resolvido no integrations.ai).
     `run_sync=True` roda o despacho inline (testes/commands); o default é assíncrono (Django-Q).
     """
+    if settings.NOTIFY_MODE == "remote":
+        return _send_remote(
+            text=text,
+            caller=caller,
+            phone=phone,
+            email=email,
+            title=title,
+            subject=subject,
+            whatsapp=whatsapp,
+            email_channel=email_channel,
+            tts=tts,
+            media_url=media_url,
+            media_type=media_type,
+            gender=gender,
+            mail_template=mail_template,
+            idempotency_key=idempotency_key,
+            run_sync=run_sync,
+        )
+
     if idempotency_key:
         existing = Notification.objects.filter(idempotency_key=idempotency_key).first()
         if existing is not None:
@@ -137,6 +159,74 @@ def send(
         transaction.on_commit(lambda: async_task("notify.dispatch.dispatch", notif.id))
 
     return str(notif.external_id)
+
+
+def _send_remote(
+    *,
+    text: str,
+    caller: str,
+    phone: str | None,
+    email: str | None,
+    title: str | None,
+    subject: str | None,
+    whatsapp: bool,
+    email_channel: bool,
+    tts: bool,
+    media_url: str | None,
+    media_type: str | None,
+    gender: str | None,
+    mail_template: str,
+    idempotency_key: str | None,
+    run_sync: bool,
+) -> str:
+    """Modo remote (Fase 2): delega o envio ao notify-server via SDK, preservando o contrato.
+
+    Async: enfileira o POST no Django-Q só DEPOIS do commit (§12) e devolve NA HORA um uuid
+    gerado aqui; o servidor deduplica pela chave (`external_id` do payload = idempotency_key do
+    caller, ou o próprio uuid), então o retry do Q re-posta a MESMA chave sem duplicar. Com
+    idempotency_key repetida o retorno é um uuid novo "dangling" (aceito — callers com chave
+    ignoram o retorno, recon R4). Sync: POST inline; devolve o external_id REAL da resposta.
+    """
+    client_uuid = str(uuid.uuid4())
+    server_key = idempotency_key or client_uuid
+    if media_url and not media_type:
+        media_type = _guess_media_type(media_url)  # paridade com o caminho local
+    payload = {
+        "text": text,
+        "caller": caller,
+        "phone": phone,
+        "email": email,
+        "title": title,
+        "subject": subject,
+        "whatsapp": whatsapp,
+        "email_channel": email_channel,
+        "tts": tts,
+        "media_url": media_url,
+        "media_type": media_type,
+        "gender": gender,
+        "mail_template": mail_template,
+        # na API /v1/send o campo chama-se external_id, mas é a idempotency_key do servidor.
+        "external_id": server_key,
+        "run_sync": run_sync,
+    }
+
+    if run_sync:
+        from notify.sdk import client as sdk
+
+        resp = sdk.post_send(payload, run_sync=True)
+        return str(resp["external_id"])
+
+    from django_q.tasks import async_task
+
+    # POST só depois do commit (§12): rollback do caller não pode virar mensagem enviada.
+    transaction.on_commit(lambda: async_task("notify.sdk.push.push_send", payload))
+    logger.info(
+        "notify.sdk.remote_queued",
+        external_id=client_uuid,
+        caller=caller,
+        has_key=bool(idempotency_key),
+    )
+    return client_uuid
 
 
 def get_by_external_id(external_id) -> Notification | None:
