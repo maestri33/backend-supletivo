@@ -101,7 +101,7 @@ def get_map(users) -> dict:
 def create(
     *,
     user,
-    cpf: str,
+    cpf: str | None,
     phone: str,
     email: str | None = None,
     gender: str | None = None,
@@ -183,6 +183,43 @@ def set_selfie_needs_meeting(user, value: bool = True) -> Profile | None:
     return p
 
 
+def set_email(user, email: str) -> Profile | None:
+    """Grava o e-mail de contato no profile (passo 5 do funil do lead v2). None se não tem profile.
+
+    A UNICIDADE é checada pelo caller (`auth.set_email` → EMAIL_CONFLICT) antes de gravar; o
+    `unique` do banco segue como última linha de defesa."""
+    p = Profile.objects.filter(user=user).first()
+    if p is None:
+        return None
+    p.email = email
+    p.save(update_fields=["email", "updated_at"])
+    return p
+
+
+def set_cpf_identity(
+    user, *, cpf: str, name=None, gender=None, birth_date=None
+) -> Profile | None:
+    """Grava o CPF + identidade (CPFHub) no profile — passo 3 do funil do lead v2 (a conta nasce
+    sem CPF no passo do telefone). Identidade só PREENCHE vazios (mesma régua do `fill_identity`);
+    o CPF sobrescreve (é a confirmação do dono da conta). None se não tem profile."""
+    p = Profile.objects.filter(user=user).first()
+    if p is None:
+        return None
+    changed = ["cpf"]
+    p.cpf = cpf
+    if name and not p.name:
+        p.name = name
+        changed.append("name")
+    if gender and not p.gender:
+        p.gender = gender
+        changed.append("gender")
+    if birth_date and not p.birth_date:
+        p.birth_date = birth_date
+        changed.append("birth_date")
+    p.save(update_fields=[*changed, "updated_at"])
+    return p
+
+
 def set_phone(user, phone: str) -> Profile | None:
     """Grava o telefone de login no profile — usado pelo resgate do staff (`auth.change_phone`)
     quando o usuário perde o número e fica trancado fora do OTP. None se não tem profile."""
@@ -203,6 +240,8 @@ __all__ = [
     "find_by_external_id",
     "get",
     "create",
+    "set_email",
+    "set_cpf_identity",
     "attach_address",
     "get_address",
     "set_pix",

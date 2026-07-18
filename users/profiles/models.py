@@ -25,7 +25,9 @@ class Profile(models.Model):
         on_delete=models.CASCADE,
         related_name="profile",
     )
-    cpf = models.CharField("CPF", max_length=11, unique=True)
+    # NULO no funil do lead v2 (protótipo 2026-07-18): a conta nasce no passo do TELEFONE e o CPF
+    # entra no passo 3 (`auth.confirm_identity`). `unique` continua valendo entre não-nulos.
+    cpf = models.CharField("CPF", max_length=11, unique=True, null=True, blank=True)
     # telefone no formato canônico DDI+DDD+número (55+DDD+9+8 = 13 díg) — o mesmo que o WhatsApp/
     # notify usam (resolve_br_number). Guardamos o número resolvido (variante registrada no zap).
     phone = models.CharField("telefone", max_length=13, unique=True)

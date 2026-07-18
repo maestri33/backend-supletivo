@@ -18,6 +18,9 @@ class CheckIn(Schema):
     external_id: str | None = None  # re-dispara OTP de usuário já conhecido (do USER)
     # O NORMAL é disparar OTP. `false` = modo sem OTP: espia found/roles e devolve `token` direto.
     send_otp: bool = True
+    # funil do lead v2 (`?ref=` da landing): external_id do PROMOTOR — usado SÓ pelo grupo
+    # `clients` quando o check CRIA a conta (captura). Os demais grupos ignoram.
+    ref: str | None = None
 
 
 class CheckOut(Schema):
@@ -33,6 +36,9 @@ class CheckOut(Schema):
     roles: list[str] | None = None
     # só no modo `send_otp=false`: JWT de acesso direto.
     token: str | None = None
+    # funil do lead v2: o check do `clients` CRIA a conta quando o número é novo e tem WhatsApp
+    # (found continua honesto = false). O front trata (found || created) → tela do OTP.
+    created: bool = False
 
 
 class LoginIn(Schema):

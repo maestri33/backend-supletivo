@@ -19,6 +19,20 @@ def validate_cpf(cpf: str) -> str:
     return clean
 
 
+def cpf_check_digits_ok(cpf: str) -> bool:
+    """Dígitos verificadores do CPF (mod-11). Usado pelo passo 3 do funil v2 (`confirm_identity`)
+    ANTES do lookup no CPFHub — DV errado nem gasta chamada externa. O `validate_cpf` continua
+    só-formato (o register legado delega a veracidade ao CPFHub e tolera o serviço fora)."""
+
+    def dv(digits: str) -> int:
+        weight = len(digits) + 1
+        total = sum(int(d) * (weight - i) for i, d in enumerate(digits))
+        rest = (total * 10) % 11
+        return 0 if rest == 10 else rest
+
+    return dv(cpf[:9]) == int(cpf[9]) and dv(cpf[:10]) == int(cpf[10])
+
+
 def validate_phone(phone: str) -> str:
     """Normaliza pro formato canônico DDI+DDD+número (BR). Retorna 12 ou 13 dígitos ou ValueError.
 
