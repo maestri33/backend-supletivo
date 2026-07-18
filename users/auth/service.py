@@ -14,12 +14,19 @@ from __future__ import annotations
 import random
 import time
 
+import httpx
 import structlog
 from asgiref.sync import async_to_sync
 from django.conf import settings
 from django.db import IntegrityError, transaction
 
-from integrations.communication.whatsapp.client import WhatsAppError, get_client
+from integrations.communication.whatsapp.client import (
+    WhatsAppError,
+    _br_phone_variants,
+    get_client,
+)
+from notify.sdk import client as notify_client
+from notify.sdk.client import NotifyServerError
 from integrations.tools.cpf.scripts import cpfhub
 from users.auth import validation
 from users.auth.models import User
@@ -88,12 +95,50 @@ def _lookup_cpf(cpf: str):
         ) from exc
 
 
+# Cache do phone/check remoto (NOTIFY_MODE=remote): phone → (resolvido|None, monotonic_ts).
+# Análogo ao _br_jid_cache do client Evolution; cacheia inclusive o negativo (None). TTL 1h.
+_REMOTE_CHECK_TTL_S = 3600
+_remote_check_cache: dict[str, tuple[str | None, float]] = {}
+
+
+async def _wa_check_remote(phone: str) -> tuple[bool, str]:
+    """phone/check via notify-server: 1 POST com as variantes BR (com/sem 9º dígito).
+
+    Erros do SDK viram WhatsAppError p/ o `_check_phone_whatsapp` seguir convertendo em
+    IntegrationError PHONE_SERVICE_DOWN — preserva os 3 tratamentos por caller (register
+    best-effort, change_phone estrito, check → None)."""
+    cached = _remote_check_cache.get(phone)
+    if cached is not None:
+        value, ts = cached
+        if time.monotonic() - ts < _REMOTE_CHECK_TTL_S:
+            return (value is not None, value or phone)
+        del _remote_check_cache[phone]
+
+    variants = _br_phone_variants(phone)
+    try:
+        result = await notify_client.phone_check_async(variants)
+    except NotifyServerError as exc:
+        raise WhatsAppError(exc.status_code, exc.body) from exc
+    except httpx.HTTPError as exc:
+        raise WhatsAppError(0, f"{type(exc).__name__}: {exc}") from exc
+
+    resolved: str | None = None
+    for item in result or []:
+        if item.get("exists"):
+            resolved = item.get("number") or phone
+            break
+    _remote_check_cache[phone] = (resolved, time.monotonic())
+    return (resolved is not None, resolved or phone)
+
+
 async def _wa_check(phone: str) -> tuple[bool, str]:
     if getattr(settings, "TEST_MODE", False):
         return (
             True,
             phone,
         )  # TEST_MODE=1: número "existe" no zap sem chamar a Evolution API.
+    if getattr(settings, "NOTIFY_MODE", "local") == "remote":
+        return await _wa_check_remote(phone)
     async with get_client() as wa:
         resolved = await wa.resolve_br_number(phone)
         result = await wa.check_numbers([resolved])
