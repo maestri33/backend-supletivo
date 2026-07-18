@@ -505,9 +505,7 @@ def confirm_identity(*, user_external_id: str, cpf: str) -> dict:
     # DV antes do CPFHub (funil v2): dígito errado nem gasta chamada externa — o front já valida,
     # aqui é a última linha (mesmo modal "Vamos conferir esse CPF?" no front via CPF_INVALID).
     if not validation.cpf_check_digits_ok(cpf):
-        raise ValidationError(
-            "CPF inválido (dígito verificador).", code="CPF_INVALID"
-        )
+        raise ValidationError("CPF inválido (dígito verificador).", code="CPF_INVALID")
 
     own = profiles.get(user)
     if own is not None and own.cpf == cpf:
@@ -530,9 +528,7 @@ def confirm_identity(*, user_external_id: str, cpf: str) -> dict:
         _notify_cpf_conflict(other, attempt_phone)
         try:
             roles.purge_funnel_user(user_external_id=str(user.external_id))
-            logger.info(
-                "auth.cpf_conflict_purged", external_id=str(user.external_id)
-            )
+            logger.info("auth.cpf_conflict_purged", external_id=str(user.external_id))
         except Exception as exc:  # noqa: BLE001 — purge falhou (ex.: conta avançada): loga e segue
             logger.warning(
                 "auth.cpf_conflict_purge_failed",
@@ -541,9 +537,7 @@ def confirm_identity(*, user_external_id: str, cpf: str) -> dict:
             )
         logger.info("auth.cpf_conflict", external_id=str(user.external_id))
         # SEM vazar nome/dados do titular (proteção de identidade do protótipo).
-        raise Conflict(
-            "Este CPF já está vinculado a outra conta.", code="CPF_CONFLICT"
-        )
+        raise Conflict("Este CPF já está vinculado a outra conta.", code="CPF_CONFLICT")
 
     identity = _lookup_cpf(cpf)  # IntegrationError (CPF_SERVICE_DOWN) sobe → 502
     if identity is None:

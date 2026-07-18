@@ -225,8 +225,9 @@ def test_email_grava_e_conflita(client, default_hub):
 
     # o próprio e-mail de novo → idempotente
     assert (
-        _json(client, "post", "/lead/email", {"email": "maria@gmail.com"}, token_a)
-        .status_code
+        _json(
+            client, "post", "/lead/email", {"email": "maria@gmail.com"}, token_a
+        ).status_code
         == 200
     )
 
@@ -247,8 +248,9 @@ def test_email_grava_e_conflita(client, default_hub):
 
 def _complete_profile(client, token, cpf_seed: str, email: str) -> None:
     assert (
-        _json(client, "post", "/lead/identity", {"cpf": _valid_cpf(cpf_seed)}, token)
-        .status_code
+        _json(
+            client, "post", "/lead/identity", {"cpf": _valid_cpf(cpf_seed)}, token
+        ).status_code
         == 200
     )
     assert (
@@ -305,8 +307,9 @@ def test_checkout_pago_nao_troca(client, default_hub):
     token = _enter(client, "11987650032")
     _complete_profile(client, token, "444555666", "lead32@example.com")
     assert (
-        _json(client, "post", "/lead/checkout", {"payment_method": "pix"}, token)
-        .status_code
+        _json(
+            client, "post", "/lead/checkout", {"payment_method": "pix"}, token
+        ).status_code
         == 200
     )
     lead = Lead.objects.get(user__profile__phone="5511987650032")

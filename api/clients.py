@@ -356,10 +356,15 @@ class IdentityIn(Schema):
 class IdentityOut(Schema):
     cpf: str
     name: str | None = None
-    birth_date: str | None = Field(None, description="ISO YYYY-MM-DD — o front calcula a idade")
-    sex: str | None = Field(None, description='"M" | "F" — decide "matriculado/a" no pergaminho')
+    birth_date: str | None = Field(
+        None, description="ISO YYYY-MM-DD — o front calcula a idade"
+    )
+    sex: str | None = Field(
+        None, description='"M" | "F" — decide "matriculado/a" no pergaminho'
+    )
     photo: str | None = Field(
-        None, description="Sempre null por ora (CPFHub não entrega foto; front usa placeholder)"
+        None,
+        description="Sempre null por ora (CPFHub não entrega foto; front usa placeholder)",
     )
 
 
