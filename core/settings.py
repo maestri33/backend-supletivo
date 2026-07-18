@@ -498,6 +498,20 @@ MAIL_FROM_NAME = env("MAIL_FROM_NAME", default="Supletivo Brasil")
 MAIL_TIMEOUT = env.int("MAIL_TIMEOUT", default=30)
 
 
+# notify-server (Fase 2 — SDK HTTP em notify/sdk/): NOTIFY_MODE=remote troca o miolo local do
+# notify pelo POST ao notify-server; "local" = comportamento atual, byte a byte (rollback =
+# voltar a flag + restart). A api-key pode ter chars especiais — os.environ literal (padrão
+# MAIL_SMTP_PASSWORD acima). NOTIFY_TIMEOUT cobre os POSTs de worker/phone-check;
+# NOTIFY_SYNC_TIMEOUT cobre o run_sync inline (staff /test espera o despacho real — mais folga).
+# Checks notify.E001/E002 validam a combinação no boot.
+NOTIFY_MODE = env("NOTIFY_MODE", default="local")  # local | remote
+NOTIFY_SERVER_URL = env("NOTIFY_SERVER_URL", default="http://notify.v7m.org")
+NOTIFY_API_KEY = os.environ.get("NOTIFY_API_KEY", "")
+NOTIFY_ACCOUNT_SLUG = env("NOTIFY_ACCOUNT_SLUG", default="supletivo")
+NOTIFY_TIMEOUT = env.float("NOTIFY_TIMEOUT", default=10.0)
+NOTIFY_SYNC_TIMEOUT = env.float("NOTIFY_SYNC_TIMEOUT", default=60.0)
+
+
 # Django-Q2 — fila async com broker no próprio banco (sem Redis). `qcluster` roda o worker.
 Q_CLUSTER = {
     "name": "mvp",
