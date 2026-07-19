@@ -599,17 +599,22 @@ def test_template(request, event: str, payload: TestSendIn):
     require_superuser(request.auth)
     from notify.interface.events import send_event
 
-    ext = send_event(
-        event,
-        user=str(request.auth.external_id),
-        ctx=payload.ctx,
-        channels_override=tuple(payload.channels) if payload.channels else None,
-        # G19: SEM idempotency_key. A key era estável (event+staff), então o 2º clique em "testar"
-        # retornava a notificação anterior e NÃO enviava — o preview parava de funcionar. Preview é
-        # pra ver o resultado a CADA clique; idempotência não faz sentido aqui (não é evento de
-        # negócio com risco de duplicação, é o próprio staff testando).
-        run_sync=True,  # síncrono pra o staff ver o resultado AGORA
-    )
+    try:
+        ext = send_event(
+            event,
+            user=str(request.auth.external_id),
+            ctx=payload.ctx,
+            channels_override=tuple(payload.channels) if payload.channels else None,
+            # G19: SEM idempotency_key. A key era estável (event+staff), então o 2º clique em "testar"
+            # retornava a notificação anterior e NÃO enviava — o preview parava de funcionar. Preview é
+            # pra ver o resultado a CADA clique; idempotência não faz sentido aqui (não é evento de
+            # negócio com risco de duplicação, é o próprio staff testando).
+            run_sync=True,  # síncrono pra o staff ver o resultado AGORA
+        )
+    except KeyError:
+        # evento sem Template no DB e ausente do catálogo in-memory: msgs.text() levanta KeyError.
+        # Vira 404 EVENT_NOT_FOUND (senão o handler genérico devolveria 500).
+        ext = None
     if ext is None:
         raise NotFound(
             f"evento '{event}' não existe (nem Template, nem catálogo in-memory).",

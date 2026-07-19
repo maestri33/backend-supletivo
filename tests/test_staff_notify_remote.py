@@ -223,3 +223,16 @@ def test_restore_seed_remote_local_only(client, staff_headers, remote, no_http):
     )
     assert resp.status_code == 200
     assert Template.objects.filter(event=_SEED_EVENT).exists()
+
+
+def test_test_template_unknown_event_returns_404(client, staff_headers, no_http):
+    """POST /templates/{event}/test de evento sem Template e fora do catálogo → 404 EVENT_NOT_FOUND
+    (send_event levanta KeyError via msgs.text; o endpoint traduz pra 404 em vez de 500)."""
+    resp = client.post(
+        "/api/v1/staff/notify/templates/evento.que.nao.existe/test",
+        data=json.dumps({}),
+        content_type="application/json",
+        **staff_headers,
+    )
+    assert resp.status_code == 404
+    assert resp.json()["code"] == "EVENT_NOT_FOUND"
