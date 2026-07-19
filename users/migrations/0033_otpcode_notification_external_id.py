@@ -1,37 +1,14 @@
-# Fase 2 (notify cutover) — passo 1/2: adiciona a coluna nova e copia o vínculo.
+# NO-OP — reconciliação da corrida entre duas sessões no mesmo branch (2026-07-18/19).
 #
-# A FK OtpCode.notification só é removida na migração seguinte (0034), depois do deploy
-# reiniciar os workers. Assim o código ANTIGO (que ainda declara a FK) continua rodando contra
-# um schema que ainda tem a coluna durante a janela migrate→restart, sem quebrar o login por OTP
-# no meio do deploy (achado do review adversarial: migração única quebrava OtpCode ali).
-#
-# UUIDField (não CharField): send()/send_event() sempre devolvem str(uuid.uuid4()).
+# Esta migração foi aplicada em PRODUÇÃO via `--fake` (nunca executou SQL): a migração irmã
+# `0033_otpcode_notification_fk_to_uuid` (de outra sessão, funil v2) chegou primeiro e já tinha
+# feito o AddField+RunPython+RemoveField completo quando esta foi reconciliada. Mantida como
+# checkpoint vazio só porque o nome já está gravado em `django_migrations` na produção real —
+# removê-la quebraria `showmigrations`/`migrate --check` lá. Em bancos NOVOS (CI, staging do
+# zero), quem cria o schema físico é a cadeia `0033_otpcode_notification_fk_to_uuid` →
+# `0034_profile_cpf_nullable`; esta e a `0034_remove_otpcode_notification` são só marcadores.
 
-from django.db import migrations, models
-
-
-def copy_otp_notification_external_id(apps, schema_editor):
-    """Copia a FK notification -> UUID notification_external_id (não perde auditoria de OTP)."""
-    OtpCode = apps.get_model("users", "OtpCode")
-    Notification = apps.get_model("notify", "Notification")
-    for otp in OtpCode.objects.exclude(notification__isnull=True):
-        notif = Notification.objects.filter(id=otp.notification_id).first()
-        if notif is not None:
-            otp.notification_external_id = notif.external_id
-            otp.save(update_fields=["notification_external_id"])
-
-
-def restore_otp_notification(apps, schema_editor):
-    """Reverso: reata a FK notification a partir do UUID notification_external_id."""
-    OtpCode = apps.get_model("users", "OtpCode")
-    Notification = apps.get_model("notify", "Notification")
-    for otp in OtpCode.objects.exclude(notification_external_id__isnull=True):
-        notif = Notification.objects.filter(
-            external_id=otp.notification_external_id
-        ).first()
-        if notif is not None:
-            otp.notification_id = notif.id
-            otp.save(update_fields=["notification"])
+from django.db import migrations
 
 
 class Migration(migrations.Migration):
@@ -40,13 +17,4 @@ class Migration(migrations.Migration):
         ("users", "0032_validationblock"),
     ]
 
-    operations = [
-        migrations.AddField(
-            model_name="otpcode",
-            name="notification_external_id",
-            field=models.UUIDField(blank=True, null=True),
-        ),
-        migrations.RunPython(
-            copy_otp_notification_external_id, restore_otp_notification
-        ),
-    ]
+    operations = []
