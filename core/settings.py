@@ -510,8 +510,12 @@ NOTIFY_MODE = env("NOTIFY_MODE", default="local")  # local | remote
 # Contrato genérico do notify: NOTIFY_URL (base do serviço) + NOTIFY_INSTANCE (a instância que
 # roteia o WhatsApp/e-mail da conta). Os nomes antigos NOTIFY_SERVER_URL/NOTIFY_ACCOUNT_SLUG
 # seguem aceitos como fallback pra não quebrar deploy existente.
-NOTIFY_URL = env("NOTIFY_URL", default=env("NOTIFY_SERVER_URL", default="http://notify.v7m.org"))
-NOTIFY_INSTANCE = env("NOTIFY_INSTANCE", default=env("NOTIFY_ACCOUNT_SLUG", default="supletivo"))
+NOTIFY_URL = env(
+    "NOTIFY_URL", default=env("NOTIFY_SERVER_URL", default="http://notify.v7m.org")
+)
+NOTIFY_INSTANCE = env(
+    "NOTIFY_INSTANCE", default=env("NOTIFY_ACCOUNT_SLUG", default="supletivo")
+)
 NOTIFY_API_KEY = os.environ.get("NOTIFY_API_KEY", "")
 NOTIFY_TIMEOUT = env.float("NOTIFY_TIMEOUT", default=10.0)
 NOTIFY_SYNC_TIMEOUT = env.float("NOTIFY_SYNC_TIMEOUT", default=60.0)

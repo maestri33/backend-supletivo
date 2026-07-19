@@ -46,8 +46,7 @@ def check_notify_mode(app_configs, **kwargs):
             )
         )
     elif mode == "remote" and not (
-        getattr(settings, "NOTIFY_URL", "")
-        and getattr(settings, "NOTIFY_API_KEY", "")
+        getattr(settings, "NOTIFY_URL", "") and getattr(settings, "NOTIFY_API_KEY", "")
     ):
         errors.append(
             DjangoError(

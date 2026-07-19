@@ -244,7 +244,9 @@ def test_send_event_remote_resolve_profile_e_enfileira(
     from notify.interface.events import send_event
     from users.roles import notifications as msgs
 
-    _tpl.invalidate("lead.captured")  # garante o caminho catálogo in-memory (sem row no DB)
+    _tpl.invalidate(
+        "lead.captured"
+    )  # garante o caminho catálogo in-memory (sem row no DB)
     expected = msgs.text("lead.captured", nome="Maria", name="Maria", valor="R$ 999")
 
     prof = SimpleNamespace(
@@ -312,7 +314,9 @@ def test_send_event_remote_overrides_aplicados_localmente(
     payload = q_capture[0][1][0]
     assert payload["external_id"] == "chave-estavel"
     assert payload["whatsapp"] is True
-    assert payload["email_channel"] is False  # channels_override=("whatsapp",) tira o e-mail
+    assert (
+        payload["email_channel"] is False
+    )  # channels_override=("whatsapp",) tira o e-mail
     assert payload["tts"] is True  # is_tts_override=True → voice-note
 
 
