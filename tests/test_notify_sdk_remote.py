@@ -529,3 +529,27 @@ def test_notify_send_command_modo_remote_consulta_o_sdk(remote, http_capture):
     assert http_capture["calls"][1]["path"] == f"/v1/notifications/{server_id}"
     assert server_id in out.getvalue()
     assert "sent" in out.getvalue()
+
+
+@pytest.mark.django_db
+def test_body_md_override_ainda_honra_trigger_inativo():
+    """body_md_override NÃO fura o kill-switch: Trigger.active=False desliga o evento mesmo com o
+    caller passando o corpo JÁ pronto (garantia documentada em events.py — regressão do review)."""
+    from notify.interface import templates as _tpl
+    from notify.interface.events import send_event
+    from notify.models import Notification, Template, Trigger
+
+    _tpl.invalidate("test.kill_override")
+    t = Template.objects.create(
+        event="test.kill_override", body_md="Oi {nome}", channels="whatsapp"
+    )
+    Trigger.objects.create(template=t, active=False)
+
+    ret = send_event(
+        "test.kill_override",
+        phone="5511999990000",
+        body_md_override="corpo pronto do caller",
+        run_sync=True,
+    )
+    assert ret is None
+    assert Notification.objects.filter(caller="event:test.kill_override").count() == 0
