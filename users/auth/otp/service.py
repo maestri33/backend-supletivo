@@ -162,8 +162,6 @@ def generate_and_send(user) -> OtpCode:
         whatsapp=True,
     )
     otp.status = STATUS_SENT
-    # guarda o handle direto (Fase 2 do desmembramento): funciona igual no modo local e no remoto
-    # (onde a Notification não tem row local — a auditoria mora no notify-server).
     otp.notification_external_id = notif_external_id
     otp.save(update_fields=["status", "notification_external_id"])
     logger.info("otp.sent", id=otp.id, notification=notif_external_id)

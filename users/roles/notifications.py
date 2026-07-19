@@ -437,3 +437,18 @@ def story_text(
         return out
     except Exception:  # noqa: BLE001 — IA é enfeite; jamais deixa um marco sem mensagem
         return fallback
+
+
+# sentinela do story_or_none: contém NUL, impossível de sair da IA — detecta o caminho de fallback.
+_STORY_MISS = "\x00sem-story\x00"
+
+
+def story_or_none(event: str, *, name: str, age: int | None = None) -> str | None:
+    """Como `story_text`, mas devolve None quando NÃO há história (evento sem story, storytelling
+    desligado no Template, IA falhou ou o texto veio ruim), em vez do fallback fixo.
+
+    Uso do modo remote (Fase 2): None = sem override, o notify-server renderiza o template DELE;
+    texto = vai como `body_md_override`. Delega ao `story_text` (mesma decisão e geração — zero
+    drift) passando o sentinela como fallback."""
+    out = story_text(event, name=name, fallback=_STORY_MISS, age=age)
+    return None if out == _STORY_MISS else out

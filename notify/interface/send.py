@@ -14,7 +14,10 @@ Django-Q e devolve o `external_id` na hora — NUNCA bloqueia o fluxo do caller 
 
 from __future__ import annotations
 
+import uuid
+
 import structlog
+from django.conf import settings
 from django.db import IntegrityError, transaction
 
 from notify.models import STATUS_PENDING, STATUS_SKIPPED, Notification
@@ -38,6 +41,26 @@ def _guess_media_type(url: str) -> str:
         if ext in exts:
             return media_type
     return "document"
+
+
+def local_idempotent_hit(idempotency_key: str | None, *, caller: str) -> str | None:
+    """Se `idempotency_key` já foi usada, devolve o external_id existente — senão None.
+
+    Chamado ANTES do branch de modo (local ou remote): a tabela local é a MESMA nos dois modos,
+    então isso fecha a duplicidade do flip local→remote (uma chave reenviada logo após o flip
+    acha o hit aqui em vez de criar Notification nova no servidor). Não cobre o sentido inverso
+    (remote→local, rollback): risco residual aceito — rollback é caminho de emergência, não
+    flip rotineiro; ver wiki/notify/servico-multi-tenant.md.
+    """
+    if not idempotency_key:
+        return None
+    existing = Notification.objects.filter(idempotency_key=idempotency_key).first()
+    if existing is None:
+        return None
+    logger.info(
+        "notify.idempotent_hit", external_id=str(existing.external_id), caller=caller
+    )
+    return str(existing.external_id)
 
 
 def send(
@@ -65,14 +88,12 @@ def send(
     mídia: WhatsApp busca pela LAN, e-mail embute pela URL pública; `media_type` é auto-detectado
     pela extensão se não vier. `gender` (M/F) escolhe a voz do TTS (resolvido no integrations.ai).
     `run_sync=True` roda o despacho inline (testes/commands); o default é assíncrono (Django-Q).
-
-    NOTIFY_MODE=remote (Fase 2 do desmembramento): a MESMA assinatura, mas o envio vai pro
-    notify-server via HTTP (`notify.remote`) com external_id gerado AQUI — devolve o handle na
-    hora e enfileira retry local em falha de rede (§12). O caminho local continua o default.
     """
-    from notify import remote
+    hit = local_idempotent_hit(idempotency_key, caller=caller)
+    if hit is not None:
+        return hit
 
-    if remote.is_remote():
+    if settings.NOTIFY_MODE == "remote":
         return _send_remote(
             text=text,
             caller=caller,
@@ -90,16 +111,6 @@ def send(
             idempotency_key=idempotency_key,
             run_sync=run_sync,
         )
-
-    if idempotency_key:
-        existing = Notification.objects.filter(idempotency_key=idempotency_key).first()
-        if existing is not None:
-            logger.info(
-                "notify.idempotent_hit",
-                external_id=str(existing.external_id),
-                caller=caller,
-            )
-            return str(existing.external_id)
 
     if media_url and not media_type:
         media_type = _guess_media_type(media_url)
@@ -164,53 +175,81 @@ def send(
     return str(notif.external_id)
 
 
-def _send_remote(**kwargs) -> str:
-    """Caminho remoto do send(): monta o payload do POST /v1/send com external_id do CLIENTE.
+def _send_remote(
+    *,
+    text: str,
+    caller: str,
+    phone: str | None,
+    email: str | None,
+    title: str | None,
+    subject: str | None,
+    whatsapp: bool,
+    email_channel: bool,
+    tts: bool,
+    media_url: str | None,
+    media_type: str | None,
+    gender: str | None,
+    mail_template: str,
+    idempotency_key: str | None,
+    run_sync: bool,
+) -> str:
+    """Modo remote (Fase 2): delega o envio ao notify-server via SDK, preservando o contrato.
 
-    - TEST_MODE: dry-run — devolve o UUID sem tocar a rede (espelho do dry-run do dispatch local).
-    - `run_sync=True`: POST síncrono, erro PROPAGA (o caller pediu inline — testes/commands).
-    - default: best-effort — falha de rede enfileira retry no Django-Q com o MESMO external_id.
-    Nota (documentada no plano): com `idempotency_key` repetida, o server honra a PRIMEIRA
-    notificação; o UUID devolvido aqui pode não ser o dela. Nenhum caller usa retorno +
-    idempotency_key juntos hoje (OTP usa retorno e não passa key).
+    Chamado só quando `local_idempotent_hit` (acima) não achou nada local. Async: enfileira o
+    POST no Django-Q só DEPOIS do commit (§12) e devolve NA HORA um uuid gerado aqui; o servidor
+    deduplica pela chave (`external_id` do payload = idempotency_key do caller, ou o próprio
+    uuid), então o retry do Q re-posta a MESMA chave sem duplicar. Repetir uma chave que já foi
+    usada NO SERVIDOR (mas não existe localmente) ainda devolve um uuid novo "dangling" — aceito,
+    callers com chave ignoram o retorno (recon R4). Sync: POST inline; devolve o external_id REAL
+    da resposta.
     """
-    import uuid as _uuid
+    client_uuid = str(uuid.uuid4())
+    server_key = idempotency_key or client_uuid
+    if media_url and not media_type:
+        media_type = _guess_media_type(media_url)  # paridade com o caminho local
+    payload = {
+        "text": text,
+        "caller": caller,
+        "phone": phone,
+        "email": email,
+        "title": title,
+        "subject": subject,
+        "whatsapp": whatsapp,
+        "email_channel": email_channel,
+        "tts": tts,
+        "media_url": media_url,
+        "media_type": media_type,
+        "gender": gender,
+        "mail_template": mail_template,
+        # na API /v1/send o campo chama-se external_id, mas é a idempotency_key do servidor.
+        "external_id": server_key,
+        "run_sync": run_sync,
+    }
 
-    from django.conf import settings as _settings
-
-    from notify import remote
-
-    media_url = kwargs.get("media_url")
-    if media_url and not kwargs.get("media_type"):
-        kwargs["media_type"] = _guess_media_type(media_url)
-
-    external_id = str(_uuid.uuid4())
-    run_sync = kwargs.pop("run_sync", False)
-    payload = {"external_id": external_id, **kwargs}
-
-    logger.info(
-        "notify.queued_remote",
-        external_id=external_id,
-        caller=kwargs.get("caller"),
-        run_sync=run_sync,
-    )
-    if getattr(_settings, "TEST_MODE", False):
-        logger.info("notify.remote_dry_run", external_id=external_id)
-        return external_id
     if run_sync:
-        payload["run_sync"] = True
-        remote.post_send(payload)
-    else:
-        remote.send_with_retry(payload)
-    return external_id
+        from notify.sdk import client as sdk
+
+        resp = sdk.post_send(payload, run_sync=True)
+        return str(resp["external_id"])
+
+    from django_q.tasks import async_task
+
+    # POST só depois do commit (§12): rollback do caller não pode virar mensagem enviada.
+    transaction.on_commit(lambda: async_task("notify.sdk.push.push_send", payload))
+    logger.info(
+        "notify.sdk.remote_queued",
+        external_id=client_uuid,
+        caller=caller,
+        has_key=bool(idempotency_key),
+    )
+    return client_uuid
 
 
 def get_by_external_id(external_id) -> Notification | None:
     """Busca a Notification pelo external_id (o handle de borda devolvido por `send`). None se não achar.
 
     Permite que outro app guarde a relação por FK (em vez do external_id solto), respeitando §3 —
-    não fura o model do notify por fora. NOTIFY_MODE=remote: a notificação não tem row local →
-    devolve None (auditoria mora no notify-server; consulte GET /v1/notifications/{id} lá).
+    não fura o model do notify por fora.
     """
     if not external_id:
         return None

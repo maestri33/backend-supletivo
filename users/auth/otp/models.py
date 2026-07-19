@@ -30,9 +30,9 @@ class OtpCode(models.Model):
     status = models.CharField(max_length=20, default=STATUS_GENERATED)
     attempts = models.PositiveIntegerField(default=0)
     failure_reason = models.CharField(max_length=20, null=True, blank=True)
-    # Handle (UUID) da Notification do notify (rastreia o despacho). Era FK; voltou a UUID solto
-    # na Fase 2 do desmembramento (wiki/notify/servico-multi-tenant.md): com NOTIFY_MODE=remote a
-    # auditoria mora no notify-server e não há row local pra FK apontar.
+    # external_id (UUID) da notificação no notify (rastreia o despacho). Coluna solta em vez de
+    # FK: no modo remote a Notification vive no notify-server, fora deste banco (Fase 2). UUIDField
+    # porque send()/send_event() sempre devolvem str(uuid.uuid4()) nos dois modos (local e remote).
     notification_external_id = models.UUIDField(null=True, blank=True)
     error_detail = models.TextField(null=True, blank=True)
     verified_at = models.DateTimeField(null=True, blank=True)
