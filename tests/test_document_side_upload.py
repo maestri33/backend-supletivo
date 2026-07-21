@@ -13,7 +13,9 @@ pytestmark = pytest.mark.django_db
 def _png(color: str) -> SimpleUploadedFile:
     buffer = io.BytesIO()
     Image.new("RGB", (8, 8), color).save(buffer, "PNG")
-    return SimpleUploadedFile("document.png", buffer.getvalue(), content_type="image/png")
+    return SimpleUploadedFile(
+        "document.png", buffer.getvalue(), content_type="image/png"
+    )
 
 
 def _user_with_documents():

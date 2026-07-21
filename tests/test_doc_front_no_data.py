@@ -82,7 +82,9 @@ def test_prompt_exige_o_lado_solicitado(monkeypatch):
     monkeypatch.setattr(
         ai,
         "describe_image",
-        lambda *a, **k: (captured.__setitem__("prompt", k.get("prompt")), "APROVADO.")[1],
+        lambda *a, **k: (captured.__setitem__("prompt", k.get("prompt")), "APROVADO.")[
+            1
+        ],
     )
     doc_ai.check_photo(b"fake", side="back", doc_type=doc_ai.DOC_RG, caller="test")
     prompt = captured["prompt"].lower()
