@@ -201,3 +201,27 @@ def test_refresh_nao_aceita_outra_troca_de_role():
 
     with pytest.raises(jwt_service.TokenError):
         jwt_service.refresh(tokens["refresh_token"])
+
+
+@pytest.mark.django_db
+def test_refresh_sincroniza_overlay_de_treinamento_sem_novo_otp():
+    registered = auth_service.register(
+        role="candidate",
+        phone="11977776666",
+        cpf="12345678901",
+        email="transition-overlay@v7m.test",
+    )
+    user = User.objects.get(external_id=registered["external_id"])
+    roles.promote(user, "promoter")
+    roles.grant(user, "training")
+    locked_tokens = jwt_service.issue(str(user.external_id), ["promoter", "training"])
+
+    roles.revoke(user, "training")
+    unlocked = jwt_service.refresh(locked_tokens["refresh_token"])
+    unlocked_claims = jwt_service.decode(unlocked["access_token"])
+    assert unlocked_claims["roles"] == ["promoter"]
+
+    roles.grant(user, "training")
+    relocked = jwt_service.refresh(unlocked["refresh_token"])
+    relocked_claims = jwt_service.decode(relocked["access_token"])
+    assert set(relocked_claims["roles"]) == {"promoter", "training"}

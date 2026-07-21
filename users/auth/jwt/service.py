@@ -62,6 +62,16 @@ def issue(external_id: str, roles: list[str]) -> dict:
     }
 
 
+def _live_roles(external_id: str) -> list[str] | None:
+    from users.auth.models import User
+    from users.roles import interface as role_service
+
+    user = User.objects.filter(external_id=external_id, is_active=True).first()
+    if user is None:
+        return None
+    return sorted(role_service.active_roles(user))
+
+
 def _promoter_transition_roles(token, external_id: str) -> list[str] | None:
     """Aceita somente a promoção monotônica `candidate` → `promoter` do próprio refresh assinado.
 
@@ -69,18 +79,15 @@ def _promoter_transition_roles(token, external_id: str) -> list[str] | None:
     o próximo poll recebe 401 e prende o usuário no último passo. Qualquer outra troca de papel,
     banimento ou salto de mais de uma versão continua exigindo novo OTP.
     """
-    from users.auth.models import User
-    from users.roles import interface as role_service
-
     claims_version = int(token.get("token_version") or 0)
     live_version = current_version(external_id)
     if live_version < 0 or live_version != claims_version + 1:
         return None
-    user = User.objects.filter(external_id=external_id, is_active=True).first()
-    if user is None:
+    live_roles = _live_roles(external_id)
+    if live_roles is None:
         return None
     previous = set(token.get("roles") or [])
-    current = set(role_service.active_roles(user))
+    current = set(live_roles)
     removed = previous - current
     added = current - previous
     if removed != {"candidate"}:
@@ -100,7 +107,9 @@ def refresh(refresh_token: str) -> dict:
             raise TokenError("token_version_stale")
         logger.info("jwt.promoter_transition_refreshed", external_id=external_id)
         return issue(external_id, transitioned)
-    roles = token.get("roles", [])
+    roles = _live_roles(external_id)
+    if roles is None:
+        raise TokenError("token_user_inactive")
     logger.info("jwt.refreshed", external_id=external_id)
     return issue(external_id, roles)
 
