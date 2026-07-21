@@ -63,8 +63,11 @@ class MiniMaxClient:
         self._timeout = timeout
 
     def _headers(self) -> dict[str, str]:
+        api_key = str(self._api_key or "").strip()
+        if not api_key:
+            raise MiniMaxError("MiniMax API key não configurada.")
         return {
-            "Authorization": f"Bearer {self._api_key}",
+            "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json",
         }
 

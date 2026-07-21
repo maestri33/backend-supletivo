@@ -688,7 +688,11 @@ def enrollment_document_classify(request, file: UploadedFile = File(...)):
     _enr_guard(request)  # só cliente do funil (não vaza o classificador pra fora)
     from integrations.ai import service as ai
 
-    return ai.classify_document(file.read(), caller="enrollment.classify")
+    return ai.classify_document(
+        file.read(),
+        caller="enrollment.classify",
+        mime_type=file.content_type or "application/octet-stream",
+    )
 
 
 @api.get("/enrollment/documents/rg", response=RgSectionOut, tags=["enrollment"])

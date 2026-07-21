@@ -621,7 +621,11 @@ def candidate_document_classify(request, file: UploadedFile = File(...)):
     _guard(request, "candidate")
     from integrations.ai import service as ai
 
-    return ai.classify_document(file.read(), caller="candidate.classify")
+    return ai.classify_document(
+        file.read(),
+        caller="candidate.classify",
+        mime_type=file.content_type or "application/octet-stream",
+    )
 
 
 @api.post(

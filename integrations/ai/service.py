@@ -456,6 +456,7 @@ def describe_image(
     image_bytes, mime_type = _prep_for_vision(image_bytes, mime_type)
     instruction = prompt or "Descreva esta imagem."
     attempts: list[tuple[str, str, object]] = []
+    media_timeout = timeout or settings.IA_TIMEOUT
 
     # primário (só se OmniRoute estiver configurado + tiver modelo de visão): gateway via chat()
     # multimodal — o LLMClient NÃO tem describe_image, a visão OpenAI-compatible vai como content
@@ -471,7 +472,7 @@ def describe_image(
             api_key=omni["api_key"],
             temperature=settings.IA_DEFAULT_TEMPERATURE,
             max_tokens=settings.IA_MAX_TOKENS,
-            timeout=settings.IA_TIMEOUT,
+            timeout=media_timeout,
         )
         data_url = f"data:{mime_type};base64,{base64.b64encode(image_bytes).decode()}"
         messages = [
@@ -491,7 +492,7 @@ def describe_image(
         attempts.append(("omniroute", vision_model, gateway_call))
 
     # fallback (SEMPRE presente): MiniMax-M3 direto — chave própria, sem depender do OmniRoute.
-    mm = MiniMaxClient(direct=True)
+    mm = MiniMaxClient(direct=True, timeout=media_timeout)
 
     async def direct_call():
         return await mm.describe(image_bytes, mime_type=mime_type, prompt=prompt)
@@ -538,8 +539,25 @@ def classify_document(
 ) -> dict:
     """RÁPIDA: `{is_document, doc_type, completeness, confidence}`. is_document=None quando a IA não
     deu um JSON utilizável (o front então confirma o tipo com a pessoa). Nunca levanta por parse."""
+    if mime_type == "application/pdf":
+        from core.pdf import PdfRenderError, render_pdf_to_jpeg
+
+        try:
+            image_bytes = render_pdf_to_jpeg(image_bytes)
+        except PdfRenderError:
+            return {
+                "is_document": False,
+                "doc_type": None,
+                "completeness": None,
+                "confidence": 0.0,
+            }
+        mime_type = "image/jpeg"
     raw = describe_image(
-        image_bytes, caller=caller, mime_type=mime_type, prompt=_CLASSIFY_PROMPT
+        image_bytes,
+        caller=caller,
+        mime_type=mime_type,
+        prompt=_CLASSIFY_PROMPT,
+        timeout=8.0,
     )
     data = _extract_json(raw) if isinstance(raw, str) else None
     if not data or not isinstance(data.get("is_document"), bool):

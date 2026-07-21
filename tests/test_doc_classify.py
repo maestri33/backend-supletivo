@@ -90,6 +90,32 @@ def test_lixo_total_cai_em_indefinido_sem_quebrar(monkeypatch):
     )  # indefinido → front cai no fluxo de confirmação manual
 
 
+def test_pdf_e_convertido_para_imagem_antes_da_classificacao(monkeypatch):
+    from integrations.ai import service as ai
+
+    captured = {}
+    monkeypatch.setattr("core.pdf.render_pdf_to_jpeg", lambda data: b"jpeg-renderizado")
+
+    def fake_describe(image_bytes, **kwargs):
+        captured["image_bytes"] = image_bytes
+        captured.update(kwargs)
+        return json.dumps(
+            {
+                "is_document": False,
+                "doc_type": None,
+                "completeness": None,
+                "confidence": 0.99,
+            }
+        )
+
+    monkeypatch.setattr(ai, "describe_image", fake_describe)
+    ai.classify_document(b"pdf-original", caller="test", mime_type="application/pdf")
+
+    assert captured["image_bytes"] == b"jpeg-renderizado"
+    assert captured["mime_type"] == "image/jpeg"
+    assert captured["timeout"] == 8.0
+
+
 def test_endpoint_classify_exige_auth(client):
     """O endpoint de classificação é gated (só cliente do funil) — sem token dá 401, não vaza a IA."""
     import io

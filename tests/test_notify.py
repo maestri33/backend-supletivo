@@ -107,6 +107,16 @@ def test_minimax_client_direct_mode():
     assert c._gateway_mode is False
 
 
+def test_minimax_recusa_header_authorization_vazio():
+    import pytest
+
+    from integrations.ai.minimax import MiniMaxClient, MiniMaxError
+
+    client = MiniMaxClient(api_key="", base_url="https://api.minimax.io")
+    with pytest.raises(MiniMaxError, match="API key não configurada"):
+        client._headers()
+
+
 def test_ia_providers_centralizado_no_omniroute():
     """IA_PROVIDERS contém omniroute como provider primário (Wave 4 — centralizado)."""
     from django.conf import settings
