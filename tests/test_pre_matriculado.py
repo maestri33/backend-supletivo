@@ -113,7 +113,9 @@ def test_bolsista_so_libera_prova_com_10_indicacoes_pagas(monkeypatch):
         status=Student.Status.DOCUMENTS_UNDER_REVIEW,
         blood_type="O+",
     )
-    monkeypatch.setattr(student_iface, "_required_doc_types_for", lambda _student: set())
+    monkeypatch.setattr(
+        student_iface, "_required_doc_types_for", lambda _student: set()
+    )
     monkeypatch.setattr(student_iface, "_notify", lambda *args, **kwargs: None)
 
     _add_paid_leads(user, hub, 9)

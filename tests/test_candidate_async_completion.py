@@ -52,7 +52,9 @@ def test_selfie_nao_promove_enquanto_documento_esta_pendente(monkeypatch):
     proof.validation_status = "approved"
     proof.save(update_fields=["validation_status"])
     promoted = []
-    monkeypatch.setattr(service, "_promote_to_promoter", lambda cand: promoted.append(cand.pk))
+    monkeypatch.setattr(
+        service, "_promote_to_promoter", lambda cand: promoted.append(cand.pk)
+    )
 
     service._complete_candidate(candidate)
 
@@ -76,7 +78,9 @@ def test_promove_quando_analises_assincronas_terminam(monkeypatch):
     proof.validation_status = "approved"
     proof.save(update_fields=["validation_status"])
     promoted = []
-    monkeypatch.setattr(service, "_promote_to_promoter", lambda cand: promoted.append(cand.pk))
+    monkeypatch.setattr(
+        service, "_promote_to_promoter", lambda cand: promoted.append(cand.pk)
+    )
 
     service._complete_candidate(candidate)
 
