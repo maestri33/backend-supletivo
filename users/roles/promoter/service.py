@@ -143,6 +143,7 @@ def to_dict(promoter: Promoter) -> dict:
         "status": promoter.status,
         "hub_external_id": str(promoter.hub.external_id),
         "ref_url": ref_url(promoter.user),
+        "pre_matriculado": promoter.pre_matriculado,
         "locked": training_iface.is_locked(promoter.user),
         "pending_materials": training_iface.pending_materials(promoter.user),
         "blocks": [blocks.to_dict(b) for b in blocks.get_active_blocks(promoter.user)],

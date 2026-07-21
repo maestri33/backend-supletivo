@@ -73,6 +73,29 @@ class Profile(models.Model):
     education_completed = models.BooleanField(
         "concluiu o nível?", null=True, blank=True
     )
+    education_grade = models.PositiveSmallIntegerField(
+        "última série/ano", null=True, blank=True
+    )
+    education_status = models.CharField(
+        "situação da última série",
+        max_length=16,
+        choices=(
+            ("completed", "Concluiu"),
+            ("attending", "Está cursando"),
+            ("stopped", "Parou antes de concluir"),
+        ),
+        null=True,
+        blank=True,
+    )
+    education_year = models.PositiveSmallIntegerField(
+        "ano da última frequência", null=True, blank=True
+    )
+    education_city = models.CharField(
+        "cidade onde estudou", max_length=128, null=True, blank=True
+    )
+    education_school = models.CharField(
+        "última escola", max_length=255, null=True, blank=True
+    )
     # flag nível-PESSOA (Victor 2026-07-08): selfie reprovou 5× → não bloqueia, mas obriga encontro
     # presencial no fim do curso (coordenador tira a foto e posta como assinatura → flag cai).
     selfie_needs_meeting = models.BooleanField(

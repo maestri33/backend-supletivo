@@ -97,3 +97,31 @@ def test_auto_enroll_ignora_quem_nao_e_pre_matriculado():
 
     assert promoter_iface.maybe_auto_enroll_bolsista(user) is False
     assert Enrollment.objects.filter(user=user).count() == 0
+
+
+@pytest.mark.django_db
+def test_bolsista_so_libera_prova_com_10_indicacoes_pagas(monkeypatch):
+    from users.roles.student import service as student_iface
+    from users.roles.student.models import Student
+
+    user, hub, _ = _mk_promoter(pre_matriculado=False)
+    student = Student.objects.create(
+        user=user,
+        hub=hub,
+        self_study=True,
+        bolsista=True,
+        status=Student.Status.DOCUMENTS_UNDER_REVIEW,
+        blood_type="O+",
+    )
+    monkeypatch.setattr(student_iface, "_required_doc_types_for", lambda _student: set())
+    monkeypatch.setattr(student_iface, "_notify", lambda *args, **kwargs: None)
+
+    _add_paid_leads(user, hub, 9)
+    student_iface._maybe_release_exam(student)
+    student.refresh_from_db()
+    assert student.status == Student.Status.DOCUMENTS_UNDER_REVIEW
+
+    _add_paid_leads(user, hub, 1)
+    student_iface._maybe_release_exam(student)
+    student.refresh_from_db()
+    assert student.status == Student.Status.EXAM_RELEASED

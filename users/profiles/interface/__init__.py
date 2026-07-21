@@ -153,15 +153,40 @@ def set_pix(
     return profile
 
 
-def set_education(user, *, level: str, completed: bool) -> Profile | None:
-    """Grava a escolaridade no Profile (nível-pessoa, Victor 2026-07-08). Sobrescreve (correção).
-    None se não tem profile. Validação de `level` fica no service que chama."""
+def set_education(
+    user,
+    *,
+    level: str,
+    completed: bool,
+    grade: int | None = None,
+    education_status: str | None = None,
+    year: int | None = None,
+    city: str | None = None,
+    school: str | None = None,
+) -> Profile | None:
+    """Grava escolaridade estruturada no Profile e permite correção posterior."""
     p = Profile.objects.filter(user=user).first()
     if p is None:
         return None
     p.education_level = level
     p.education_completed = completed
-    p.save(update_fields=["education_level", "education_completed", "updated_at"])
+    p.education_grade = grade
+    p.education_status = education_status
+    p.education_year = year
+    p.education_city = city
+    p.education_school = school
+    p.save(
+        update_fields=[
+            "education_level",
+            "education_completed",
+            "education_grade",
+            "education_status",
+            "education_year",
+            "education_city",
+            "education_school",
+            "updated_at",
+        ]
+    )
     return p
 
 
