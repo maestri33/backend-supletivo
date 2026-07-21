@@ -9,7 +9,10 @@ class Migration(migrations.Migration):
             model_name="profile",
             name="education_city",
             field=models.CharField(
-                blank=True, max_length=128, null=True, verbose_name="cidade onde estudou"
+                blank=True,
+                max_length=128,
+                null=True,
+                verbose_name="cidade onde estudou",
             ),
         ),
         migrations.AddField(
