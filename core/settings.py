@@ -17,6 +17,8 @@ from pathlib import Path
 
 import environ
 
+from core.environment import resolve_environment, resolve_external_fakes
+
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
@@ -36,7 +38,7 @@ DEBUG = env("DEBUG")
 
 ALLOWED_HOSTS = env.list("ALLOWED_HOSTS", default=[])
 
-# ── A4 — TEST_MODE ────────────────────────────────────────────────────────
+# ── APP_ENV / TEST_MODE ───────────────────────────────────────────────────
 # Modo de teste integrado: simula CPFHub (aceita qualquer CPF bem formado), força WhatsApp
 # check_numbers=True, usa código OTP fixo e aponta Asaas pro sandbox. Ligado pelo .env
 # (`TEST_MODE=1`). TRAVA anti-prod única e correta: `socket.gethostname() ∈
@@ -45,24 +47,34 @@ ALLOWED_HOSTS = env.list("ALLOWED_HOSTS", default=[])
 # ISOLADO (test-v7m), que não é prod: tem DB local + Asaas sandbox + DEBUG=true. O que
 # protege prod é o HOSTNAME, não o módulo (o .env do prod real fica num host NÃO listado).
 # Falha → ImproperlyConfigured no import. Source of truth único: este settings.
-TEST_MODE = env.bool("TEST_MODE", default=False)
 TEST_MODE_ALLOWED_HOSTS = env.list("TEST_MODE_ALLOWED_HOSTS", default=[])
+_legacy_test_mode = env.bool("TEST_MODE", default=False)
+
+_environment = resolve_environment(
+    app_env=env("APP_ENV", default="test" if _legacy_test_mode else "prod"),
+    legacy_test_mode=_legacy_test_mode,
+    hostname=socket.gethostname(),
+    allowed_test_hosts=TEST_MODE_ALLOWED_HOSTS,
+)
+APP_ENV = _environment.app_env
+TEST_MODE = _environment.test_mode
 TEST_MODE_OTP_CODE = env("TEST_MODE_OTP_CODE", default="000000")
+TEST_DATA_TTL_HOURS = env.int("TEST_DATA_TTL_HOURS", default=24)
+TEST_COLLABORATOR_PHONE = env("TEST_COLLABORATOR_PHONE", default="5511999990001")
+TEST_COLLABORATOR_CPF = env("TEST_COLLABORATOR_CPF", default="52998224725")
+TEST_COLLABORATOR_EMAIL = env(
+    "TEST_COLLABORATOR_EMAIL", default="e2e-promotor@v7m.test"
+)
+TEST_EXTERNAL_ADAPTERS = resolve_external_fakes(
+    app_env=APP_ENV,
+    requested=env.bool("TEST_EXTERNAL_ADAPTERS", default=False),
+)
+TEST_KYC_OUTCOME = env("TEST_KYC_OUTCOME", default="approved").strip().lower()
+if TEST_KYC_OUTCOME not in {"approved", "rejected", "review"}:
+    raise ValueError("TEST_KYC_OUTCOME deve ser approved, rejected ou review.")
 TEST_MODE_ASAAS_SANDBOX_URL = env(
     "TEST_MODE_ASAAS_SANDBOX_URL", default="https://api-sandbox.asaas.com"
 )
-if TEST_MODE:
-    from django.core.exceptions import ImproperlyConfigured
-
-    _hostname = socket.gethostname()
-    if _hostname not in TEST_MODE_ALLOWED_HOSTS:
-        raise ImproperlyConfigured(
-            f"TEST_MODE=1 recusado: hostname {_hostname!r} não está em "
-            f"TEST_MODE_ALLOWED_HOSTS={TEST_MODE_ALLOWED_HOSTS}. "
-            "Anti-prod: TEST_MODE só roda em hosts explicitamente autorizados."
-        )
-
-
 # CORS (django-cors-headers) — config no .env (CONVENTION §10: um .env, nada hardcoded).
 # Em dev liberamos geral p/ a rede interna acessar fácil; em prod = lista explícita + allow_all False.
 CORS_ALLOW_ALL_ORIGINS = env.bool("CORS_ALLOW_ALL_ORIGINS", default=False)

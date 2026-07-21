@@ -13,6 +13,7 @@ compartilhadas, sem import do model (evita ciclo documents↔roles).
 from __future__ import annotations
 
 import structlog
+from django.conf import settings
 
 logger = structlog.get_logger()
 
@@ -119,6 +120,10 @@ def check_photo(
     IA fora do ar → REVIEW (humano decide). O motivo SEMPRE volta (plan/9)."""
     if doc_type not in DOC_TYPES:
         raise ValueError(f"doc_type inválido: {doc_type!r} (use um de {DOC_TYPES})")
+    if settings.TEST_EXTERNAL_ADAPTERS:
+        from core.test_adapters import kyc_result
+
+        return kyc_result()
     from integrations.ai import service as ai
 
     doc_hint = _DOC_TYPE_HINT[doc_type]
@@ -197,6 +202,10 @@ def fix_orientation(
 
 def ocr_images(images: list[bytes], *, caller: str) -> str:
     """OCR (Google Vision, modo documento) de cada imagem; devolve o texto junto."""
+    if settings.TEST_EXTERNAL_ADAPTERS:
+        from core.test_adapters import document_ocr
+
+        return document_ocr()
     from integrations.ai import service as ai
 
     parts = [ai.ocr(img, caller=caller, document=True) for img in images]
@@ -227,6 +236,10 @@ def extract_document(
     (o orquestrador decide o que fazer — em regra, REVIEW)."""
     if doc_type not in DOC_TYPES:
         raise ValueError(f"doc_type inválido: {doc_type!r} (use um de {DOC_TYPES})")
+    if settings.TEST_EXTERNAL_ADAPTERS:
+        from core.test_adapters import document_extract
+
+        return document_extract(doc_type=doc_type, holder_name=holder_name)
     from integrations.ai import service as ai
 
     expected = holder_name or "(nome não informado)"

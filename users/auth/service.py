@@ -637,6 +637,17 @@ def set_email(*, user_external_id: str, email: str) -> dict:
 # ── login ────────────────────────────────────────────────────────────────
 
 
+def verify_otp_for_user(*, user: User, otp: str) -> None:
+    """Consome um OTP válido do usuário ou levanta o erro público canônico."""
+    if not otp_service.verify(user, otp):
+        raise Unauthorized("OTP inválido ou expirado.", code="OTP_INVALID")
+
+
+def issue_tokens_for_user(user: User) -> dict:
+    """Emite tokens com a fotografia atual das roles ativas do usuário."""
+    return jwt_service.issue(str(user.external_id), roles.active_roles(user))
+
+
 def login(*, external_id: str, role: str, otp: str) -> dict:
     """Confere role ativa → valida OTP → emite JWT com TODAS as roles ativas (passwordless)."""
     user = User.objects.filter(external_id=external_id).first()
@@ -650,9 +661,7 @@ def login(*, external_id: str, role: str, otp: str) -> dict:
         )
         raise Forbidden(f"Usuário não possui a role '{role}'.", code="ROLE_NOT_HELD")
 
-    if not otp_service.verify(user, otp):
-        raise Unauthorized("OTP inválido ou expirado.", code="OTP_INVALID")
-
+    verify_otp_for_user(user=user, otp=otp)
     tokens = jwt_service.issue(external_id, active)
     logger.info("auth.login_ok", external_id=external_id, role=role)
     return tokens

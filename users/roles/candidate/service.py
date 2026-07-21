@@ -26,6 +26,7 @@ logger = structlog.get_logger()
 
 _S = Candidate.Status
 _SELFIE_EXT = {"image/jpeg": "jpg", "image/png": "png", "image/webp": "webp"}
+_COLLABORATOR_ROLES = ("coordinator", "promoter", "training", "candidate")
 
 
 class CandidateError(DomainError):
@@ -39,12 +40,7 @@ class CandidateError(DomainError):
 # ── nascimento (público) ────────────────────────────────────────────────────
 
 
-def create_candidate(*, cpf: str, phone: str, email: str, hub=None) -> dict:
-    """Cria o candidato: register(role candidate) + Candidate(STARTED) ligado a um hub.
-
-    `hub` = external_id do polo (landing `?ref=` do coordenador); sem hub → hub padrão (regra dura:
-    candidato↔hub).
-    """
+def _resolve_capture_hub(hub):
     hub_obj, ref_reason = hub_iface.resolve_capture_hub(hub)
     if hub_obj is None:
         raise CandidateError(
@@ -59,6 +55,16 @@ def create_candidate(*, cpf: str, phone: str, email: str, hub=None) -> dict:
             reason=ref_reason,
             hub=str(hub_obj.external_id),
         )
+    return hub_obj, ref_reason
+
+
+def create_candidate(*, cpf: str, phone: str, email: str, hub=None) -> dict:
+    """Cria o candidato: register(role candidate) + Candidate(STARTED) ligado a um hub.
+
+    `hub` = external_id do polo (landing `?ref=` do coordenador); sem hub → hub padrão (regra dura:
+    candidato↔hub).
+    """
+    hub_obj, ref_reason = _resolve_capture_hub(hub)
 
     reg = auth_iface.register(role="candidate", phone=phone, cpf=cpf, email=email)
     user = User.objects.get(external_id=reg["external_id"])
@@ -75,6 +81,67 @@ def create_candidate(*, cpf: str, phone: str, email: str, hub=None) -> dict:
         "user_external_id": reg["external_id"],
         "status": candidate.status,
     }
+
+
+def join_candidate(*, user_external_id: str, otp: str, hub=None) -> dict:
+    """Adere uma identidade existente ao funil do colaborador após provar posse via OTP.
+
+    Preserva as roles atuais (por exemplo, `lead`/`enrollment`) e cria `candidate` + `Candidate`
+    atomicamente. Clientes desatualizados que chamarem esta rota já dentro do funil recebem uma
+    sessão normal. O OTP só é consumido se toda a transação puder ser concluída.
+    """
+    user = User.objects.filter(external_id=user_external_id).first()
+    if user is None:
+        raise NotFound("Usuário não encontrado.", code="USER_NOT_FOUND")
+
+    with transaction.atomic():
+        user = User.objects.select_for_update().get(pk=user.pk)
+        auth_iface.verify_otp_for_user(user=user, otp=otp)
+        active = roles.active_roles(user)
+
+        if not any(role in active for role in _COLLABORATOR_ROLES):
+            profile = profiles.get(user)
+            required = {
+                "cpf": getattr(profile, "cpf", None),
+                "email": getattr(profile, "email", None),
+                "name": getattr(profile, "name", None),
+                "birth_date": getattr(profile, "birth_date", None),
+            }
+            missing_fields = [name for name, value in required.items() if not value]
+            if missing_fields:
+                raise CandidateError(
+                    "Seu cadastro anterior precisa ser completado antes de entrar no programa de promotores.",
+                    code="JOIN_PROFILE_INCOMPLETE",
+                    extra={"missing_fields": missing_fields},
+                )
+
+            hub_obj, ref_reason = _resolve_capture_hub(hub)
+            candidate = Candidate.objects.filter(user=user).first()
+            if candidate is None:
+                candidate = Candidate.objects.create(
+                    user=user, hub=hub_obj, status=_S.STARTED
+                )
+            roles.assign(user, "candidate")
+            logger.info(
+                "candidate.joined_existing_user",
+                external_id=str(candidate.external_id),
+                hub=str(hub_obj.external_id),
+                ref_reason=ref_reason,
+                previous_roles=active,
+            )
+        elif "candidate" in active and not Candidate.objects.filter(user=user).exists():
+            hub_obj, ref_reason = _resolve_capture_hub(hub)
+            candidate = Candidate.objects.create(
+                user=user, hub=hub_obj, status=_S.STARTED
+            )
+            logger.warning(
+                "candidate.repaired_missing_row",
+                external_id=str(candidate.external_id),
+                hub=str(hub_obj.external_id),
+                ref_reason=ref_reason,
+            )
+
+        return auth_iface.issue_tokens_for_user(user)
 
 
 def get_for_user_external_id(user_external_id: str) -> Candidate | None:

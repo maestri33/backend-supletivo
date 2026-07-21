@@ -65,6 +65,12 @@ class User(ExternalIdModel, AbstractBaseUser, PermissionsMixin):
     # versão do token: o JWT carrega esta versão; trocar de role (roles.promote/assign) incrementa, o que
     # **invalida todo JWT antigo** (gate confere) → força re-login/refresh com a role nova (Victor 2026-06-05).
     token_version = models.PositiveIntegerField(default=0)
+    is_test = models.BooleanField(
+        "dado sintético de teste", default=False, db_index=True
+    )
+    test_expires_at = models.DateTimeField(
+        "expira em", null=True, blank=True, db_index=True
+    )
 
     objects = UserManager()
 
