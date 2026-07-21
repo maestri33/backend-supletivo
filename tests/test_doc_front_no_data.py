@@ -74,6 +74,24 @@ def test_prompt_da_frente_proibe_reprovar_por_falta_de_dados(monkeypatch):
     )
 
 
+def test_prompt_exige_o_lado_solicitado(monkeypatch):
+    from users.roles import _document_ai as doc_ai
+    from integrations.ai import service as ai
+
+    captured = {}
+    monkeypatch.setattr(
+        ai,
+        "describe_image",
+        lambda *a, **k: (captured.__setitem__("prompt", k.get("prompt")), "APROVADO.")[
+            1
+        ],
+    )
+    doc_ai.check_photo(b"fake", side="back", doc_type=doc_ai.DOC_RG, caller="test")
+    prompt = captured["prompt"].lower()
+    assert "lado esperado é obrigatório" in prompt
+    assert "imagem mostrar claramente o outro lado" in prompt
+
+
 def test_prompt_do_full_ainda_exige_legibilidade(monkeypatch):
     """No full (que tem tudo), a regra de legibilidade dos dados CONTINUA — não afrouxou geral."""
     from users.roles import _document_ai as doc_ai

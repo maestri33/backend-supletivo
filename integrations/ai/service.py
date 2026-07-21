@@ -513,7 +513,9 @@ _CLASSIFY_PROMPT = (
     '`doc_type` ("rg" | "cnh" | null se não for identidade), '
     '`completeness` ("front" | "back" | "full" — front=só a frente, back=só o verso, full=frente e '
     "verso na mesma imagem/documento inteiro; null se não aplicável), "
-    "`confidence` (0 a 1). NÃO valide autenticidade nem legibilidade — só classifique o que é."
+    "`is_legible` (bool: dá para reconhecer o documento e ler os elementos principais sem corte, "
+    "desfoque ou reflexo impeditivo?), `reason` (motivo curto em português ou null), "
+    "`confidence` (0 a 1). NÃO valide autenticidade — faça apenas a pré-checagem visual rápida."
 )
 
 _CLASSIFY_ALLOWED_TYPE = {"rg", "cnh"}
@@ -537,8 +539,7 @@ def _extract_json(text: str) -> dict | None:
 def classify_document(
     image_bytes: bytes, *, caller: str, mime_type: str = "image/jpeg"
 ) -> dict:
-    """RÁPIDA: `{is_document, doc_type, completeness, confidence}`. is_document=None quando a IA não
-    deu um JSON utilizável (o front então confirma o tipo com a pessoa). Nunca levanta por parse."""
+    """RÁPIDA: classifica tipo/lado e legibilidade, sem validar autenticidade. Nunca levanta por parse."""
     if mime_type == "application/pdf":
         from core.pdf import PdfRenderError, render_pdf_to_jpeg
 
@@ -549,6 +550,8 @@ def classify_document(
                 "is_document": False,
                 "doc_type": None,
                 "completeness": None,
+                "is_legible": False,
+                "reason": "Não foi possível abrir o PDF enviado.",
                 "confidence": 0.0,
             }
         mime_type = "image/jpeg"
@@ -565,16 +568,22 @@ def classify_document(
             "is_document": None,
             "doc_type": None,
             "completeness": None,
+            "is_legible": None,
+            "reason": None,
             "confidence": None,
         }
     doc_type = data.get("doc_type")
     completeness = data.get("completeness")
+    is_legible = data.get("is_legible")
+    reason = data.get("reason")
     return {
         "is_document": data["is_document"],
         "doc_type": doc_type if doc_type in _CLASSIFY_ALLOWED_TYPE else None,
         "completeness": completeness
         if completeness in _CLASSIFY_ALLOWED_COMPLETE
         else None,
+        "is_legible": is_legible if isinstance(is_legible, bool) else None,
+        "reason": reason[:240] if isinstance(reason, str) else None,
         "confidence": data.get("confidence"),
     }
 

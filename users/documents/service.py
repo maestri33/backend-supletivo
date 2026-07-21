@@ -54,6 +54,13 @@ _PHOTO_SLOTS = {
     "address_proof_photo": ("address_proof", "photo"),
 }
 
+_PAIRED_PHOTO_SLOTS = {
+    "rg_front": ("back_photo", "ao verso", "a frente"),
+    "rg_back": ("front_photo", "à frente", "o verso"),
+    "cnh_front": ("back_photo", "ao verso", "a frente"),
+    "cnh_back": ("front_photo", "à frente", "o verso"),
+}
+
 # MIME aceito → extensão do arquivo salvo.
 _ALLOWED_IMAGE = {"image/jpeg": "jpg", "image/png": "png", "image/webp": "webp"}
 _PDF_MIME = (
@@ -260,6 +267,22 @@ def pdf_to_jpeg(data: bytes) -> bytes:
         raise ValidationError(str(exc), code=exc.code) from exc
 
 
+def _reject_duplicate_side(sub, slot: str, data: bytes) -> None:
+    pair = _PAIRED_PHOTO_SLOTS.get(slot)
+    if pair is None:
+        return
+    counterpart_field, counterpart_label, expected_label = pair
+    counterpart_path = getattr(sub, counterpart_field, None)
+    if not counterpart_path or not default_storage.exists(counterpart_path):
+        return
+    with default_storage.open(counterpart_path, "rb") as stored:
+        if stored.read() == data:
+            raise ValidationError(
+                f"Essa foto é igual {counterpart_label}. Envie {expected_label} do documento.",
+                code="DOCUMENT_SIDE_DUPLICATE",
+            )
+
+
 def upload_photo(external_id: str, slot: str, upload) -> str:
     """Salva a imagem do slot em media/documents/<external_id>/<slot>.<ext> e grava o path no DB.
 
@@ -302,6 +325,7 @@ def upload_photo(external_id: str, slot: str, upload) -> str:
     from core.media import save_media
 
     sub = getattr(document, sub_name)
+    _reject_duplicate_side(sub, slot, data)
     old = getattr(sub, field, None)
     path = save_media(prefix="documents", data=data, ext=ext)
     if old and old != path and default_storage.exists(old):

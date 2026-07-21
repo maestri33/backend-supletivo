@@ -650,7 +650,8 @@ class RgUploadAck(Schema):
 
 
 class DocClassifyOut(Schema):
-    """Classificação RÁPIDA (síncrona) da foto ANTES do upload — NÃO valida, só reconhece; alimenta
+    """Classificação RÁPIDA (síncrona) da foto ANTES do upload — reconhece e checa legibilidade;
+    NÃO valida autenticidade. Alimenta
     a UI generativa (o front escolhe o componente). `is_document=null` = a IA não decidiu → o front
     confirma o tipo com a pessoa (erro da IA nunca bloqueia). A validação minuciosa segue assíncrona
     no upload do RG. `doc_type`: rg|cnh|null; `completeness`: front|back|full|null."""
@@ -658,6 +659,8 @@ class DocClassifyOut(Schema):
     is_document: bool | None = None
     doc_type: str | None = None
     completeness: str | None = None
+    is_legible: bool | None = None
+    reason: str | None = None
     confidence: float | None = None
 
 
