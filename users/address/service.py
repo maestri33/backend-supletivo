@@ -7,6 +7,8 @@ Funções são a LÓGICA (não sabem de HTTP); a view traduz pra JSON/status.
 
 from __future__ import annotations
 
+import re
+
 import structlog
 from asgiref.sync import async_to_sync
 from django.conf import settings
@@ -34,6 +36,15 @@ _PATCHABLE = (
     "city",
     "state",
 )
+
+
+def _normalize_zipcode(value):
+    if value in (None, ""):
+        return value
+    zipcode = re.sub(r"\D", "", str(value))
+    if len(zipcode) != 8:
+        raise ValidationError("CEP inválido.", code="CEP_INVALID")
+    return zipcode
 
 
 def create_empty() -> Address:
@@ -130,6 +141,8 @@ def patch(*, external_id: str, **fields) -> Address:
     for key in _PATCHABLE:
         if key in fields:
             value = fields[key]
+            if key == "zipcode":
+                value = _normalize_zipcode(value)
             setattr(address, key, value.upper() if key == "state" and value else value)
             changed.append(key)
     if changed:
@@ -153,6 +166,8 @@ def fill_empty(*, external_id: str, **fields) -> Address:
     changed = []
     for key in _PATCHABLE:
         incoming = fields.get(key)
+        if key == "zipcode":
+            incoming = _normalize_zipcode(incoming)
         current = getattr(address, key, None)
         # só preenche se veio valor E o campo está vazio hoje
         if incoming not in (None, "") and current in (None, ""):
