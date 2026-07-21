@@ -54,8 +54,10 @@ def _address_matches(extracted: dict, address) -> tuple[bool, str]:
     Regra permissiva: reprova só se CEP OU cidade divergirem CLARAMENTE (ambos presentes e diferentes).
     A rua entra como reforço (overlap de tokens), não como veto isolado — comprovante abrevia/varia
     logradouro demais pra travar por isso. Campo ausente = não penaliza (dá o benefício da dúvida)."""
-    if address is None:
-        return False, "Endereço ainda não informado."
+    if address is None or not any(
+        getattr(address, field, None) for field in ("zipcode", "street", "city")
+    ):
+        return True, "Endereço será preenchido a partir do comprovante."
 
     ex_zip = _digits(extracted.get("zip"))
     in_zip = _digits(getattr(address, "zipcode", None))
@@ -168,6 +170,7 @@ def validate_and_store(user_external_id: str, *, caller: str) -> str:
     from django.conf import settings
     from django.utils import timezone
 
+    from users.address import interface as address_iface
     from users.documents import service as documents_iface
     from users.profiles import interface as profiles
 
@@ -188,6 +191,23 @@ def validate_and_store(user_external_id: str, *, caller: str) -> str:
         mime_type=_mime_of(ap.photo),
         caller=caller,
     )
+    extracted = payload.get("extracted") if isinstance(payload, dict) else None
+    if p is not None and isinstance(extracted, dict):
+        try:
+            address_iface.fill_empty(
+                external_id=user_external_id,
+                zipcode=extracted.get("zip") or extracted.get("zipcode"),
+                street=extracted.get("street"),
+                number=extracted.get("number"),
+                complement=extracted.get("complement"),
+                neighborhood=extracted.get("neighborhood"),
+                city=extracted.get("city"),
+                state=extracted.get("state"),
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "address_proof.address_fill_failed", caller=caller, error=str(exc)[:200]
+            )
     ap.validation_status = status
     ap.validation_result = payload
     ap.validated_at = timezone.now()

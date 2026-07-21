@@ -219,6 +219,11 @@ def me_dict(cand: Candidate) -> dict:
             # escolaridade (nível-pessoa, F3): o front usa pra renderizar/pré-marcar a etapa `education`.
             "education_level": p.education_level,
             "education_completed": p.education_completed,
+            "education_grade": p.education_grade,
+            "education_status": p.education_status,
+            "education_year": p.education_year,
+            "education_city": p.education_city,
+            "education_school": p.education_school,
             # autoritativos do CPFHub — nenhum endpoint do candidato os edita; o front usa
             # esta flag pra travar/destacar os inputs (sombra verde + ✓).
             "locked_fields": ["name", "birth_date"],
@@ -373,7 +378,15 @@ def upload_document_photo(*, user_external_id, slot: str, upload) -> dict:
 
     # FOTO-PRIMEIRO (Victor 2026-06-16): o upload é a ENTRADA da etapa documento — nada de digitar
     # número/tipo antes (ninguém sabe o nº da CNH; o OCR extrai). Aceito a partir de `address`.
-    cand = _require(user_external_id, _S.ADDRESS, _S.DOCUMENTS, _S.PIX)
+    cand = _require(
+        user_external_id,
+        _S.STARTED,
+        _S.PROFILE,
+        _S.ADDRESS,
+        _S.DOCUMENTS,
+        _S.PIX,
+        _S.COMPLETED,
+    )
     # Define o `doc_type` do candidato a partir do 1º slot (rg_* ou cnh_*). Imutável depois.
     inferred = (
         "rg" if slot.startswith("rg_") else ("cnh" if slot.startswith("cnh_") else None)
@@ -390,7 +403,7 @@ def upload_document_photo(*, user_external_id, slot: str, upload) -> dict:
             f"Você já escolheu {cand.doc_type.upper()}. Para trocar, recomece o cadastro.",
             code="DOC_TYPE_LOCKED",
         )
-    if cand.status == _S.ADDRESS:  # 1ª foto = entra na etapa documento
+    if cand.status in (_S.STARTED, _S.PROFILE, _S.ADDRESS):
         _set_status(cand, _S.DOCUMENTS)
     path = documents_iface.upload_photo(user_external_id, slot, upload)
     # pipeline IA async (visão → OCR → extração → biometria) — plan/12+15 B3
@@ -440,6 +453,7 @@ def submit_address_proof_kinship(*, user_external_id, relation: str) -> dict:
     )
     _address_proof.submit_kinship(user_external_id, relation)
     _advance_address(cand, user_external_id)
+    _complete_candidate(cand)
     return me_dict(cand)
 
 
@@ -454,6 +468,7 @@ def run_address_proof_validation(candidate_id: int) -> None:
     _address_proof.validate_and_store(user_ext, caller="candidate.address_proof")
     cand.refresh_from_db(fields=["status"])
     _advance_address(cand, user_ext)
+    _complete_candidate(cand)
 
 
 # ── validação do documento por IA (plan/12+15 B3) ───────────────────────────
@@ -955,6 +970,7 @@ def _doc_post_approval(cand: Candidate, sub) -> None:
     (InsightFace/onnxruntime pode matar o worker) NÃO pode perder o avanço do wizard (Victor 2026-06-16)."""
     # o doc já está aprovado + com número → avança documents→pix ANTES de tocar na biometria.
     _advance_documents(cand, str(cand.user.external_id))
+    _complete_candidate(cand)
 
     from pathlib import Path
 
@@ -1242,7 +1258,17 @@ def set_pix(*, user_external_id, key: str, key_type: str) -> dict:
 _EDU_LEVELS = ("fundamental", "medio")
 
 
-def set_education(*, user_external_id, level: str, completed: bool) -> dict:
+def set_education(
+    *,
+    user_external_id,
+    level: str,
+    completed: bool,
+    grade: int | None = None,
+    education_status: str | None = None,
+    year: int | None = None,
+    city: str | None = None,
+    school: str | None = None,
+) -> dict:
     cand = _require(user_external_id, _S.PIX, _S.EDUCATION)
     if level not in _EDU_LEVELS:
         raise CandidateError(
@@ -1250,14 +1276,53 @@ def set_education(*, user_external_id, level: str, completed: bool) -> dict:
             code="EDUCATION_LEVEL_INVALID",
             extra={"level": level, "allowed": list(_EDU_LEVELS)},
         )
-    profiles.set_education(cand.user, level=level, completed=bool(completed))
+    allowed_grades = range(1, 10) if level == "fundamental" else range(1, 4)
+    if grade is not None and grade not in allowed_grades:
+        raise CandidateError(
+            "Série/ano incompatível com o nível de ensino.",
+            code="EDUCATION_GRADE_INVALID",
+            extra={"grade": grade, "level": level},
+        )
+    education_status = education_status or ("completed" if completed else "stopped")
+    if education_status not in ("completed", "attending", "stopped"):
+        raise CandidateError(
+            "Situação escolar inválida.",
+            code="EDUCATION_STATUS_INVALID",
+            extra={"education_status": education_status},
+        )
+    if grade is None:
+        level_completed = bool(completed)
+    else:
+        final_grade = 9 if level == "fundamental" else 3
+        level_completed = education_status == "completed" and grade == final_grade
+    if year is not None:
+        from django.utils import timezone
+
+        if year < 1950 or year > timezone.now().year + 1:
+            raise CandidateError(
+                "Ano da última frequência inválido.",
+                code="EDUCATION_YEAR_INVALID",
+                extra={"year": year},
+            )
+    profiles.set_education(
+        cand.user,
+        level=level,
+        completed=level_completed,
+        grade=grade,
+        education_status=education_status,
+        year=year,
+        city=(city or "").strip() or None,
+        school=(school or "").strip() or None,
+    )
     if cand.status == _S.PIX:
         _set_status(cand, _S.EDUCATION)
     logger.info(
         "candidate.education_set",
         external_id=str(cand.external_id),
         level=level,
-        completed=bool(completed),
+        grade=grade,
+        education_status=education_status,
+        completed=level_completed,
     )
     return me_dict(cand)
 
@@ -1546,10 +1611,30 @@ def _promote_to_promoter(cand: Candidate) -> bool:
 
 
 def _complete_candidate(cand: Candidate) -> None:
-    """Selfie aprovada → AUTO-PROMOVE a promotor (Victor 2026-07-08): "só de nome, porque o treino
-    trava o promotor". O treino (blocking) segura as funções de promotor até as notas; o coordenador
-    só entra se a selfie cair em `review` (`decide_selfie`). Idempotente (só em SELFIE)."""
-    if cand.status != _S.SELFIE:
+    """Promove depois da selfie, sem prender as telas durante as análises assíncronas."""
+    from users.roles import _address_proof, _document_ai, _selfie
+
+    if cand.status not in (_S.SELFIE, _S.COMPLETED):
+        return
+    selfie_allowed = cand.selfie_verified or (
+        cand.selfie_reject_count >= _selfie.MAX_REJECTS_BEFORE_MEETING
+    )
+    if not selfie_allowed:
+        return
+    user_ext = str(cand.user.external_id)
+    document = (
+        documents_iface.get_doc_sub(user_ext, cand.doc_type) if cand.doc_type else None
+    )
+    proof = documents_iface.get_address_proof(user_ext)
+    checks_ready = bool(
+        document
+        and document.validation_status == _document_ai.APPROVED
+        and proof
+        and proof.validation_status == _address_proof.APPROVED
+    )
+    if not checks_ready:
+        if cand.status == _S.SELFIE:
+            _set_status(cand, _S.COMPLETED)
         return
     _promote_to_promoter(cand)
 

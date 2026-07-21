@@ -140,6 +140,11 @@ class PixIn(Schema):
 class EducationIn(Schema):
     level: str  # fundamental | medio
     completed: bool  # concluiu o nível?
+    grade: int | None = None
+    education_status: str | None = None  # completed | attending | stopped
+    year: int | None = None
+    city: str | None = None
+    school: str | None = None
 
 
 class KinshipIn(Schema):
@@ -166,6 +171,11 @@ class CandidateProfileOut(Schema):
     birth_date: str | None = None
     education_level: str | None = None
     education_completed: bool | None = None
+    education_grade: int | None = None
+    education_status: str | None = None
+    education_year: int | None = None
+    education_city: str | None = None
+    education_school: str | None = None
     locked_fields: list[str] = []
 
 
@@ -344,6 +354,7 @@ class PromoterMeOut(Schema):
     status: str
     hub_external_id: str
     ref_url: str
+    pre_matriculado: bool = False
     locked: bool
     pending_materials: list[dict] = []
     blocks: list[dict] | None = None
@@ -654,7 +665,14 @@ def candidate_education(request, payload: EducationIn):
     completo o promotor nasce `pre_matriculado`. Devolve o `me_dict` canônico."""
     ext = _guard(request, "candidate")
     return candidate_iface.set_education(
-        user_external_id=ext, level=payload.level, completed=payload.completed
+        user_external_id=ext,
+        level=payload.level,
+        completed=payload.completed,
+        grade=payload.grade,
+        education_status=payload.education_status,
+        year=payload.year,
+        city=payload.city,
+        school=payload.school,
     )
 
 
