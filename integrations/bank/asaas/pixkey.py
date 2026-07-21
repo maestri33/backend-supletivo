@@ -16,6 +16,7 @@ import unicodedata
 from datetime import timedelta
 
 import structlog
+from django.conf import settings
 from django.utils import timezone
 
 from .client import AsaasError, get_client
@@ -134,7 +135,12 @@ def validate_pix_key(*, key: str, key_type: str, expected_document: str) -> PixK
         raise PixKeyError("invalid_document_length")
     _basic_validate(key, key_type)
 
-    raw = _dict_lookup(key)
+    if settings.TEST_EXTERNAL_ADAPTERS:
+        from core.test_adapters import pix_dict_lookup
+
+        raw = pix_dict_lookup(expected_document=expected)
+    else:
+        raw = _dict_lookup(key)
     bank_account = raw.get("bankAccount") or {}
     got_doc = (bank_account.get("cpfCnpj") or "").strip()
     if not _doc_matches(got_doc, expected):

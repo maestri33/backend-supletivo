@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import structlog
 from asgiref.sync import async_to_sync
+from django.conf import settings
 
 from integrations.tools.cep.scripts import viacep
 from users.address.models import Address
@@ -55,6 +56,10 @@ def list_all(*, limit: int = 100, offset: int = 0) -> list[Address]:
 
 def _viacep(cep: str) -> dict | None:
     """ViaCEP via tool de integração. None = CEP inexistente/inválido; fora do ar → IntegrationError."""
+    if settings.TEST_EXTERNAL_ADAPTERS:
+        from core.test_adapters import viacep_lookup
+
+        return viacep_lookup(cep)
     try:
         return async_to_sync(viacep.lookup)(cep)
     except viacep.ViaCepUnavailable as exc:

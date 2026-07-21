@@ -1,8 +1,7 @@
 name: CI
-# Gate do backend (Django+Ninja). Roda no runner SELF-HOSTED (LXC backend-v7m) reusando o .env
-# REAL — assim os system checks de integração (asaas/mail/whatsapp E001…) acham as keys e não
-# travam, sem precisar de secret dummy nem mascarar drift de Postgres com SQLite. NÃO reinicia
-# nada nem migra: é só verificação. O Deploy só dispara DEPOIS deste workflow passar (workflow_run).
+# Gate isolado do backend (Django+Ninja). Pull requests nunca recebem segredos reais
+# nem executam código no runner de produção. O deploy continua separado e só roda após
+# este workflow passar na main.
 on:
   push:
     branches: [main]
@@ -12,39 +11,53 @@ concurrency:
   cancel-in-progress: true
 jobs:
   check:
-    runs-on: [self-hosted, backend-v7m]
+    runs-on: ubuntu-latest
+    env:
+      SECRET_KEY: ci-only-not-a-secret
+      DEBUG: "0"
+      APP_ENV: prod
+      ALLOWED_HOSTS: localhost,127.0.0.1
+      DATABASE_URL: "sqlite:///:memory:"
+      ASAAS_API_KEY: ci-dummy
+      INFINITEPAY_HANDLE: ci-dummy
+      IA_PROVIDERS: test
+      IA_TEST_BASE_URL: http://127.0.0.1:9
+      IA_TEST_API_KEY: ci-dummy
+      IA_FALLBACK_CHAIN: test:test-model
+      WHATSAPP_API_BASE_URL: http://127.0.0.1:9
+      WHATSAPP_GLOBAL_API_KEY: ci-dummy
+      MAIL_SMTP_HOST: localhost
+      MAIL_SMTP_USER: ci@invalid.test
+      MAIL_SMTP_PASSWORD: ci-dummy
     steps:
       - uses: actions/checkout@v4
 
-      - name: .env real (symlink do deploy dir — não copia, não vaza o secret no workspace)
-        run: ln -sf .env.ci "$GITHUB_WORKSPACE/.env"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
 
-      - name: Dependências (venv isolado do _work, não toca o /opt)
+      - name: Dependências
         run: |
-          # --extra dev: instala pytest/pytest-django/factory-boy (grupo `dev` do pyproject) —
-          # sem isso o step de Pytest falha com "No module named pytest".
-          /usr/local/bin/uv sync --inexact --extra dev
-          # psycopg não está no pyproject (dev usa SQLite); o .env real aponta pra Postgres,
-          # e o check carrega o backend postgres no import dos models → precisa do driver.
-          /usr/local/bin/uv pip install -q "psycopg[binary]"
+          python -m pip install uv
+          python -m uv sync --extra dev
 
-      - name: System checks (offline; integrações acham a key no .env real)
-        run: .venv/bin/python manage.py check
+      - name: System checks offline
+        run: python -m uv run python manage.py check
 
       - name: Migrações sincronizadas com os models
-        run: .venv/bin/python manage.py makemigrations --check --dry-run
+        run: python -m uv run python manage.py makemigrations --check --dry-run
 
       - name: Lint + format (ruff pinado na versão do dev; uvx baixa sob demanda — não está no venv)
         run: |
-          /usr/local/bin/uvx ruff@0.15.14 check .
-          /usr/local/bin/uvx ruff@0.15.14 format --check .
+          uvx ruff@0.15.14 check .
+          uvx ruff@0.15.14 format --check .
 
       - name: Pytest (Wave 2 — auth, webhooks, consentimento)
-        run: DATABASE_URL="sqlite:///:memory:" .venv/bin/python -m pytest tests/ -v --tb=short
-
-      - name: pip-audit (deps vuln — falha em HIGH/CRITICAL, warn em baixa severidade)
         run: |
-          # uv não instala `pip` no venv (gerencia direto) → usa `uv pip install`, como o passo de deps.
-          /usr/local/bin/uv pip install pip-audit -q
-          # --strict: exit 1 se achar qualquer vulnerabilidade com severity >= high
-          .venv/bin/pip-audit --strict || true
+          APP_ENV=test TEST_MODE_ALLOWED_HOSTS="$(hostname)" \
+            uv run pytest tests/ -v --tb=short
+
+      - name: pip-audit
+        run: |
+          SITE_PACKAGES="$(uv run python -c 'import site; print(site.getsitepackages()[0])')"
+          uvx pip-audit --strict --path "$SITE_PACKAGES"

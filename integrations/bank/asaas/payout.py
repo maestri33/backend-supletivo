@@ -22,6 +22,7 @@ import uuid
 from decimal import Decimal, InvalidOperation
 
 import structlog
+from django.conf import settings
 
 from .client import AsaasError, get_client
 from .models import Payment
@@ -57,6 +58,16 @@ def create_payout(*, amount, pix_key, description=None, payment_id=None) -> Paym
         status="SUBMITTING",
         description=description or f"payout {pid}",
     )
+
+    if settings.APP_ENV != "prod":
+        from core.test_adapters import payout_response
+
+        response = payout_response(payment_id=pid)
+        row.asaas_id = response["id"]
+        row.status = "SUBMITTED"
+        row.save(update_fields=["asaas_id", "status", "updated_at"])
+        logger.info("payout_stubbed", payment_id=pid, amount=str(amt))
+        return row
 
     try:
         res = asyncio.run(_send(amt, pix_key, pid, row.description))

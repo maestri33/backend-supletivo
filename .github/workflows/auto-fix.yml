@@ -1,11 +1,11 @@
 name: Auto-fix
-# devagent (runner self-hosted no test-v7m 30120): quando o CI falha num branch do DONO,
+# Runner efêmero: quando o CI falha num branch do DONO,
 # tenta `ruff --fix`, commita, e mescla sozinho quando o CI re-rodar verde. Full auto.
 # backend-supletivo: fix DETERMINISTICO (ruff) apenas — as falhas de CI aqui sao 100% ruff.
 # Se a falha nao for de lint/format, comenta e para (humano decide).
 #
 # Guardrails (issue #5 — anti-RCE): so dispara em falha de branch != main, do repo (nao fork),
-# com actor == maestri33. Loop cap impede fix->falha->fix. Runner isolado dos hosts de prod.
+# com actor == maestri33. Loop cap impede fix->falha->fix.
 on:
   workflow_run:
     workflows: ["CI"]
@@ -23,12 +23,17 @@ jobs:
       github.event.workflow_run.head_repository.full_name == 'maestri33/backend-supletivo' &&
       github.event.workflow_run.actor.login == 'maestri33' &&
       github.event.workflow_run.head_branch != 'main'
-    runs-on: [self-hosted, devagent]
+    runs-on: ubuntu-latest
     env:
       GH_TOKEN: ${{ secrets.AGENT_GH_TOKEN }}
       GH_REPO: ${{ github.repository }}
       BR: ${{ github.event.workflow_run.head_branch }}
     steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Instala uv
+        run: python -m pip install uv
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.event.workflow_run.head_branch }}
@@ -66,7 +71,7 @@ jobs:
       github.event.workflow_run.conclusion == 'success' &&
       github.event.workflow_run.head_repository.full_name == 'maestri33/backend-supletivo' &&
       github.event.workflow_run.head_branch != 'main'
-    runs-on: [self-hosted, devagent]
+    runs-on: ubuntu-latest
     env:
       GH_TOKEN: ${{ secrets.AGENT_GH_TOKEN }}
       GH_REPO: ${{ github.repository }}

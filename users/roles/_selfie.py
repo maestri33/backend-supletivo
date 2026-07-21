@@ -14,6 +14,7 @@ from __future__ import annotations
 import re
 
 import structlog
+from django.conf import settings
 from django.db import models
 
 logger = structlog.get_logger()
@@ -58,6 +59,10 @@ def verify(
     image_bytes: bytes, content_type: str, *, caller: str
 ) -> tuple[str, str | None]:
     """(status, justificativa). status ∈ approved|rejected|review. IA fora/ambígua → review (humano decide)."""
+    if settings.TEST_EXTERNAL_ADAPTERS:
+        from core.test_adapters import kyc_result
+
+        return kyc_result()
     from integrations.ai import service as ai
 
     try:
@@ -106,10 +111,14 @@ def add_face_match(
     fora / sem rosto / sem documento → o face-match devolve `review` (= bloqueio; o coordenador decide).
     Devolve (status_combinado, descrição_acumulada). Reuso único — candidate e enrollment chamam isto.
     """
-    from django.conf import settings
-
     if liveness_status == REJECTED or not getattr(settings, "BIOMETRIC_ENABLED", True):
         return liveness_status, liveness_desc
+
+    if settings.TEST_EXTERNAL_ADAPTERS:
+        return (
+            liveness_status,
+            f"{liveness_desc or ''} | biometria sintética aprovada".strip(" |"),
+        )
 
     from integrations.tools.biometric import service as biometric
 
@@ -140,6 +149,9 @@ def instructions(
 
     Instruções curtas e práticas, faladas direto com a pessoa — vão no GET da selfie e no
     notify de reprovação. Best-effort: IA fora do ar → None (o motivo da reprovação já basta)."""
+    if settings.TEST_EXTERNAL_ADAPTERS:
+        return "Use uma imagem nítida e frontal da fixture de teste."
+
     from integrations.ai import service as ai
 
     prompt = (

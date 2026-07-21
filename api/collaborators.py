@@ -22,7 +22,7 @@ from api.base import (
     add_funnel_login,
     build_group,
 )
-from api.schemas import CheckIn, CheckOut
+from api.schemas import CheckIn, CheckOut, TokenOut
 from core.net import source_ip
 from users.auth import service as auth_iface
 from users.consent import PROMOTER_CONTRACT
@@ -55,6 +55,7 @@ _ERROR_REGISTRY = (
 | `NOT_HUB_COORDINATOR` | coordenador não é do polo (403) | — |
 | `CPF_EXISTS` / `PHONE_EXISTS` / `EMAIL_EXISTS` | cadastro duplicado (409) | — |
 | `CPF_INVALID` / `PHONE_INVALID` / `CPF_NOT_FOUND` | dado rejeitado na validação (422) | — |
+| `JOIN_PROFILE_INCOMPLETE` | conta de outro funil sem identidade completa (422) | `missing_fields` |
 """
 )
 
@@ -81,6 +82,12 @@ class CandidateCreateIn(Schema):
     hub: str | None = (
         None  # ?ref= da landing: external_id de POLO ou PROMOTOR; ruim/ausente → polo padrão
     )
+
+
+class CandidateJoinIn(Schema):
+    external_id: str = Field(description="external_id do USER vindo do /auth/check")
+    otp: str
+    hub: str | None = None
 
 
 class CandidateOut(Schema):
@@ -458,6 +465,20 @@ def check(request, payload: CheckIn):
         external_id=payload.external_id,
         send_otp=payload.send_otp,
         service_authed=service_secret_ok(request),
+    )
+
+
+@auth_router.post("/join", response=TokenOut, auth=None)
+def join(request, payload: CandidateJoinIn):
+    """Ativa o acesso de promotor para uma conta existente após validar o OTP.
+
+    Preserva os papéis já usados no Supletivo e só cria `candidate` depois da prova de posse do
+    WhatsApp.
+    """
+    return candidate_iface.join_candidate(
+        user_external_id=payload.external_id,
+        otp=payload.otp,
+        hub=payload.hub,
     )
 
 

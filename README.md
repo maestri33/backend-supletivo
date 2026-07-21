@@ -16,6 +16,26 @@ uv run python manage.py runserver
 
 Config em `backend/.env` (não versionado). Dev usa SQLite.
 
+### Ambientes e dados E2E
+
+`APP_ENV` é a fonte única de verdade: `prod`, `staging`, `preview` ou `test`.
+Qualquer valor diferente de `prod` habilita o modo determinístico somente quando o hostname
+estiver em `TEST_MODE_ALLOWED_HOSTS`; `APP_ENV=prod` nunca aceita `TEST_MODE=1`.
+
+```bash
+uv run python manage.py seed_defaults
+uv run python manage.py seed_test_collaborator
+uv run python manage.py cleanup_test_data
+```
+
+O seed E2E reseta uma conta `candidate`, usa `TEST_MODE_OTP_CODE` e marca a identidade com
+`is_test` + TTL (`TEST_DATA_TTL_HOURS`). O cleanup remove apenas dados sintéticos expirados.
+
+Em `preview` e `test`, habilite `TEST_EXTERNAL_ADAPTERS=1` para substituir ViaCEP, DICT/Pix e
+KYC por contratos determinísticos. Em `staging`, mantenha desligado para usar as integrações de
+homologação; payout continua sempre sintético fora de `prod`. O modo sintético dos demais
+providers é recusado em `prod`.
+
 ## Estado
 
 - **Bootstrap (step 0):** Django sobe, migra, `/admin/` no ar. → [[wiki/core/bootstrap]]

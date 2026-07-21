@@ -13,6 +13,7 @@ def test_settings():
     from django.conf import settings
 
     settings.TEST_MODE = True
+    settings.APP_ENV = "test"
     settings.BOT_SERVICE_SECRET = "test_bot_secret"
     settings.BOT_SERVICE_HEADER = "x-bot-service-token"
 

@@ -62,13 +62,44 @@ def issue(external_id: str, roles: list[str]) -> dict:
     }
 
 
+def _promoter_transition_roles(token, external_id: str) -> list[str] | None:
+    """Aceita somente a promoção monotônica `candidate` → `promoter` do próprio refresh assinado.
+
+    A selfie é validada de forma assíncrona e a promoção invalida a sessão antiga. Sem esta ponte,
+    o próximo poll recebe 401 e prende o usuário no último passo. Qualquer outra troca de papel,
+    banimento ou salto de mais de uma versão continua exigindo novo OTP.
+    """
+    from users.auth.models import User
+    from users.roles import interface as role_service
+
+    claims_version = int(token.get("token_version") or 0)
+    live_version = current_version(external_id)
+    if live_version < 0 or live_version != claims_version + 1:
+        return None
+    user = User.objects.filter(external_id=external_id, is_active=True).first()
+    if user is None:
+        return None
+    previous = set(token.get("roles") or [])
+    current = set(role_service.active_roles(user))
+    removed = previous - current
+    added = current - previous
+    if removed != {"candidate"}:
+        return None
+    if "promoter" not in added or not added.issubset({"promoter", "training"}):
+        return None
+    return sorted(current)
+
+
 def refresh(refresh_token: str) -> dict:
-    """Valida um refresh token e reemite um par novo (rotação). `TokenError` se inválido OU se a role
-    mudou (versão do token != versão atual → força re-login)."""
+    """Rotaciona o par; só a promoção segura candidato→promotor atravessa troca de role."""
     token = RefreshToken(refresh_token)
     external_id = token.get("external_id", "")
     if not version_matches(external_id, token.get("token_version")):
-        raise TokenError("token_version_stale")  # role mudou → refresh negado, re-login
+        transitioned = _promoter_transition_roles(token, external_id)
+        if transitioned is None:
+            raise TokenError("token_version_stale")
+        logger.info("jwt.promoter_transition_refreshed", external_id=external_id)
+        return issue(external_id, transitioned)
     roles = token.get("roles", [])
     logger.info("jwt.refreshed", external_id=external_id)
     return issue(external_id, roles)
