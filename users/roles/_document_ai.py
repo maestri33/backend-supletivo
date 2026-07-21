@@ -29,8 +29,7 @@ DOC_RG = "rg"
 DOC_CNH = "cnh"
 DOC_TYPES = (DOC_RG, DOC_CNH)
 
-# lado esperado da foto (CONTEXTO no prompt — não é critério rígido de reprovação; o candidato
-# pode trocar os lados e o conteúdo se resolve na extração/biometria). front/back = par; full = inteiro.
+# lado esperado da foto. front/back = par; full = inteiro.
 _SIDE_DESC = {
     "front": (
         "a FRENTE da carteira — o lado com a FOTO do titular, a impressão digital, a assinatura "
@@ -128,26 +127,33 @@ def check_photo(
 
     doc_hint = _DOC_TYPE_HINT[doc_type]
     # Regra do lado (Victor 2026-07-11): a FRENTE do RG antigo NÃO TEM dados textuais (só foto+digital+
-    # assinatura) — os dados moram no VERSO. Por isso a frente NUNCA reprova por "faltam dados"; só
-    # reprova se não for o documento. A ausência de dados no lado errado NÃO é defeito. Os dados só são
-    # exigidos na EXTRAÇÃO (full ou frente+verso juntos), não nesta checagem de lado.
+    # assinatura) — os dados moram no VERSO. Por isso a frente NUNCA reprova por "faltam dados".
+    # O lado esperado continua obrigatório; os dados só são exigidos na EXTRAÇÃO.
     is_side = side in ("front", "back")
+    legibility_item = "(c)" if is_side else "(b)"
     legibility_rule = (
-        "(b) a imagem estiver tão desfocada/escura que nem dá pra ver que é este documento. "
+        f"{legibility_item} a imagem estiver tão desfocada/escura que nem dá pra ver que é este "
+        "documento. "
         "ATENÇÃO: NÃO reprove porque 'faltam os dados do titular' — cada lado tem o que tem "
         "(a frente do RG antigo é só foto/digital/assinatura; os dados textuais ficam no verso). "
         "Ausência de dados NÃO é defeito nesta etapa."
         if is_side
-        else "(b) os dados estiverem genuinamente ilegíveis (muito desfocado/escuro ou cortado "
+        else f"{legibility_item} os dados estiverem genuinamente ilegíveis (muito desfocado/escuro ou cortado "
         "escondendo informação)."
+    )
+    side_rule = (
+        "O LADO ESPERADO É OBRIGATÓRIO. (b) a imagem mostrar claramente o outro lado da carteira, "
+        "mesmo que ele esteja legível; "
+        if is_side
+        else ""
     )
     prompt = (
         f"Esta imagem deve mostrar {_SIDE_DESC[side]} de {doc_hint} "
         "A imagem pode ter sido endireitada automaticamente; NÃO reprove por orientação/rotação. "
         "Documento plastificado costuma ter brilho/reflexo — só é problema se ESCONDER os dados. "
         f"Reprove APENAS se: (a) não for {doc_type.upper()} válido (outro documento, QR code, "
-        f"selfie, outro papel) — ou {legibility_rule} NÃO reprove só porque parece ser o "
-        "outro lado da carteira. Responda em português começando OBRIGATORIAMENTE com APROVADO "
+        f"selfie, outro papel); {side_rule}ou {legibility_rule} Responda em português começando "
+        "OBRIGATORIAMENTE com APROVADO "
         "ou REPROVADO, seguida de um motivo curto e claro."
     )
     try:

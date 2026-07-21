@@ -1,6 +1,5 @@
-"""IA de classificação RÁPIDA de documento (síncrona, front→backend→OmniRoute): NÃO valida, só
-reconhece — é documento? RG ou CNH? inteiro ou frente/verso? A validação minuciosa continua
-assíncrona. Base pra generative UI (CopilotKit escolhe o componente pelo resultado).
+"""IA de classificação RÁPIDA de documento (síncrona, front→backend→OmniRoute): reconhece tipo,
+lado e legibilidade sem validar autenticidade. A validação minuciosa continua assíncrona.
 """
 
 import json
@@ -26,6 +25,8 @@ def test_classifica_rg_frente(monkeypatch):
                 "is_document": True,
                 "doc_type": "rg",
                 "completeness": "front",
+                "is_legible": True,
+                "reason": "Frente do RG inteira e nítida.",
                 "confidence": 0.9,
             }
         ),
@@ -34,6 +35,27 @@ def test_classifica_rg_frente(monkeypatch):
     assert out["is_document"] is True
     assert out["doc_type"] == "rg"
     assert out["completeness"] == "front"
+    assert out["is_legible"] is True
+    assert out["reason"] == "Frente do RG inteira e nítida."
+
+
+def test_classifica_documento_ilegivel(monkeypatch):
+    ai = _patch_vision(
+        monkeypatch,
+        json.dumps(
+            {
+                "is_document": True,
+                "doc_type": "rg",
+                "completeness": "back",
+                "is_legible": False,
+                "reason": "O verso está desfocado.",
+                "confidence": 0.92,
+            }
+        ),
+    )
+    out = ai.classify_document(b"fake", caller="test")
+    assert out["is_legible"] is False
+    assert out["reason"] == "O verso está desfocado."
 
 
 def test_classifica_cnh_inteiro(monkeypatch):

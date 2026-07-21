@@ -603,13 +603,16 @@ def candidate_document_photo(request, slot: str, file: UploadedFile = File(...))
 
 
 class DocClassifyOut(Schema):
-    """Classificação RÁPIDA (síncrona) da foto ANTES do upload — só reconhece, NÃO valida; alimenta
+    """Classificação RÁPIDA (síncrona) da foto ANTES do upload — reconhece e checa legibilidade;
+    NÃO valida autenticidade. Alimenta
     a UI generativa. `is_document=null` = IA não decidiu → o front confirma com a pessoa. O promotor
     ACEITA CNH (diferente do aluno) — a regra de rejeição fica no front."""
 
     is_document: bool | None = None
     doc_type: str | None = None
     completeness: str | None = None
+    is_legible: bool | None = None
+    reason: str | None = None
     confidence: float | None = None
 
 
