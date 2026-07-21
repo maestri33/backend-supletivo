@@ -17,7 +17,7 @@ jobs:
       DEBUG: "0"
       APP_ENV: prod
       ALLOWED_HOSTS: localhost,127.0.0.1
-      DATABASE_URL: sqlite:///:memory:
+      DATABASE_URL: "sqlite:///:memory:"
       ASAAS_API_KEY: ci-dummy
       INFINITEPAY_HANDLE: ci-dummy
       IA_PROVIDERS: test
