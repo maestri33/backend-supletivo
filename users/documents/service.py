@@ -13,6 +13,7 @@ import structlog
 from django.conf import settings
 from django.core.files.storage import default_storage
 
+from core.pdf import PdfRenderError, render_pdf_to_jpeg
 from users.documents.models import (
     CNH,
     RG,
@@ -58,11 +59,6 @@ _ALLOWED_IMAGE = {"image/jpeg": "jpg", "image/png": "png", "image/webp": "webp"}
 _PDF_MIME = (
     "application/pdf"  # aceito em qualquer slot: convertido pra JPEG antes de salvar
 )
-_PDF_MAX_PAGES = (
-    2  # scan comum: pág 1 = frente, pág 2 = verso; >2 páginas → usa as 2 primeiras
-)
-# lado maior (px) do render de cada página do PDF — teto de memória; sobra resolução pro OCR.
-_PDF_MAX_RENDER_SIDE = 2500.0
 
 
 def create_empty(user) -> Document:
@@ -257,44 +253,11 @@ def _decode_image(data: bytes) -> None:
         ) from exc
 
 
-def _pdf_to_jpeg(data: bytes) -> bytes:
-    """Renderiza o PDF (até 2 páginas, empilhadas) numa imagem JPEG única — plan/12.
-
-    Escala com TETO por página (fix Marilu 2026-07-05): scan "foto→PDF" tem MediaBox do tamanho da
-    foto — scale fixa 2.0 virava bitmap de centenas de MB (risco de OOM no worker; o PDF não passa
-    pelo guard anti-bomba do Pillow). Lado maior limitado a `_PDF_MAX_RENDER_SIDE` px."""
-    from io import BytesIO
-
-    import pypdfium2 as pdfium
-    from PIL import Image
-
+def pdf_to_jpeg(data: bytes) -> bytes:
     try:
-        pdf = pdfium.PdfDocument(data)
-        pages = []
-        for i in range(min(len(pdf), _PDF_MAX_PAGES)):
-            page = pdf[i]
-            w, h = page.get_size()  # pontos (1pt ≈ 1px em scale=1)
-            scale = min(2.0, _PDF_MAX_RENDER_SIDE / max(w, h, 1.0))
-            pages.append(page.render(scale=scale).to_pil())
-    except Exception as exc:  # noqa: BLE001 — PDF corrompido/protegido
-        raise ValidationError(
-            "Arquivo não é um PDF válido (corrompido ou protegido).",
-            code="PDF_DECODE_FAILED",
-        ) from exc
-    if not pages:
-        raise ValidationError("PDF sem páginas.", code="PDF_EMPTY")
-    if len(pages) == 1:
-        sheet = pages[0].convert("RGB")
-    else:
-        width = max(p.width for p in pages)
-        sheet = Image.new("RGB", (width, sum(p.height for p in pages)), "white")
-        y = 0
-        for p in pages:
-            sheet.paste(p.convert("RGB"), (0, y))
-            y += p.height
-    out = BytesIO()
-    sheet.save(out, format="JPEG", quality=90)
-    return out.getvalue()
+        return render_pdf_to_jpeg(data)
+    except PdfRenderError as exc:
+        raise ValidationError(str(exc), code=exc.code) from exc
 
 
 def upload_photo(external_id: str, slot: str, upload) -> str:
@@ -331,7 +294,7 @@ def upload_photo(external_id: str, slot: str, upload) -> str:
 
     data = upload.read()
     if content_type == _PDF_MIME:
-        data = _pdf_to_jpeg(data)
+        data = pdf_to_jpeg(data)
         ext = "jpg"
     else:
         _decode_image(data)
