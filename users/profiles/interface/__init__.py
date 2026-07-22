@@ -159,6 +159,9 @@ def set_education(
     level: str,
     completed: bool,
     grade: int | None = None,
+    last_completed_grade: int | None = None,
+    qualification: str | None = None,
+    last_completed_qualification: str | None = None,
     education_status: str | None = None,
     year: int | None = None,
     city: str | None = None,
@@ -171,6 +174,9 @@ def set_education(
     p.education_level = level
     p.education_completed = completed
     p.education_grade = grade
+    p.education_last_completed_grade = last_completed_grade
+    p.education_qualification = qualification
+    p.education_last_completed_qualification = last_completed_qualification
     p.education_status = education_status
     p.education_year = year
     p.education_city = city
@@ -180,6 +186,9 @@ def set_education(
             "education_level",
             "education_completed",
             "education_grade",
+            "education_last_completed_grade",
+            "education_qualification",
+            "education_last_completed_qualification",
             "education_status",
             "education_year",
             "education_city",
@@ -194,7 +203,13 @@ def has_medio_completo(user) -> bool:
     """Ensino médio COMPLETO? (decide `Promoter.pre_matriculado`). Sem profile / sem dado → False
     (na dúvida, pré-matriculado — o promotor sem médio confirmado entra no fluxo diferenciado)."""
     p = Profile.objects.filter(user=user).first()
-    return bool(p and p.education_level == "medio" and p.education_completed)
+    return bool(
+        p
+        and (
+            p.education_level == "superior"
+            or (p.education_level == "medio" and p.education_completed)
+        )
+    )
 
 
 def set_selfie_needs_meeting(user, value: bool = True) -> Profile | None:
