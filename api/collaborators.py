@@ -138,9 +138,12 @@ class PixIn(Schema):
 
 
 class EducationIn(Schema):
-    level: str  # fundamental | medio
+    level: str  # fundamental | medio | superior
     completed: bool  # concluiu o nível?
     grade: int | None = None
+    last_completed_grade: int | None = None
+    qualification: str | None = None
+    last_completed_qualification: str | None = None
     education_status: str | None = None  # completed | attending | stopped
     year: int | None = None
     city: str | None = None
@@ -172,6 +175,9 @@ class CandidateProfileOut(Schema):
     education_level: str | None = None
     education_completed: bool | None = None
     education_grade: int | None = None
+    education_last_completed_grade: int | None = None
+    education_qualification: str | None = None
+    education_last_completed_qualification: str | None = None
     education_status: str | None = None
     education_year: int | None = None
     education_city: str | None = None
@@ -676,6 +682,9 @@ def candidate_education(request, payload: EducationIn):
         level=payload.level,
         completed=payload.completed,
         grade=payload.grade,
+        last_completed_grade=payload.last_completed_grade,
+        qualification=payload.qualification,
+        last_completed_qualification=payload.last_completed_qualification,
         education_status=payload.education_status,
         year=payload.year,
         city=payload.city,

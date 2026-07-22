@@ -66,7 +66,11 @@ class Profile(models.Model):
     education_level = models.CharField(
         "escolaridade",
         max_length=16,
-        choices=(("fundamental", "Ensino Fundamental"), ("medio", "Ensino Médio")),
+        choices=(
+            ("fundamental", "Ensino Fundamental"),
+            ("medio", "Ensino Médio"),
+            ("superior", "Ensino Superior"),
+        ),
         null=True,
         blank=True,
     )
@@ -75,6 +79,15 @@ class Profile(models.Model):
     )
     education_grade = models.PositiveSmallIntegerField(
         "última série/ano", null=True, blank=True
+    )
+    education_last_completed_grade = models.PositiveSmallIntegerField(
+        "última série/ano concluído", null=True, blank=True
+    )
+    education_qualification = models.CharField(
+        "última formação superior frequentada", max_length=32, null=True, blank=True
+    )
+    education_last_completed_qualification = models.CharField(
+        "última formação superior concluída", max_length=32, null=True, blank=True
     )
     education_status = models.CharField(
         "situação da última série",

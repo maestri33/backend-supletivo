@@ -220,6 +220,9 @@ def me_dict(cand: Candidate) -> dict:
             "education_level": p.education_level,
             "education_completed": p.education_completed,
             "education_grade": p.education_grade,
+            "education_last_completed_grade": p.education_last_completed_grade,
+            "education_qualification": p.education_qualification,
+            "education_last_completed_qualification": p.education_last_completed_qualification,
             "education_status": p.education_status,
             "education_year": p.education_year,
             "education_city": p.education_city,
@@ -1255,7 +1258,8 @@ def set_pix(*, user_external_id, key: str, key_type: str) -> dict:
 # reusada quando/se virar aluno. Sem médio completo → o promotor nasce `pre_matriculado` (F4). Fica
 # ANTES da selfie de propósito: a selfie aprovada auto-promove (F2), então a escolaridade tem que
 # ser coletada antes disso. Só nível+concluiu (série/escola são riqueza do enrollment, não do funil promotor).
-_EDU_LEVELS = ("fundamental", "medio")
+_EDU_LEVELS = ("fundamental", "medio", "superior")
+_EDU_QUALIFICATIONS = ("graduacao", "pos_graduacao", "mestrado", "doutorado")
 
 
 def set_education(
@@ -1264,6 +1268,9 @@ def set_education(
     level: str,
     completed: bool,
     grade: int | None = None,
+    last_completed_grade: int | None = None,
+    qualification: str | None = None,
+    last_completed_qualification: str | None = None,
     education_status: str | None = None,
     year: int | None = None,
     city: str | None = None,
@@ -1277,11 +1284,32 @@ def set_education(
             extra={"level": level, "allowed": list(_EDU_LEVELS)},
         )
     allowed_grades = range(1, 10) if level == "fundamental" else range(1, 4)
-    if grade is not None and grade not in allowed_grades:
+    if level != "superior" and grade is not None and grade not in allowed_grades:
         raise CandidateError(
             "Série/ano incompatível com o nível de ensino.",
             code="EDUCATION_GRADE_INVALID",
             extra={"grade": grade, "level": level},
+        )
+    if level == "superior":
+        if qualification not in _EDU_QUALIFICATIONS:
+            raise CandidateError(
+                "Formação superior inválida.",
+                code="EDUCATION_QUALIFICATION_INVALID",
+                extra={
+                    "qualification": qualification,
+                    "allowed": list(_EDU_QUALIFICATIONS),
+                },
+            )
+        if grade is not None or last_completed_grade is not None:
+            raise CandidateError(
+                "Ensino Superior deve informar formação, não série.",
+                code="EDUCATION_GRADE_INVALID",
+                extra={"grade": grade, "level": level},
+            )
+    elif qualification is not None or last_completed_qualification is not None:
+        raise CandidateError(
+            "Formação superior só pode ser usada no Ensino Superior.",
+            code="EDUCATION_QUALIFICATION_INVALID",
         )
     education_status = education_status or ("completed" if completed else "stopped")
     if education_status not in ("completed", "attending", "stopped"):
@@ -1290,7 +1318,57 @@ def set_education(
             code="EDUCATION_STATUS_INVALID",
             extra={"education_status": education_status},
         )
-    if grade is None:
+    if level == "superior" and education_status == "completed":
+        if (
+            last_completed_qualification is not None
+            and last_completed_qualification != qualification
+        ):
+            raise CandidateError(
+                "A última formação concluída deve coincidir com a formação informada.",
+                code="EDUCATION_LAST_COMPLETED_QUALIFICATION_INVALID",
+            )
+        last_completed_qualification = qualification
+    elif level == "superior":
+        if (
+            last_completed_qualification is not None
+            and last_completed_qualification not in _EDU_QUALIFICATIONS
+        ):
+            raise CandidateError(
+                "Última formação concluída inválida.",
+                code="EDUCATION_LAST_COMPLETED_QUALIFICATION_INVALID",
+            )
+        if last_completed_qualification is not None and qualification is not None:
+            if _EDU_QUALIFICATIONS.index(
+                last_completed_qualification
+            ) >= _EDU_QUALIFICATIONS.index(qualification):
+                raise CandidateError(
+                    "A última formação concluída deve ser anterior à formação frequentada.",
+                    code="EDUCATION_LAST_COMPLETED_QUALIFICATION_INVALID",
+                )
+    elif education_status == "completed":
+        if last_completed_grade is not None and last_completed_grade != grade:
+            raise CandidateError(
+                "A última série concluída deve coincidir com a série informada.",
+                code="EDUCATION_LAST_COMPLETED_GRADE_INVALID",
+                extra={"grade": grade, "last_completed_grade": last_completed_grade},
+            )
+        last_completed_grade = grade
+    elif last_completed_grade is not None:
+        max_completed = (grade - 1) if grade is not None else max(allowed_grades)
+        if last_completed_grade < 0 or last_completed_grade > max_completed:
+            raise CandidateError(
+                "A última série concluída deve ser anterior à série frequentada.",
+                code="EDUCATION_LAST_COMPLETED_GRADE_INVALID",
+                extra={
+                    "grade": grade,
+                    "last_completed_grade": last_completed_grade,
+                    "min": 0,
+                    "max": max_completed,
+                },
+            )
+    if level == "superior":
+        level_completed = education_status == "completed"
+    elif grade is None:
         level_completed = bool(completed)
     else:
         final_grade = 9 if level == "fundamental" else 3
@@ -1309,6 +1387,9 @@ def set_education(
         level=level,
         completed=level_completed,
         grade=grade,
+        last_completed_grade=last_completed_grade,
+        qualification=qualification,
+        last_completed_qualification=last_completed_qualification,
         education_status=education_status,
         year=year,
         city=(city or "").strip() or None,
@@ -1321,6 +1402,9 @@ def set_education(
         external_id=str(cand.external_id),
         level=level,
         grade=grade,
+        last_completed_grade=last_completed_grade,
+        qualification=qualification,
+        last_completed_qualification=last_completed_qualification,
         education_status=education_status,
         completed=level_completed,
     )
