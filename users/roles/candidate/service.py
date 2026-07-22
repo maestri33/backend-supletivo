@@ -1295,7 +1295,10 @@ def set_education(
             raise CandidateError(
                 "Formação superior inválida.",
                 code="EDUCATION_QUALIFICATION_INVALID",
-                extra={"qualification": qualification, "allowed": list(_EDU_QUALIFICATIONS)},
+                extra={
+                    "qualification": qualification,
+                    "allowed": list(_EDU_QUALIFICATIONS),
+                },
             )
         if grade is not None or last_completed_grade is not None:
             raise CandidateError(
@@ -1335,7 +1338,9 @@ def set_education(
                 code="EDUCATION_LAST_COMPLETED_QUALIFICATION_INVALID",
             )
         if last_completed_qualification is not None and qualification is not None:
-            if _EDU_QUALIFICATIONS.index(last_completed_qualification) >= _EDU_QUALIFICATIONS.index(qualification):
+            if _EDU_QUALIFICATIONS.index(
+                last_completed_qualification
+            ) >= _EDU_QUALIFICATIONS.index(qualification):
                 raise CandidateError(
                     "A última formação concluída deve ser anterior à formação frequentada.",
                     code="EDUCATION_LAST_COMPLETED_QUALIFICATION_INVALID",
